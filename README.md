@@ -145,8 +145,11 @@ Set `RECOMP_HOME` to put the large files (Unity editors, build output) on anothe
 
 ```
 python3 recomp.py toolchain <Game.app>        # fetch that exact Unity version + iOS support into toolchain/
-python3 recomp.py unity <Game.app> --team <TEAMID> --bundle-id <id> --device <iPad name or UDID>
+python3 recomp.py unity <Game.app> --team <TEAMID> --device <iPad name or UDID>
 ```
+
+The bundle ID defaults to Recomp Helper's, `recomp.<team>.<game>`, so a port from either installs
+over the last one (keeping its saves and Steam sign-in); `--bundle-id` picks another.
 
 Stages (run all, or name some): `prepare player inject xcode install`.
 
@@ -211,7 +214,7 @@ error reports put them under the app's `Documents`, visible in the Files app.
 ## Unreal route
 
 ```
-python3 recomp.py unreal <Game.app> --team <TEAMID> --bundle-id <id> --device <iPad name or UDID>
+python3 recomp.py unreal <Game.app> --team <TEAMID> --device <iPad name or UDID>
 ```
 
 Stages (run all, or name some): `prepare xcode install`. Recomp Helper runs the same stages.

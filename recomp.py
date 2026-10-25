@@ -12,13 +12,14 @@
   recomp.py mods <Game.app> [--include ID]... [--exclude ID]... [--json]
                                                      the Mac's mods and what the next port does with each;
                                                      --include/--exclude choose which ones it compiles in
-  recomp.py mods <Game.app> --device NAME|UDID --bundle-id ID [--all]
+  recomp.py mods <Game.app> --device NAME|UDID [--bundle-id ID] [--all]
                                                      copy the last port's mods to the iPad's mod folder
                                                      (the unity route's install stage does this too)
 
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
+The bundle ID defaults to Recomp Helper's, recomp.<team>.<game>, so a port installs over the last one.
 
 Large files (Unity editors, build output) go under $RECOMP_HOME, default this folder.
 Set RECOMP_EVENTS=1 for machine-readable progress lines (used by the Mac app).
@@ -37,6 +38,23 @@ from recomp import events, paths  # noqa: E402
 
 STAGES = ["prepare", "player", "inject", "xcode", "install"]
 UNREAL_STAGES = ["prepare", "xcode", "install"]
+
+
+def default_bundle_id(game, team):
+    """The bundle ID Recomp Helper uses too, so every port of a game installs over the last one."""
+    if team:
+        return f"recomp.{team.lower()}.{game.slug.lower()}"
+    return f"local.recomp.{game.slug.lower()}"
+
+
+def last_bundle_id(game, work):
+    """The bundle ID of the last port built in work (the installed app's), else the default."""
+    import glob
+    import plistlib
+    for info in glob.glob(os.path.join(work, "DerivedData", "Build", "Products", "*-iphoneos", "*.app", "Info.plist")):
+        with open(info, "rb") as f:
+            return plistlib.load(f)["CFBundleIdentifier"]
+    return default_bundle_id(game, None)
 
 
 def cmd_scan(rest):
@@ -109,7 +127,7 @@ def cmd_unity(rest):
     game = u.Game(a.app)
     work = os.path.abspath(a.work or os.path.join(paths.BUILD, game.slug))
     os.makedirs(work, exist_ok=True)
-    bundle_id = a.bundle_id or f"local.recomp.{game.slug.lower()}"
+    bundle_id = a.bundle_id or default_bundle_id(game, a.team)
     stages = a.stages or STAGES
     if "install" in stages and not a.device:
         sys.exit("install needs --device (see: recomp.py env)")
@@ -156,7 +174,7 @@ def cmd_unreal(rest):
     game = u.Game(a.app)
     work = os.path.abspath(a.work or os.path.join(paths.BUILD, game.slug))
     os.makedirs(work, exist_ok=True)
-    bundle_id = a.bundle_id or f"local.recomp.{game.slug.lower()}"
+    bundle_id = a.bundle_id or default_bundle_id(game, a.team)
     stages = a.stages or UNREAL_STAGES
     if "xcode" in stages and not a.team:
         sys.exit("xcode needs --team (see: recomp.py env)")
@@ -232,7 +250,7 @@ def cmd_mods(rest):
         # What the installed app holds is what the last port compiled, not what is planned.
         if not os.path.exists(os.path.join(work, "prepare.json")):
             sys.exit(f"no port of {game.name} in {work} yet: port the game first")
-        u.push_mods(game, work, a.device, a.bundle_id or f"local.recomp.{game.slug.lower()}", a.all)
+        u.push_mods(game, work, a.device, a.bundle_id or last_bundle_id(game, work), a.all)
         return 0
     cfg, found = u.plan_mods(game, work, a.unity)
     if a.json:
