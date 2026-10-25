@@ -82,16 +82,20 @@ struct BuildEnvironment: Decodable {
 struct SaveSyncStatus: Decodable {
     struct Entry: Decodable, Hashable {
         let name: String
-        let state: String
-        let lastChange: String?
+        /// Newest file of the entry on this Mac and in iCloud Drive (ISO dates).
+        let mac: String?
+        let icloud: String?
     }
 
     let enabled: Bool
     let icloud: Bool
+    let running: Bool
     let root: String?
     let cloud: String?
     let entries: [Entry]
-    let lastChange: String?
+    let lastSync: String?
+    /// How many games are synced; the background item runs while there is one.
+    let syncedGames: Int
     let backup: String?
     let conflicts: Int?
 }

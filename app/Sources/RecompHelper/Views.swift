@@ -2,6 +2,14 @@ import AppKit
 import SwiftUI
 
 @main
+enum Main {
+    /// launchd starts the app with --sync-saves for the save sync's background item (SaveSync.swift).
+    @MainActor static func main() {
+        if CommandLine.arguments.contains("--sync-saves") { exit(SaveSyncAgent.runHeadless()) }
+        RecompHelperApp.main()
+    }
+}
+
 struct RecompHelperApp: App {
     @StateObject private var state = AppState()
 
@@ -172,13 +180,15 @@ struct GameDetail: View {
     }
 }
 
-/// Turns the iCloud Drive save sync on and off for the Mac game (`recomp.py saves`).
+/// Shares the Mac game's saves with its iOS ports through iCloud Drive (`recomp.py saves`).
+/// The Mac game and Steam Cloud keep their own folder; a background item copies both ways.
 struct SaveSyncBox: View {
     @EnvironmentObject var state: AppState
     let game: Game
     @State private var status: SaveSyncStatus?
     @State private var busy = false
     @State private var error: String?
+    @State private var note: String?
 
     var body: some View {
         GroupBox("Saves") {
@@ -190,17 +200,20 @@ struct SaveSyncBox: View {
                         .disabled(busy || status == nil || status?.icloud == false)
                     if busy { ProgressView().controlSize(.small) }
                 }
-                Text("The Mac game then saves straight into iCloud Drive/Recomp Saves/\(game.name), the folder its iPad port syncs with. Steam Cloud keeps working. Quit the game before changing this.")
+                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPad and iPhone ports sync with, every few minutes while the game is not running.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let s = status {
                     if !s.icloud {
                         Label("iCloud Drive is off on this Mac. Turn it on in System Settings > your name > iCloud.",
                               systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
+                    if s.enabled {
+                        Label("Last sync: " + (s.lastSync.map(shown) ?? "not yet") + (s.running ? " (\(game.name) is running: it syncs after it quits)" : ""),
+                              systemImage: "arrow.triangle.2.circlepath").font(.callout)
+                    }
                     ForEach(s.entries, id: \.self) { e in
-                        Label("\(e.name): \(e.state)" + (e.lastChange.map { ", last change \($0.replacingOccurrences(of: "T", with: " "))" } ?? ""),
-                              systemImage: e.state == "linked" ? "icloud" : "internaldrive")
-                            .font(.callout)
+                        Label("\(e.name): last change on this Mac \(e.mac.map(shown) ?? "—"), in iCloud Drive \(e.icloud.map(shown) ?? "—")",
+                              systemImage: "doc").font(.callout)
                     }
                     if let backup = s.backup {
                         Label("Backup of the previous saves: \(backup)", systemImage: "archivebox").font(.caption)
@@ -211,6 +224,9 @@ struct SaveSyncBox: View {
                               systemImage: "doc.on.doc").font(.caption)
                     }
                 }
+                if let note {
+                    Label(note, systemImage: "info.circle").font(.callout)
+                }
                 if let error {
                     Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
                 }
@@ -220,12 +236,16 @@ struct SaveSyncBox: View {
         .task { await run("--status") }
     }
 
+    private func shown(_ iso: String) -> String { iso.replacingOccurrences(of: "T", with: " ") }
+
     private func run(_ action: String) async {
         busy = true
         error = nil
         defer { busy = false }
         do {
-            status = try await Engine.json(SaveSyncStatus.self, ["saves", game.app, action, "--json"], home: state.workspace)
+            let s = try await Engine.json(SaveSyncStatus.self, ["saves", game.app, action, "--json"], home: state.workspace)
+            status = s
+            if action != "--status" { note = SaveSyncAgent.update(wanted: s.syncedGames > 0) }
         } catch {
             self.error = error.localizedDescription
             if action != "--status" { await run("--status") }
