@@ -6,7 +6,8 @@
 //    game checks for them and an M-series iPad has the same GPU as the Mac;
 //  - Mac-only device and layer properties get the values an Apple Silicon Mac reports;
 //  - metallibs from older tools (file format 2.3, e.g. Bink's) are refused while
-//    their header says macOS; with that flag cleared the same code loads and runs.
+//    their header says macOS; with that flag cleared the same code loads and runs;
+//  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged.
 #import "RecompAppKit.h"
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
@@ -127,6 +128,26 @@ static void FixHeapSetStorage(id self, SEL s, NSUInteger mode) {
     ((void (*)(id, SEL, NSUInteger))oHeapSetStorage)(self, s, mode == 1 ? MTLStorageModeShared : mode);
 }
 
+// --- MetalFX ---------------------------------------------------------------------------
+// MetalFX runs on iOS as it does on the Mac; the game builds a scaler whenever its
+// render size changes. Logged once per scaler, to show the upscale actually in use.
+
+static IMP oNewTemporalScaler, oNewSpatialScaler;
+static void LogScaler(const char *kind, id d, id scaler) {
+    RLOG(@"MetalFX: %s scaler %@x%@ -> %@x%@%s", kind, [d valueForKey:@"inputWidth"], [d valueForKey:@"inputHeight"],
+         [d valueForKey:@"outputWidth"], [d valueForKey:@"outputHeight"], scaler ? "" : " refused");
+}
+static id FixNewTemporalScaler(id self, SEL s, id dev) {
+    id scaler = ((id (*)(id, SEL, id))oNewTemporalScaler)(self, s, dev);
+    LogScaler("temporal", self, scaler);
+    return scaler;
+}
+static id FixNewSpatialScaler(id self, SEL s, id dev) {
+    id scaler = ((id (*)(id, SEL, id))oNewSpatialScaler)(self, s, dev);
+    LogScaler("spatial", self, scaler);
+    return scaler;
+}
+
 static void NoOp1(id self, SEL s, id a) {}
 static void NoOpRange(id self, SEL s, NSRange r) {}
 static void NoOpSync3(id self, SEL s, id t, NSUInteger slice, NSUInteger level) {}
@@ -168,6 +189,9 @@ __attribute__((constructor)) static void RecompMetalInit(void) {
         Swizzle(tc, @selector(setResourceOptions:), (IMP)FixTexSetOptions, &oTexSetOptions);
         Class hc = object_getClass([MTLHeapDescriptor new]);
         Swizzle(hc, @selector(setStorageMode:), (IMP)FixHeapSetStorage, &oHeapSetStorage);
+        Class mfxt = NSClassFromString(@"MTLFXTemporalScalerDescriptor"), mfxs = NSClassFromString(@"MTLFXSpatialScalerDescriptor");
+        if (mfxt) Swizzle(mfxt, @selector(newTemporalScalerWithDevice:), (IMP)FixNewTemporalScaler, &oNewTemporalScaler);
+        if (mfxs) Swizzle(mfxs, @selector(newSpatialScalerWithDevice:), (IMP)FixNewSpatialScaler, &oNewSpatialScaler);
 
         // Buffers and blit encoders come in several concrete classes. Where iOS
         // classes define the managed-memory calls, they only assert; replace those,
