@@ -5,7 +5,10 @@
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
 //   3 fingers: drag = right drag
+//   Apple Pencil: one more finger while its tip is down (iOS reports it as a Pen, not a touch)
 //   Key buttons (bottom left): Esc and the profile's extra keys, see KeyButtons
+//   While a game mod says a building is being placed: 1 finger on the world aims instead of
+//   clicking, and the mod's Place button clicks where it aimed, see Placement
 //   Text fields open the on-screen keyboard, see SoftKeyboard
 //   In play, with no controller: an on-screen gamepad instead (opt-in), see TouchPad
 //
@@ -23,8 +26,10 @@ namespace Recomp
         const float MoveThreshold = 12f;      // pixels before a gesture counts as a drag
         const float TapSeconds = 0.3f;
         const float ScrollPerPixel = 0.5f;    // pinch spread change -> scroll units
+        const int PenId = -1;                 // the pencil's slot among the touches (touch ids are positive)
+        const int ProbeFrames = 2;            // while placing: frames the mouse sits on a new touch before the game's UI is asked
 
-        enum Mode { None, Pending, Left, Multi }
+        enum Mode { None, Pending, Left, Multi, Probe, Aim }
 
         static Mouse _mouse;
         static readonly Dictionary<int, Vector2> Touches = new Dictionary<int, Vector2>();
@@ -41,6 +46,13 @@ namespace Recomp
         static ushort _buttons;
         static bool _releaseNextFrame, _tapPending;
         static ushort _tapButtons, _loggedButtons;
+        static bool _penDown, _sawPen;
+        // Placement mode: where the player last aimed (the ghost stays there), whether the mouse
+        // goes back there once a touch on the game's UI or a camera gesture is over, and the
+        // frames left before Place clicks there.
+        static Vector2 _aim;
+        static bool _hasAim, _restoreAim;
+        static int _restoreWait, _probeFrames, _placeIn;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         public static void Install()
@@ -59,9 +71,27 @@ namespace Recomp
 
         static unsafe void OnEvent(InputEventPtr eventPtr, InputDevice device)
         {
-            if (!(device is Touchscreen) || !eventPtr.IsA<StateEvent>()) return;
+            if (!eventPtr.IsA<StateEvent>()) return;
             var stateEvent = StateEvent.From(eventPtr);
-            if (stateEvent->stateFormat != TouchState.Format) return;
+            if (device is Pen && stateEvent->stateFormat == PenState.Format)
+            {
+                // Games that read only the mouse never see the pencil, while UI that takes any
+                // pointer does: consume it like a touch so both see the same mouse.
+                var pen = (PenState*)stateEvent->state;
+                if (!_sawPen)
+                {
+                    _sawPen = true;
+                    Debug.Log("[recomp] first pencil event");
+                }
+                eventPtr.handled = true;
+                var down = (pen->buttons & (1 << (int)PenButton.Tip)) != 0;
+                if (down || _penDown)
+                    OnPointer(PenId, !down ? UnityEngine.InputSystem.TouchPhase.Ended
+                        : _penDown ? UnityEngine.InputSystem.TouchPhase.Moved : UnityEngine.InputSystem.TouchPhase.Began, pen->position);
+                _penDown = down;
+                return;
+            }
+            if (!(device is Touchscreen) || stateEvent->stateFormat != TouchState.Format) return;
             var touch = (TouchState*)stateEvent->state;
             if (!_sawTouch)
             {
@@ -69,47 +99,51 @@ namespace Recomp
                 Debug.Log("[recomp] first touch received");
             }
             eventPtr.handled = true;
-            var id = touch->touchId;
+            OnPointer(touch->touchId, touch->phase, touch->position);
+        }
+
+        static void OnPointer(int id, UnityEngine.InputSystem.TouchPhase phase, Vector2 position)
+        {
             if (KeyTouches.TryGetValue(id, out var key))
             {
-                if (touch->phase == UnityEngine.InputSystem.TouchPhase.Ended)
+                if (phase == UnityEngine.InputSystem.TouchPhase.Ended)
                 {
                     KeyTouches.Remove(id);
                     KeyButtons.Press(key);
                 }
-                else if (touch->phase == UnityEngine.InputSystem.TouchPhase.Canceled)
+                else if (phase == UnityEngine.InputSystem.TouchPhase.Canceled)
                     KeyTouches.Remove(id);
                 return;
             }
-            if (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && (key = KeyButtons.At(touch->position)) >= 0)
+            if (phase == UnityEngine.InputSystem.TouchPhase.Began && (key = KeyButtons.At(position)) >= 0)
             {
                 KeyTouches[id] = key;
                 return;
             }
             // Touches that begin while the gamepad is shown stay with it until they end.
-            if (TouchPad.Owns(id) || (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && TouchPad.Visible))
+            if (TouchPad.Owns(id) || (phase == UnityEngine.InputSystem.TouchPhase.Began && TouchPad.Visible))
             {
                 var now = Time.realtimeSinceStartup;
-                switch (touch->phase)
+                switch (phase)
                 {
-                    case UnityEngine.InputSystem.TouchPhase.Began: TouchPad.Begin(id, touch->position, now); break;
+                    case UnityEngine.InputSystem.TouchPhase.Began: TouchPad.Begin(id, position, now); break;
                     case UnityEngine.InputSystem.TouchPhase.Moved:
-                    case UnityEngine.InputSystem.TouchPhase.Stationary: TouchPad.Move(id, touch->position); break;
+                    case UnityEngine.InputSystem.TouchPhase.Stationary: TouchPad.Move(id, position); break;
                     default:
-                        if (TouchPad.End(id, now)) ClickAt(touch->position);
+                        if (TouchPad.End(id, now)) ClickAt(position);
                         break;
                 }
                 return;
             }
-            switch (touch->phase)
+            switch (phase)
             {
                 case UnityEngine.InputSystem.TouchPhase.Began:
                 case UnityEngine.InputSystem.TouchPhase.Moved:
                 case UnityEngine.InputSystem.TouchPhase.Stationary:
-                    Touches[touch->touchId] = touch->position;
+                    Touches[id] = position;
                     break;
                 default:
-                    Touches.Remove(touch->touchId);
+                    Touches.Remove(id);
                     break;
             }
         }
@@ -145,12 +179,40 @@ namespace Recomp
             switch (_mode)
             {
                 case Mode.None:
-                    if (n == 1) Begin(Mode.Pending, center, now);
+                    if (n == 1) Begin(Placement.Active && !Placement.Rows ? Mode.Probe : Mode.Pending, center, now);
                     else if (n > 1) Begin(Mode.Multi, center, now);
+                    break;
+                case Mode.Probe:
+                    // Placing a building: the mouse has moved onto the finger without a button.
+                    // Ask the game's UI, as the game does, once it has seen the mouse there:
+                    // menus get a click, the world aims.
+                    if (n > 1) { Begin(Mode.Multi, center, now); break; }
+                    if (n == 1 && ++_probeFrames < ProbeFrames) break;
+                    if (Placement.MouseOverUI(_lastPos))
+                    {
+                        if (n == 0) { Tap(1 << (int)MouseButton.Left, "left click"); End(); }
+                        else _mode = Mode.Pending;  // keeps its start: the press still comes 80 ms after the touch
+                    }
+                    else if (n == 0)
+                    {
+                        _aim = _lastPos;
+                        _hasAim = true;
+                        _mode = Mode.None;
+                    }
+                    else _mode = Mode.Aim;
+                    break;
+                case Mode.Aim:
+                    if (n > 1) Begin(Mode.Multi, center, now);
+                    else if (n == 0)
+                    {
+                        _aim = _lastPos;
+                        _hasAim = true;
+                        _mode = Mode.None;
+                    }
                     break;
                 case Mode.Pending:
                     if (n > 1) Begin(Mode.Multi, center, now);
-                    else if (n == 0) { Tap(1 << (int)MouseButton.Left, "left click"); _mode = Mode.None; }
+                    else if (n == 0) { Tap(1 << (int)MouseButton.Left, "left click"); End(); }
                     else if (now - _modeStart > PendingSeconds || (center - _start).magnitude > MoveThreshold)
                     {
                         _mode = Mode.Left;
@@ -158,7 +220,7 @@ namespace Recomp
                     }
                     break;
                 case Mode.Left:
-                    if (n == 0) { _buttons = 0; _mode = Mode.None; }
+                    if (n == 0) { _buttons = 0; End(); }
                     break;
                 case Mode.Multi:
                     _maxFingers = Mathf.Max(_maxFingers, n);
@@ -167,7 +229,7 @@ namespace Recomp
                         _buttons = 0;
                         if (_maxFingers == 2 && now - _modeStart < TapSeconds && _travel < MoveThreshold)
                             Tap(1 << (int)MouseButton.Right, "right click (two-finger tap)");
-                        _mode = Mode.None;
+                        End();
                         break;
                     }
                     if (n == _lastCount)
@@ -181,6 +243,13 @@ namespace Recomp
                     break;
             }
 
+            if (_placeIn > 0 && n == 0 && --_placeIn == 0) Tap(1 << (int)MouseButton.Left, "place");
+            // Back to the aimed spot a frame after the click let go, so the ghost reappears there.
+            if (_restoreAim && n == 0 && !_tapPending && !_releaseNextFrame && _buttons == 0 && ++_restoreWait > 1)
+            {
+                _restoreAim = false;
+                _lastPos = _aim;
+            }
             var pos = n > 0 ? center : _lastPos;
             // When the finger count changes the centroid jumps; do not turn that into motion.
             var delta = n > 0 && n == _lastCount ? pos - _last : Vector2.zero;
@@ -206,8 +275,41 @@ namespace Recomp
             _modeStart = now;
             _start = center;
             _travel = 0f;
+            _probeFrames = 0;
             _maxFingers = Touches.Count;
             _lastSpread = 0f;
+        }
+
+        // A gesture other than aiming is over: while placing, the mouse goes back to the aimed spot.
+        static void End()
+        {
+            _mode = Mode.None;
+            if (Placement.Active && _hasAim)
+            {
+                _restoreAim = true;
+                _restoreWait = 0;
+            }
+        }
+
+        // Placement.Place: back to the aimed spot, and click there once the game has seen the mouse
+        // leave the Place button (it skips a click while the mouse is over its UI).
+        internal static bool PlaceAtAim()
+        {
+            if (!_hasAim)
+            {
+                Debug.Log("[recomp] place: nothing aimed at yet");
+                return false;
+            }
+            _last = _lastPos = _aim;
+            _restoreAim = false;
+            _placeIn = 2;
+            return true;
+        }
+
+        internal static void ResetAim()
+        {
+            _hasAim = _restoreAim = false;
+            _placeIn = 0;
         }
 
         // A left click at a spot, for taps the gamepad passes on.
