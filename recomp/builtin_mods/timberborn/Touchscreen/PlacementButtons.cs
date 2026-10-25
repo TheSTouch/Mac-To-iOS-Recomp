@@ -3,8 +3,11 @@
 // like those buttons (Views/Common/ToolPanel/BlockObjectPlacementPanel.uxml in the game's
 // StreamingAssets/Modding/UI.zip): the same button type and classes, a 20 px icon and a
 // caption where the rotate button shows its key, with icons from the game's own UI.
+// Rows shows only for tools whose drag places several objects (the layout's end point
+// matters: paths, platforms, walls, fields), not for a building placed one at a time.
 using System;
 using Timberborn.BlockObjectTools;
+using Timberborn.BlockSystem;
 using Timberborn.SingletonSystem;
 using Timberborn.ToolSystem;
 using UnityEngine;
@@ -38,9 +41,17 @@ namespace Recomp.Touchscreen
         [OnEvent]
         public void OnToolEntered(ToolEnteredEvent toolEnteredEvent)
         {
-            Placement.Active = toolEnteredEvent.Tool is BlockObjectTool;
-            if (Placement.Active && (_place == null || _place.panel == null)) Attach();
+            var tool = toolEnteredEvent.Tool as BlockObjectTool;
+            Placement.Active = tool != null;
+            if (tool == null) return;
+            if (_place == null || _place.panel == null) Attach();
+            if (_rows != null) _rows.style.display = Drags(tool.Template.Layout) ? DisplayStyle.Flex : DisplayStyle.None;
         }
+
+        // The layouts AreaPicker stretches from the drag's start to its end; Single and Half place one.
+        static bool Drags(BlockObjectLayout layout) =>
+            layout == BlockObjectLayout.Rectangle || layout == BlockObjectLayout.Line ||
+            layout == BlockObjectLayout.SideLine || layout == BlockObjectLayout.TwoSegmentLine;
 
         [OnEvent]
         public void OnToolExited(ToolExitedEvent toolExitedEvent)
