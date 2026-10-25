@@ -60,8 +60,8 @@ enum SaveSyncAgent {
         guard !syncedGames().isEmpty, service.status == .enabled,
               UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version else { return }
         DispatchQueue.global(qos: .utility).async {
-            for _ in 0..<2 {
-                _ = launchctl(["bootout", job])
+            for attempt in 1...2 {
+                let out = launchctl(["bootout", job]).status
                 var waited = 0
                 while waited < 20, launchctl(["print", job]).status == 0 {
                     Thread.sleep(forTimeInterval: 0.25)
@@ -70,8 +70,12 @@ enum SaveSyncAgent {
                 let done = DispatchSemaphore(value: 0)
                 service.unregister { _ in done.signal() }
                 done.wait()
-                _ = update(wanted: true)
+                let before = service.status
+                let note = update(wanted: true)
                 Thread.sleep(forTimeInterval: 3)
+                NSLog("[recomp] save sync item, attempt \(attempt): bootout \(out), gone after \(waited) waits, "
+                      + "status before register \(before.rawValue), after \(service.status.rawValue), "
+                      + "\(note ?? "registered"), running \(running())")
                 if running() { return }
             }
         }
