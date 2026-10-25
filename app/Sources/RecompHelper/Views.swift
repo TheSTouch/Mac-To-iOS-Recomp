@@ -268,6 +268,45 @@ struct ModsBox: View {
     @State private var error: String?
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(list?.mods.filter(\.builtIn) ?? []) { mod in
+                builtIn(mod)
+            }
+            macMods
+        }
+        .task { await run([]) }
+    }
+
+    /// A mod of the port itself, e.g. Timberborn's Touchscreen (each gets its own box, so a later
+    /// one such as small-screen UI for iPhone sits beside it): explained on its own instead of
+    /// listed with the Mac's mods, and on unless turned off here (or in the game's mod list).
+    private func builtIn(_ mod: ModList.Mod) -> some View {
+        GroupBox("Built into the port: \(mod.name)") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Toggle("Include in the port", isOn: Binding(
+                        get: { mod.selected },
+                        set: { on in Task { await run([on ? "--include" : "--exclude", mod.id]) } }))
+                        .disabled(busy)
+                    if busy { ProgressView().controlSize(.small) }
+                }
+                if let d = mod.description, !d.isEmpty {
+                    Text(d).font(.callout)
+                }
+                Text("Part of the iPad and iPhone port, not a mod from this Mac. It can also be turned off on the device in the game's mod list, without porting again; turning it off here leaves it out of the next port.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let last = mod.lastPort, (last == "compiled") != mod.selected {
+                    Label(mod.selected ? "Not in the installed port yet: port again to add it." : "The installed port still has it: port again to leave it out.",
+                          systemImage: "arrow.triangle.2.circlepath").font(.caption)
+                } else if mod.lastPort == nil, mod.selected {
+                    Label("Not in the installed port yet: port again to add it.", systemImage: "arrow.triangle.2.circlepath").font(.caption)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var macMods: some View {
         GroupBox("Mods") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -278,11 +317,11 @@ struct ModsBox: View {
                     Button("Refresh") { Task { await run([]) } }.disabled(busy)
                 }
                 if let list {
-                    if list.mods.isEmpty {
+                    if list.mods.allSatisfy(\.builtIn) {
                         Label("No mods found in " + list.folders.joined(separator: " or "), systemImage: "puzzlepiece")
                             .font(.callout)
                     }
-                    ForEach(list.mods) { mod in
+                    ForEach(list.mods.filter { !$0.builtIn }) { mod in
                         VStack(alignment: .leading, spacing: 2) {
                             Toggle(isOn: Binding(
                                 get: { mod.selected },
@@ -303,7 +342,6 @@ struct ModsBox: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { await run([]) }
     }
 
     private func summary(_ mod: ModList.Mod) -> String {

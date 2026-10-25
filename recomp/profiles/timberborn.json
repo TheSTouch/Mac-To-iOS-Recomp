@@ -29,6 +29,9 @@
       "*.sln",
       "*.csproj",
       "workshop_data.json"
+    ],
+    "builtin": [
+      "timberborn/Touchscreen"
     ]
   },
   "touch_keys": [

@@ -26,6 +26,7 @@ ASMTOOL = os.path.join(paths.HOME, "bin", "asmtool", "asmtool")
 STUBS = os.path.join(ROOT, "stubs")
 EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
+BUILTIN_MODS = os.path.join(ROOT, "recomp", "builtin_mods")
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
 PROFILES = os.path.join(ROOT, "recomp", "profiles")
 # The Unreal route's libsteam_api stand-in; Unity ports get SteamAPI_* from recomp_native_stubs.c.
@@ -325,6 +326,30 @@ def prepare(game, work, unity, ios):
     log(f"shell project ready: {shell}")
 
 
+def mods_config(game, work):
+    """The profile's "mods" block, with the folder its built-in mods are laid out in."""
+    from recomp import mods
+    cfg = mods.config(game_profile(game))
+    if cfg and cfg.get("builtin"):
+        cfg = dict(cfg, builtin_dir=os.path.join(work, "builtin-mods"))
+    return cfg
+
+
+def stage_builtin_mods(game, cfg, shims=None):
+    """Lay out the profile's built-in mods (recomp/builtin_mods/<path>) as mod folders in
+    work/builtin-mods: the manifest and, given the port's shim build folder, the mod's DLL."""
+    out = (cfg or {}).get("builtin_dir")
+    if not out:
+        return
+    for rel in cfg["builtin"]:
+        src = os.path.join(BUILTIN_MODS, rel)
+        dst = os.path.join(out, os.path.basename(rel))
+        os.makedirs(dst, exist_ok=True)
+        shutil.copy2(os.path.join(src, cfg.get("manifest", "manifest.json")), dst)
+        if shims:
+            dotnet_build(src, dst, f"-p:GameManaged={game.managed}", f"-p:RecompShims={shims}")
+
+
 def prepare_mods(game, work, unity, plugins, game_dlls, engine_names):
     """Compile in the code of the mods installed on the Mac (recomp/mods.py).
     Writes work/mods.json for inject; returns (mods for prepare.json, plugin file names)."""
@@ -332,14 +357,16 @@ def prepare_mods(game, work, unity, plugins, game_dlls, engine_names):
     table = os.path.join(work, "mods.json")
     if os.path.exists(table):
         os.remove(table)
-    cfg = mods.config(game_profile(game))
+    cfg = mods_config(game, work)
     if not cfg:
         return [], []
     existing = {n[:-4] for n in game_dlls} | {n[:-4] for n in engine_names}
     version = game.info.get("CFBundleShortVersionString", "0")
     harmony = os.path.join(work, "harmony")
     dotnet_build(os.path.join(SHIMS, "RecompHarmony"), harmony)
-    search = aot_profile(unity) + [game.managed]
+    shims = os.path.join(work, "shims")
+    stage_builtin_mods(game, cfg, shims)
+    search = aot_profile(unity) + [game.managed, shims]
     found, assemblies = mods.prepare(cfg, version, ASMTOOL, search, existing,
                                      {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, mods.excluded(work))
     added = []
@@ -359,9 +386,10 @@ def plan_mods(game, work, unity=None):
     """What the next port would do with each mod on the Mac (selection and checks), without
     building anything. Without the game's Unity editor the checks cannot run: status "unchecked"."""
     from recomp import mods
-    cfg = mods.config(game_profile(game))
+    cfg = mods_config(game, work)
     if not cfg:
         return None, []
+    stage_builtin_mods(game, cfg)
     version = game.info.get("CFBundleShortVersionString", "0")
     skip = mods.excluded(work)
     base = unity or os.path.join(paths.TOOLCHAIN, f"Unity-{game.unity_version}")
@@ -380,8 +408,11 @@ def plan_mods(game, work, unity=None):
     harmony = os.path.join(work, "harmony")
     if not os.path.exists(os.path.join(harmony, "0Harmony.dll")):
         dotnet_build(os.path.join(SHIMS, "RecompHarmony"), harmony)
-    found, _ = mods.prepare(cfg, version, ASMTOOL, aot_profile(unity_app) + [game.managed], existing,
-                            {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, skip)
+    found, _ = mods.prepare(cfg, version, ASMTOOL, aot_profile(unity_app) + [game.managed, os.path.join(work, "shims")],
+                            existing, {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, skip)
+    for m in found:
+        if m["source"] == mods.BUILTIN and m["status"] == "data only":  # its DLL is built by the first port
+            m.update(status="unchecked", reason="built and checked when the game is ported")
     return cfg, found
 
 
@@ -389,7 +420,7 @@ def push_mods(game, work, device, bundle_id, everything=False):
     """Copy the mods the last port handled (compiled in, or data only) to the iPad's mod folder.
     everything: also mods whose code is not in the port (their data loads, their code is skipped)."""
     from recomp import mods
-    cfg = mods.config(game_profile(game))
+    cfg = mods_config(game, work)
     if not cfg:
         return
     try:

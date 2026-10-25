@@ -111,6 +111,7 @@ struct ModList: Decodable {
         let version: String
         let source: String
         let folder: String
+        let description: String?
         /// "compiled" (its code goes into the port), "data only", "skipped" (reason says why),
         /// "excluded" (turned off for this game) or "unchecked" (before the first port).
         let status: String
@@ -120,6 +121,9 @@ struct ModList: Decodable {
         let harmony: Bool
         /// What the last port did with it, nil if it was not there.
         let lastPort: String?
+
+        /// A mod of the port itself (recomp/builtin_mods), not one installed on the Mac.
+        var builtIn: Bool { source == "Built in" }
     }
 
     let supported: Bool

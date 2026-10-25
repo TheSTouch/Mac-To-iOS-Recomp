@@ -27,6 +27,8 @@ Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 Works: intro video, menus, new games and saves, building, camera pan, zoom and rotation, and
 [mods](#mods-unity-ports) (tested: Ladder, code and data). A **Dev** key above Esc toggles the
 game's developer mode (Alt+Shift+Z), whose panel can unlock buildings for testing.
+The port carries its own mod, **Touchscreen** (on by default in the game's mod list): placing a
+building works as with a mouse, see [placement mode](#touch-controls-recomptouchmouse).
 
 Known limits:
 
@@ -291,8 +293,27 @@ The key buttons (Unity ports) stay on screen with or without a controller.
 | pinch | scroll wheel |
 | 3 finger drag | right drag |
 | 2 finger tap | right click |
+| Apple Pencil | like one finger (iOS reports it as a pen, which games that read the mouse ignore) |
 | key buttons (bottom left) | Esc, and above it the profile's `touch_keys` (Timberborn: Dev) |
 | tap a text field | the iOS keyboard opens (TextMeshPro fields) |
+
+**Placement mode** (Timberborn, through its built-in Touchscreen mod). Desktop building games show
+a ghost of the building under the mouse, let you rotate it, and place it on the click; a tap is a
+click the moment it lifts, so there would be no time to rotate. While a building, path or platform
+tool is active:
+
+| Touch | Effect |
+|---|---|
+| 1 finger or the pencil on the map | moves the mouse without clicking: the ghost follows and stays where you lift |
+| tap the game's UI (rotate, flip, menus, another building) | clicks at once; the mouse then goes back to where you aimed, so the ghost reappears there |
+| **Place** (in the game's placement panel) | clicks where you aimed |
+| **Rows** (in the game's placement panel) | lit: touches act directly again, so a drag draws a row (paths, walls) and places it on lift |
+| 2 and 3 finger gestures | the camera, as usual |
+
+Whether a touch is on the UI is asked of the game's EventSystem two frames after the mouse moved
+onto the finger, the same test the game makes before it places. The shim side is
+`Recomp.Placement` (a game mod sets `Placement.Active`); turning the mod off in the game's mod
+list brings back placing on touch.
 
 The virtual devices are named `Mouse` and `Keyboard`, like desktop ones: games store their
 bindings as control paths such as `/Mouse/leftButton`, which match a device by name. The key
@@ -328,6 +349,16 @@ To add mods with code:
    a mod change takes ~15-20 minutes once Unity's cache is warm.
 4. On the iPad, the game shows its mod manager at start; tap Start. Mods can be turned off there
    like on the Mac.
+
+Every Timberborn port also carries **Touchscreen**, a mod of the port itself
+(`recomp/builtin_mods/timberborn/Touchscreen`, listed by the profile's `mods.builtin`): it is built
+against the game and the port's shims when the game is ported, and goes through the same checks
+and install as the Mac's mods (source *Built in*). It is the place for touch tweaks of the game's
+own UI. Recomp Helper shows it in its own box (*Built into the port: Touchscreen*) rather than with the Mac's
+mods, on by default; turning it off there leaves it out of the next port (`recomp.py mods
+--exclude Recomp.Touchscreen`). On the iPad it can also be turned off in the game's mod list,
+without porting again. Other built-in mods (say, a small-screen UI for iPhone) would sit next to
+it in `mods.builtin`, each with its own box.
 
 What happens during the port (`recomp/mods.py`):
 

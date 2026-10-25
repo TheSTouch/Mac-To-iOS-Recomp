@@ -238,10 +238,11 @@ def cmd_mods(rest):
     if a.json:
         print(json.dumps({
             "supported": cfg is not None,
-            "folders": [r for _, r in mods.mac_roots(cfg)] if cfg else [],
+            "folders": [r for s, r in mods.mac_roots(cfg) if s != mods.BUILTIN] if cfg else [],
             "ios": cfg.get("ios") if cfg else None,
             "mods": [{"id": m["id"], "name": m["name"], "version": m.get("version", ""), "source": m["source"],
                       "folder": m["folder"], "status": m["status"], "reason": m.get("reason"),
+                      "description": m.get("description"),
                       "selected": m["status"] != "excluded", "harmony": bool(m.get("patcher")),
                       "lastPort": last.get(m["folder"], {}).get("status")} for m in found],
         }))

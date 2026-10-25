@@ -8,8 +8,14 @@ port time. A game profile's "mods" block says where the game keeps its mods:
     "ios": "Documents/Game/Mods",            # on the iPad, relative to the app container
     "manifest": "manifest.json",             # a folder holding one is a mod
     "version_dirs": "version-",              # optional: per-game-version subfolders
-    "exclude": [".git", "src", "*.zip"]      # not copied to the iPad by `recomp.py mods`
+    "exclude": [".git", "src", "*.zip"],     # not copied to the iPad by `recomp.py mods`
+    "builtin": ["timberborn/Touchscreen"]    # optional: mods of the port itself (recomp/builtin_mods)
   }
+
+Built-in mods are part of every port of the game: built at port time against the game and
+the port's shims, laid out in work/builtin-mods like a mod on the Mac (source "Built in"),
+then checked, compiled in and copied to the iPad like the others. The player can still
+leave one out, or turn it off in the game's own mod list.
 
 prepare() picks the DLLs the game would load, checks each one against the iOS class
 library and the game (asmtool check), and returns the assemblies to compile in. The
@@ -35,6 +41,8 @@ import subprocess
 # game at port time (asmtool harmony).
 RUNTIME_PATCHERS = {"0Harmony", "MonoMod.Core", "MonoMod.Utils", "MonoMod.RuntimeDetour"}
 
+BUILTIN = "Built in"  # the source of the port's own mods
+
 
 def config(profile):
     return (profile or {}).get("mods")
@@ -51,6 +59,8 @@ def mac_roots(cfg):
                 roots.append(("Steam Workshop", os.path.join(os.path.dirname(common), "workshop", "content", appid)))
         else:
             roots.append(("Local", os.path.expanduser(entry)))
+    if cfg.get("builtin_dir"):
+        roots.append((BUILTIN, cfg["builtin_dir"]))
     return [(source, r) for source, r in roots if os.path.isdir(r)]
 
 
@@ -97,7 +107,8 @@ def find(cfg, game_version):
             elif not info or not info.get("Id"):
                 continue  # not a mod
             else:
-                mod.update(name=info.get("Name") or n, id=info["Id"], version=info.get("Version", ""))
+                mod.update(name=info.get("Name") or n, id=info["Id"], version=info.get("Version", ""),
+                           description=info.get("Description", ""))
                 for dirpath, dirnames, files in os.walk(chosen):
                     dirnames[:] = [d for d in dirnames if not d.startswith(".")]
                     mod["dlls"] += sorted(os.path.join(dirpath, f) for f in files if f.lower().endswith(".dll"))
