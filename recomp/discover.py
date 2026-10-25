@@ -1,7 +1,8 @@
 """Find installed Mac games and the local build environment.
 
 scan(): .app bundles in the usual store and launcher locations plus any extra
-folders, each triaged by tools/inspect_app.py. environment(): tools the
+folders, each triaged by tools/inspect_app.py; Windows installs in those extra
+folders and in CrossOver bottles are listed too (recomp/windows_games.py). environment(): tools the
 pipeline needs, signing identities and connected devices.
 """
 import json
@@ -13,7 +14,7 @@ import subprocess
 
 import inspect_app
 
-from recomp import compat
+from recomp import compat, windows_games
 
 HOME = os.path.expanduser("~")
 STEAM_ROOTS = [os.path.join(HOME, "Library", "Application Support", "Steam")]
@@ -122,6 +123,14 @@ def scan(extra_dirs=(), quick=True):
             report["route"] = route_of(report)
             report["status"], report["status_detail"], report["checks"] = status_of(report)
             games.append(report)
+    windows = [("CrossOver", lib) for lib in windows_games.crossover_steam_libraries()]
+    windows += [("Custom", d) for d in extra_dirs]
+    for source, root in windows:
+        for report in windows_games.scan_root(root, source):
+            real = os.path.realpath(report["app"])
+            if real not in seen:
+                seen.add(real)
+                games.append(report)
     return games
 
 

@@ -53,7 +53,10 @@ Download the notarized DMG from [Releases](../../releases), or build it yourself
 The app:
 
 1. scans Steam libraries, `/Applications`, `~/Applications`, GOG, Epic, itch and Heroic folders,
-   plus any folders you add;
+   plus any folders you add; Windows installs (Steam libraries in CrossOver bottles, found on
+   their own, and Windows game folders in the folders you add) are listed too, as *Not supported*
+   with the reason: the routes start from a Mac build, and a Windows build has x86 code and
+   DirectX shaders;
 2. sorts what it finds, with the reason for each game, into:
    - *Tested*: a game profile records it as played on an iPad;
    - *Untested: may work out of the box*: a route handles it and none of the checks below found
@@ -273,7 +276,7 @@ stays on your machine.
 - `recomp.py`: CLI
 - `app/`: Recomp Helper, the SwiftUI front end (talks to `recomp.py` through `RECOMP_EVENTS=1` progress lines)
 - `scripts/`: app build, signing, notarization and icon
-- `recomp/discover.py`: game scanning and environment checks; `recomp/compat.py`: tested / untested / needs-work checks; `recomp/events.py`: progress events and failure hints
+- `recomp/discover.py`: game scanning and environment checks; `recomp/windows_games.py`: Windows installs; `recomp/compat.py`: tested / untested / needs-work checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
 - `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
