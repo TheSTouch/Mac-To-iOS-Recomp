@@ -338,6 +338,23 @@ def write_shim_config(game, data):
         json.dump({"touchGamepad": bool(profile.get("touch_gamepad"))}, f)
 
 
+def write_save_info(game, xcode_dir):
+    """Info.plist keys the shared native save sync (RecompSaves.m) reads: the game's
+    name and its profile's "saves" block (mac root, ios root, include list)."""
+    path = os.path.join(xcode_dir, "Info.plist")
+    with open(path, "rb") as f:
+        info = plistlib.load(f)
+    info["RecompGame"] = game.name
+    saves = (game_profile(game) or {}).get("saves")
+    if saves:
+        info["RecompSaves"] = saves
+    else:
+        info.pop("RecompSaves", None)
+    with open(path, "wb") as f:
+        plistlib.dump(info, f)
+    log(f"Info.plist: RecompGame={game.name}" + (f", RecompSaves={saves}" if saves else ", no saves block"))
+
+
 def apply_profiles(game, game_dlls, plugins):
     """Per-game compatibility rules (recomp/profiles/*.json) for code that cannot run on iOS."""
     applied = []
@@ -544,6 +561,7 @@ def inject(game, work):
                       os.path.join(data, "boot.config"))
     register_shims(game, data)
     write_shim_config(game, data)
+    write_save_info(game, xcode)
     from recomp import il2cpp_patches, pyenv
     with open(os.path.join(game.data, "ScriptingAssemblies.json")) as f:
         listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]
