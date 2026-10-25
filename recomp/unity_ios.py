@@ -26,6 +26,7 @@ ASMTOOL = os.path.join(paths.HOME, "bin", "asmtool", "asmtool")
 STUBS = os.path.join(ROOT, "stubs")
 EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
+NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
 
 # Managed shims added to the game, each enabled when the game ships the
 # assembly it builds on, and started through RuntimeInitializeOnLoads.json.
@@ -257,11 +258,21 @@ def prepare(game, work, unity, ios):
         with open(os.path.join(plugins, n + ".meta"), "w") as f:
             f.write(plugin_meta(n))
 
+    # Native start-up fixes shared by every port.
+    for n in os.listdir(NATIVE_SRC):
+        shutil.copy2(os.path.join(NATIVE_SRC, n), native)
+        with open(os.path.join(native, n + ".meta"), "w") as f:
+            f.write(native_meta(n))
+
     # Preserve every game assembly from the managed linker: reflection-driven
-    # code (dependency injection, serializers) would otherwise lose types.
+    # code (dependency injection, serializers) would otherwise lose types. Engine
+    # modules too: the game's data references engine types (e.g. UI Toolkit's
+    # UxmlSerializedData) that the empty shell scene never uses.
+    engine_used = sorted(n for n in os.listdir(game.managed)
+                         if n in engine_names and n.startswith("UnityEngine"))
     with open(os.path.join(shell, "Assets", "link.xml"), "w") as f:
         f.write("<linker>\n")
-        for n in game_dlls:
+        for n in game_dlls + engine_used:
             f.write(f'  <assembly fullname="{n[:-4]}" preserve="all"/>\n')
         f.write("</linker>\n")
 
@@ -334,6 +345,10 @@ def player(game, work, unity, bundle_id, team):
     log(f"Unity batchmode build (log: {logfile})")
     if os.path.exists(logfile):
         os.remove(logfile)
+    # inject's snapshot of the shell data must match the code this build generates,
+    # and Unity fails to clear a Data folder that inject filled with game data.
+    shutil.rmtree(os.path.join(work, "shell-data"), ignore_errors=True)
+    shutil.rmtree(os.path.join(out, "Data"), ignore_errors=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     follow_unity_log(logfile, proc)
     if proc.returncode != 0 or not os.path.isdir(out):
@@ -455,6 +470,9 @@ def inject(game, work):
     merge_boot_config(os.path.join(shell_data, "boot.config"), os.path.join(game.data, "boot.config"),
                       os.path.join(data, "boot.config"))
     register_shims(game, data)
+    from recomp import pyenv
+    events.progress(None, "Converting textures to ASTC")
+    run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "textures.py"), data])
     for dirpath, _, files in os.walk(data):
         for n in files:
             p = os.path.join(dirpath, n)

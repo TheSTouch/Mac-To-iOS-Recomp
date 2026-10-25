@@ -36,7 +36,7 @@ HINTS = [
      "Xcode could not sign the app: sign in to your developer account in Xcode > Settings > Accounts, then retry."),
     (r"increased-memory-limit|entitlement.*not supported",
      "Your App ID is missing a capability: let Xcode's automatic signing update it by retrying with your account signed in."),
-    (r"device is locked|passcode.protected.*locked|kAMDMobileImageMounterDeviceLocked",
+    (r"device is locked|device was not, or could not be, unlocked|kAMDMobileImageMounterDeviceLocked",
      "Unlock your iPad and keep it awake, then use Retry Install."),
     (r"Developer Mode (is )?(disabled|not enabled|must be enabled)",
      "Turn on Developer Mode on the iPad: Settings > Privacy & Security > Developer Mode, then retry."),

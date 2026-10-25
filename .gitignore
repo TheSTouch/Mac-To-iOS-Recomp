@@ -25,3 +25,7 @@ reports/
 *.pck
 app/.build/
 dist/
+# Helper builds and Python packages when RECOMP_HOME is this folder
+/src/
+/bin/
+/venv/

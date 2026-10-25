@@ -6,6 +6,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using UnityEditor.iOS.Xcode;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
@@ -75,7 +76,46 @@ namespace Recomp
             });
             Debug.Log($"[recomp] build result: {report.summary.result}, {report.summary.totalErrors} errors");
             if (report.summary.result != BuildResult.Succeeded)
+            {
                 EditorApplication.Exit(1);
+                return;
+            }
+            PostProcess(output);
+        }
+
+        // Entitlements for memory-hungry desktop games; Xcode's automatic signing
+        // enables the matching App ID capabilities.
+        const string Entitlements = @"<?xml version=""1.0"" encoding=""UTF-8""?>
+<!DOCTYPE plist PUBLIC ""-//Apple//DTD PLIST 1.0//EN"" ""http://www.apple.com/DTDs/PropertyList-1.0.dtd"">
+<plist version=""1.0"">
+<dict>
+    <key>com.apple.developer.kernel.increased-memory-limit</key>
+    <true/>
+    <key>com.apple.developer.kernel.extended-virtual-addressing</key>
+    <true/>
+</dict>
+</plist>
+";
+
+        static void PostProcess(string xcodeDir)
+        {
+            // The game's user folder (saves, mods) lives in Documents: show it in the Files app.
+            var plistPath = Path.Combine(xcodeDir, "Info.plist");
+            var plist = new PlistDocument();
+            plist.ReadFromFile(plistPath);
+            plist.root.SetBoolean("UIFileSharingEnabled", true);
+            plist.root.SetBoolean("LSSupportsOpeningDocumentsInPlace", true);
+            plist.WriteToFile(plistPath);
+
+            var projPath = PBXProject.GetPBXProjectPath(xcodeDir);
+            var proj = new PBXProject();
+            proj.ReadFromFile(projPath);
+            var target = proj.GetUnityMainTargetGuid();
+            const string entitlements = "Unity-iPhone/recomp.entitlements";
+            File.WriteAllText(Path.Combine(xcodeDir, entitlements), Entitlements);
+            proj.AddFile(entitlements, entitlements);
+            proj.SetBuildProperty(target, "CODE_SIGN_ENTITLEMENTS", entitlements);
+            proj.WriteToFile(projPath);
         }
     }
 }
