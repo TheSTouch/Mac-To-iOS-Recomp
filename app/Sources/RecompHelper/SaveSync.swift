@@ -51,17 +51,47 @@ enum SaveSyncAgent {
     }
 
     /// At app launch: re-register an item registered by another build of the app.
-    /// SMAppService.unregister leaves launchd's loaded job (and its code requirement)
-    /// in place, so the job is booted out first.
+    /// launchd keeps the loaded job with the code requirement of the build that
+    /// registered it (ad-hoc builds change it every time; Developer ID builds do
+    /// not), and SMAppService.unregister/register alone does not reload it. So the
+    /// job is booted out, the registration is redone once it is gone, and the whole
+    /// thing is tried once more if the job still does not run.
     static func refreshIfOutdated() {
         guard !syncedGames().isEmpty, service.status == .enabled,
               UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version else { return }
-        let bootout = Process()
-        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        bootout.arguments = ["bootout", "gui/\(getuid())/\(plistName.replacingOccurrences(of: ".plist", with: ""))"]
-        try? bootout.run()
-        bootout.waitUntilExit()
-        service.unregister { _ in _ = update(wanted: true) }
+        DispatchQueue.global(qos: .utility).async {
+            for _ in 0..<2 {
+                _ = launchctl(["bootout", job])
+                var waited = 0
+                while waited < 20, launchctl(["print", job]).status == 0 {
+                    Thread.sleep(forTimeInterval: 0.25)
+                    waited += 1
+                }
+                let done = DispatchSemaphore(value: 0)
+                service.unregister { _ in done.signal() }
+                done.wait()
+                _ = update(wanted: true)
+                Thread.sleep(forTimeInterval: 3)
+                if running() { return }
+            }
+        }
+    }
+
+    private static var job: String { "gui/\(getuid())/\(plistName.replacingOccurrences(of: ".plist", with: ""))" }
+
+    private static func running() -> Bool { launchctl(["print", job]).output.contains("state = running") }
+
+    @discardableResult
+    private static func launchctl(_ args: [String]) -> (status: Int32, output: String) {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        p.arguments = args
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return (-1, "") }
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        return (p.terminationStatus, text)
     }
 
     @MainActor static func runHeadless() -> Never {
