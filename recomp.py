@@ -7,8 +7,8 @@
   recomp.py toolchain <Game.app> [--check]           fetch (or check for) the Unity editor + iOS support that game needs
   recomp.py unity <Game.app> [stages] [options]      Unity/Mono route (IL2CPP recompilation)
   recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
-  recomp.py saves <Game.app> --enable|--disable|--status [--json]
-                                                     sync the Mac game's saves with its iOS port via iCloud Drive
+  recomp.py saves <Game.app> --enable|--disable|--status|--sync [--json]
+  recomp.py saves --sync-all                         share a Mac game's saves with its iOS ports via iCloud Drive
 
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
@@ -169,15 +169,19 @@ def cmd_unreal(rest):
 def cmd_saves(rest):
     from recomp import saves
     p = argparse.ArgumentParser(prog="recomp.py saves")
-    p.add_argument("app")
+    p.add_argument("app", nargs="?")
     g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--enable", action="store_true")
-    g.add_argument("--disable", action="store_true")
-    g.add_argument("--status", action="store_true")
+    for flag in ("--enable", "--disable", "--status", "--sync", "--sync-all"):
+        g.add_argument(flag, action="store_true")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(rest)
+    if a.sync_all:
+        return saves.sync_all()
+    if not a.app:
+        p.error("which game? (the path of its .app)")
     game = saves.Game(a.app)
-    st = saves.enable(game) if a.enable else saves.disable(game) if a.disable else saves.status(game)
+    action = saves.enable if a.enable else saves.disable if a.disable else saves.sync_now if a.sync else saves.status
+    st = action(game)
     if a.json:
         print(json.dumps(st))
     else:
