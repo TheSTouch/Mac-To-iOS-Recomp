@@ -11,12 +11,20 @@
 //       entry point that is not defined in an overrides file. Generated stubs
 //       return 0; overrides hold hand-written bodies for functions where 0
 //       means the wrong thing (e.g. "init succeeded").
+//
+//   asmtool guard --method <Namespace.Type::Method> [--method ...] <assembly.dll>
+//       Rewrite void methods in place so an exception they throw is printed and
+//       swallowed: for optional systems that cannot work on iOS (they would
+//       otherwise abort the game's start-up).
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
+using Mono.Cecil.Rocks;
 
 return args.Length > 0 && args[0] == "scan" ? Scan(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "internalize" ? Internalize(args.Skip(1).ToArray())
+     : args.Length > 0 && args[0] == "guard" ? Guard(args.Skip(1).ToArray())
      : Usage();
 
 static int Usage()
@@ -127,6 +135,66 @@ static int Internalize(string[] args)
     }
     File.WriteAllText(stubPath, sb.ToString());
     Console.WriteLine($"stub: {entryPoints.Count} entry points, {generated} generated, {entryPoints.Count - generated} from overrides -> {stubPath}");
+    return 0;
+}
+
+static int Guard(string[] args)
+{
+    var targets = new List<string>();
+    string input = null;
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--method") targets.Add(args[++i]);
+        else input = args[i];
+    }
+    if (input == null || targets.Count == 0) return Usage();
+
+    var resolver = new DefaultAssemblyResolver();
+    resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(input)));
+    var bytes = File.ReadAllBytes(input);  // read fully so the file can be rewritten in place
+    using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes), new ReaderParameters { AssemblyResolver = resolver });
+    var core = module.TypeSystem.CoreLibrary;
+    var console = new TypeReference("System", "Console", module, core);
+    var writeObject = new MethodReference("WriteLine", module.TypeSystem.Void, console) { Parameters = { new ParameterDefinition(module.TypeSystem.Object) } };
+    var writeString = new MethodReference("WriteLine", module.TypeSystem.Void, console) { Parameters = { new ParameterDefinition(module.TypeSystem.String) } };
+    var exception = new TypeReference("System", "Exception", module, core);
+
+    int failed = 0;
+    foreach (var target in targets)
+    {
+        var parts = target.Split("::");
+        var type = AllTypes(module).FirstOrDefault(t => t.FullName == parts[0]);
+        var methods = type?.Methods.Where(m => m.Name == parts[1] && m.HasBody).ToList() ?? new();
+        if (methods.Count == 0) { Console.Error.WriteLine($"guard: {target} not found"); failed++; continue; }
+        foreach (var method in methods)
+        {
+            if (method.ReturnType.MetadataType != MetadataType.Void) { Console.Error.WriteLine($"guard: {target} does not return void"); failed++; continue; }
+            var body = method.Body;
+            body.SimplifyMacros();
+            var il = body.GetILProcessor();
+            var end = il.Create(OpCodes.Ret);
+            foreach (var ins in body.Instructions.Where(x => x.OpCode == OpCodes.Ret).ToList())
+            {
+                ins.OpCode = OpCodes.Leave;
+                ins.Operand = end;
+            }
+            var tryStart = body.Instructions[0];
+            var handler = il.Create(OpCodes.Call, writeObject);
+            il.Append(handler);
+            il.Append(il.Create(OpCodes.Ldstr, $"[recomp] {target} failed and was skipped (not supported on iOS)"));
+            il.Append(il.Create(OpCodes.Call, writeString));
+            il.Append(il.Create(OpCodes.Leave, end));
+            il.Append(end);
+            body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+            {
+                TryStart = tryStart, TryEnd = handler, HandlerStart = handler, HandlerEnd = end, CatchType = exception,
+            });
+            body.OptimizeMacros();
+            Console.WriteLine($"guarded {method.FullName}");
+        }
+    }
+    if (failed > 0) return 1;
+    module.Write(input);
     return 0;
 }
 

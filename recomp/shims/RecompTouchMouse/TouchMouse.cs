@@ -5,6 +5,7 @@
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
 //   3 fingers: drag = right drag
+//   Esc button (top right): Escape key, see EscButton
 //
 // A real mouse or keyboard, when connected, keeps working alongside.
 using System.Collections.Generic;
@@ -28,7 +29,12 @@ namespace Recomp
         static Mode _mode;
         static float _modeStart;
         static Vector2 _start, _last, _lastPos;
-        static float _lastSpread, _maxMove;
+        // _travel: centroid movement summed only over frames with an unchanged finger
+        // count, so fingers landing or lifting at slightly different times (which
+        // makes the centroid jump) do not turn a tap into a drag.
+        static float _lastSpread, _travel;
+        static bool _sawTouch;
+        static readonly HashSet<int> EscTouches = new HashSet<int>();
         static int _maxFingers, _lastCount;
         static ushort _buttons;
         static bool _releaseNextFrame, _tapPending;
@@ -39,8 +45,7 @@ namespace Recomp
         {
             if (_mouse != null) return;
             _mouse = InputSystem.AddDevice<Mouse>("RecompTouchMouse");
-            if (Keyboard.current == null)
-                InputSystem.AddDevice<Keyboard>("RecompKeyboard");
+            EscButton.Install();
             InputSystem.onEvent += OnEvent;
             InputSystem.onBeforeUpdate += OnBeforeUpdate;
             Debug.Log("[recomp] touch mouse installed");
@@ -52,6 +57,29 @@ namespace Recomp
             var stateEvent = StateEvent.From(eventPtr);
             if (stateEvent->stateFormat != TouchState.Format) return;
             var touch = (TouchState*)stateEvent->state;
+            if (!_sawTouch)
+            {
+                _sawTouch = true;
+                Debug.Log("[recomp] first touch received");
+            }
+            eventPtr.handled = true;
+            var id = touch->touchId;
+            if (EscTouches.Contains(id))
+            {
+                if (touch->phase == UnityEngine.InputSystem.TouchPhase.Ended)
+                {
+                    EscTouches.Remove(id);
+                    EscButton.Press();
+                }
+                else if (touch->phase == UnityEngine.InputSystem.TouchPhase.Canceled)
+                    EscTouches.Remove(id);
+                return;
+            }
+            if (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && EscButton.Contains(touch->position))
+            {
+                EscTouches.Add(id);
+                return;
+            }
             switch (touch->phase)
             {
                 case UnityEngine.InputSystem.TouchPhase.Began:
@@ -63,13 +91,13 @@ namespace Recomp
                     Touches.Remove(touch->touchId);
                     break;
             }
-            eventPtr.handled = true;
         }
 
         static void OnBeforeUpdate()
         {
             if (InputState.currentUpdateType != InputUpdateType.Dynamic) return;
             var now = Time.realtimeSinceStartup;
+            EscButton.Update(now);
             var n = Touches.Count;
             var center = Vector2.zero;
             foreach (var p in Touches.Values) center += p;
@@ -99,7 +127,7 @@ namespace Recomp
                     break;
                 case Mode.Pending:
                     if (n > 1) Begin(Mode.Multi, center, now);
-                    else if (n == 0) { Tap(1 << (int)MouseButton.Left); _mode = Mode.None; }
+                    else if (n == 0) { Tap(1 << (int)MouseButton.Left, "left click"); _mode = Mode.None; }
                     else if (now - _modeStart > PendingSeconds || (center - _start).magnitude > MoveThreshold)
                     {
                         _mode = Mode.Left;
@@ -114,15 +142,16 @@ namespace Recomp
                     if (n == 0)
                     {
                         _buttons = 0;
-                        if (_maxFingers == 2 && now - _modeStart < TapSeconds && _maxMove < MoveThreshold)
-                            Tap(1 << (int)MouseButton.Right);
+                        if (_maxFingers == 2 && now - _modeStart < TapSeconds && _travel < MoveThreshold)
+                            Tap(1 << (int)MouseButton.Right, "right click (two-finger tap)");
                         _mode = Mode.None;
                         break;
                     }
-                    _maxMove = Mathf.Max(_maxMove, (center - _start).magnitude);
+                    if (n == _lastCount)
+                        _travel += (center - _last).magnitude;
                     if (n >= 3)
                         _buttons = 1 << (int)MouseButton.Right;
-                    else if (n == 2 && _maxFingers == 2 && _maxMove > MoveThreshold)
+                    else if (n == 2 && _maxFingers == 2 && _travel > MoveThreshold)
                         _buttons = 1 << (int)MouseButton.Middle;
                     if (n == 2 && _lastSpread > 0f)
                         scroll = (spread - _lastSpread) * ScrollPerPixel;
@@ -146,14 +175,15 @@ namespace Recomp
             _mode = mode;
             _modeStart = now;
             _start = center;
-            _maxMove = 0f;
+            _travel = 0f;
             _maxFingers = Touches.Count;
             _lastSpread = 0f;
         }
 
         // Press now (or next frame if a release is still due), release one frame later.
-        static void Tap(int buttons)
+        static void Tap(int buttons, string what)
         {
+            Debug.Log("[recomp] " + what);
             _tapButtons = (ushort)buttons;
             _tapPending = true;
         }

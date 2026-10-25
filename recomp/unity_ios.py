@@ -27,6 +27,7 @@ STUBS = os.path.join(ROOT, "stubs")
 EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
+PROFILES = os.path.join(ROOT, "recomp", "profiles")
 
 # Managed shims added to the game, each enabled when the game ships the
 # assembly it builds on, and started through RuntimeInitializeOnLoads.json.
@@ -125,7 +126,10 @@ def is_engine(name, engine_names):
 
 
 def ensure_asmtool():
-    if not os.path.exists(ASMTOOL):
+    """Build asmtool when missing or older than its sources."""
+    src = os.path.join(ROOT, "tools", "asmtool")
+    newest = max(os.path.getmtime(os.path.join(src, n)) for n in os.listdir(src) if n.endswith((".cs", ".csproj")))
+    if not os.path.exists(ASMTOOL) or os.path.getmtime(ASMTOOL) < newest:
         dotnet_build(os.path.join(ROOT, "tools", "asmtool"), os.path.dirname(ASMTOOL))
 
 
@@ -250,6 +254,7 @@ def prepare(game, work, unity, ios):
         run(cmd + [os.path.join(game.managed, u) for u in users])
         with open(os.path.join(native, "recomp_native_stubs.c.meta"), "w") as f:
             f.write(native_meta("recomp_native_stubs.c"))
+    applied = apply_profiles(game_dlls, plugins)
     shims = build_shims(game, os.path.join(work, "shims"))
     for dll in shims:
         shutil.copy2(dll, plugins)
@@ -287,8 +292,28 @@ def prepare(game, work, unity, ios):
     with open(os.path.join(work, "prepare.json"), "w") as f:
         json.dump({"game": game.app, "unity": game.unity_version, "assemblies": game_dlls,
                    "stubbed_modules": sorted(to_stub), "internalized": users,
-                   "shims": [os.path.basename(d)[:-4] for d in shims]}, f, indent=2)
+                   "shims": [os.path.basename(d)[:-4] for d in shims], "profiles": applied}, f, indent=2)
     log(f"shell project ready: {shell}")
+
+
+def apply_profiles(game_dlls, plugins):
+    """Per-game compatibility rules (recomp/profiles/*.json) for code that cannot run on iOS."""
+    applied = []
+    for name in sorted(os.listdir(PROFILES)):
+        if not name.endswith(".json"):
+            continue
+        with open(os.path.join(PROFILES, name)) as f:
+            profile = json.load(f)
+        if profile["when_assembly"] not in game_dlls:
+            continue
+        for dll, methods in profile.get("guard", {}).items():
+            cmd = [ASMTOOL, "guard"]
+            for m in methods:
+                cmd += ["--method", m]
+            run(cmd + [os.path.join(plugins, dll)])
+        log(f"profile {profile['name']}: {profile['why']}")
+        applied.append(profile["name"])
+    return applied
 
 
 def active_shims(game):
@@ -346,9 +371,10 @@ def player(game, work, unity, bundle_id, team):
     if os.path.exists(logfile):
         os.remove(logfile)
     # inject's snapshot of the shell data must match the code this build generates,
-    # and Unity fails to clear a Data folder that inject filled with game data.
+    # and Unity's iOS post-processor fails ("Directory not empty") on an output
+    # folder that inject or an interrupted build left behind: start clean.
     shutil.rmtree(os.path.join(work, "shell-data"), ignore_errors=True)
-    shutil.rmtree(os.path.join(out, "Data"), ignore_errors=True)
+    shutil.rmtree(out, ignore_errors=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     follow_unity_log(logfile, proc)
     if proc.returncode != 0 or not os.path.isdir(out):
@@ -470,9 +496,16 @@ def inject(game, work):
     merge_boot_config(os.path.join(shell_data, "boot.config"), os.path.join(game.data, "boot.config"),
                       os.path.join(data, "boot.config"))
     register_shims(game, data)
-    from recomp import pyenv
+    from recomp import il2cpp_patches, pyenv
+    with open(os.path.join(game.data, "ScriptingAssemblies.json")) as f:
+        listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]
+    il2cpp_patches.apply(xcode, ["mscorlib"] + [n for n in listed if n != "mscorlib"], log)
     events.progress(None, "Converting textures to ASTC")
     run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "textures.py"), data])
+    icns = game_icon(game)
+    appiconset = os.path.join(xcode, "Unity-iPhone", "Images.xcassets", "AppIcon.appiconset")
+    if icns and os.path.isdir(appiconset):
+        run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "appicon.py"), icns, appiconset])
     for dirpath, _, files in os.walk(data):
         for n in files:
             p = os.path.join(dirpath, n)
@@ -481,6 +514,17 @@ def inject(game, work):
             if patch_target_platform(p, TARGET_IOS):
                 patched += 1
     log(f"game data injected into {data} ({patched} serialized files retargeted to iOS)")
+
+
+def game_icon(game):
+    """The game's own .icns, as named by its Info.plist."""
+    name = game.info.get("CFBundleIconFile")
+    if not name:
+        return None
+    path = os.path.join(game.app, "Contents", "Resources", name)
+    if not path.endswith(".icns"):
+        path += ".icns"
+    return path if os.path.exists(path) else None
 
 
 def merge_boot_config(shell_cfg, game_cfg, out):

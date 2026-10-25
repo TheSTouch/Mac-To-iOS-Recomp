@@ -1,0 +1,12 @@
+{
+  "name": "Timberborn",
+  "when_assembly": "Timberborn.HttpApiSystem.dll",
+  "guard": {
+    "Timberborn.HttpApiSystem.dll": [
+      "Timberborn.HttpApiSystem.HttpLeversPageSection::Load",
+      "Timberborn.HttpApiSystem.HttpAdapterPageSection::Load",
+      "Timberborn.HttpApiSystem.IndexHtmlEndpoint::Load"
+    ]
+  },
+  "why": "The local HTTP API builds its pages with Handlebars.Net, which compiles templates to delegates with 'in' parameters at runtime; IL2CPP's expression interpreter cannot create those ('byref delegate'). Guarding the page loaders lets a game load; only the optional HTTP API pages are lost."
+}

@@ -10,7 +10,8 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameManaged)/UnityEngine.CoreModule.dll" Private="false" />
-    <Reference Include="Unity.InputSystem" HintPath="$(GameManaged)/Unity.InputSystem.dll" Private="false" />
+    <!-- Every engine assembly the game ships: which module holds a type moves between Unity versions. -->
+    <GameEngineAssembly Include="$(GameManaged)/UnityEngine*.dll;$(GameManaged)/Unity.Scripting*.dll;$(GameManaged)/Unity.InputSystem.dll" />
+    <Reference Include="@(GameEngineAssembly)" Private="false" />
   </ItemGroup>
 </Project>
