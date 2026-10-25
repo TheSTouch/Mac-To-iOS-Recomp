@@ -303,7 +303,11 @@ def player(game, work, unity, bundle_id, team):
     out = os.path.join(work, "xcode")
     logfile = os.path.join(work, "unity-build.log")
     exe = os.path.join(unity, "Contents", "MacOS", "Unity")
-    cmd = [exe, "-batchmode", "-nographics", "-quit", "-projectPath", shell, "-buildTarget", "iOS",
+    # -disable-assembly-updater: the API Updater otherwise scans every precompiled
+    # game assembly for obsolete Unity APIs, which never finishes on large games
+    # and is pointless since they were built against this exact Unity version.
+    cmd = [exe, "-batchmode", "-nographics", "-quit", "-disable-assembly-updater",
+           "-projectPath", shell, "-buildTarget", "iOS",
            "-executeMethod", "Recomp.Build.Run", "-logFile", logfile,
            "-recompOut", out, "-recompBundleId", bundle_id, "-recompTeam", team,
            "-recompProduct", game.name, "-recompVersion", game.info.get("CFBundleShortVersionString", "1.0").split("-")[0]]
