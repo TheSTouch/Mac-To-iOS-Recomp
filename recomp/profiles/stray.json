@@ -1,6 +1,13 @@
 {
   "name": "Stray",
   "tested": "playable on iPad, early testing (1.5, Steam).",
+  "saves": {
+    "mac": "~/Library/Application Support/Stray/SaveGames/7656119*",
+    "ios": "Library/Application Support/Stray/SaveGames",
+    "include": [
+      "Slots"
+    ]
+  },
   "unreal_project": "Hk_project",
   "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory",
   "engine_ini": {
