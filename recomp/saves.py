@@ -14,9 +14,10 @@ rules the iOS side uses:
 A sync skips a game while it runs, so the game never sees its files change
 under it: saves made on the Mac go to iCloud Drive after it quits, and saves
 made on iOS are in place before it starts again (Steam Cloud then uploads them
-too). Recomp Helper's background item runs `recomp.py saves --sync-all` every
-few minutes; it runs as the app, which macOS lets read Documents and iCloud
-Drive once the player allows it.
+too). Recomp Helper's background item runs `recomp.py saves <app> --sync` when
+a synced game quits and `saves --sync-all` when iCloud Drive/Recomp Saves
+changes and hourly; it runs as the app, which macOS lets read Documents and
+iCloud Drive once the player allows it. Only files that changed are copied.
 
   --enable   backs up the entries to ~/Library/Application Support/Recomp Helper/
              save-backups/<Game>-<date>.tar.gz, adds the game to the synced

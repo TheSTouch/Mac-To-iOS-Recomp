@@ -5,7 +5,8 @@ import SwiftUI
 enum Main {
     /// launchd starts the app with --sync-saves for the save sync's background item (SaveSync.swift).
     @MainActor static func main() {
-        if CommandLine.arguments.contains("--sync-saves") { exit(SaveSyncAgent.runHeadless()) }
+        if CommandLine.arguments.contains("--sync-saves") { SaveSyncAgent.runHeadless() }
+        SaveSyncAgent.refreshIfOutdated()
         RecompHelperApp.main()
     }
 }
@@ -200,7 +201,7 @@ struct SaveSyncBox: View {
                         .disabled(busy || status == nil || status?.icloud == false)
                     if busy { ProgressView().controlSize(.small) }
                 }
-                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPad and iPhone ports sync with, every few minutes while the game is not running.")
+                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPad and iPhone ports sync with: right after the game quits, when saves arrive from iOS, and hourly. Only changed files are copied.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let s = status {
                     if !s.icloud {
