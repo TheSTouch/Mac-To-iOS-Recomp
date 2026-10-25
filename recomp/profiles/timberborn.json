@@ -1,6 +1,7 @@
 {
   "name": "Timberborn",
   "tested": "playable on iPad (1.1.2, Steam).",
+  "steam_app_id": 1062090,
   "saves": {
     "mac": "~/Documents/Timberborn",
     "ios": "Documents/Timberborn",

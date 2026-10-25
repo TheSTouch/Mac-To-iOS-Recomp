@@ -3,6 +3,10 @@
 Port macOS games you own to your own iPad. Builds are for personal sideloading
 with your developer account; never share the resulting app, since it contains the game.
 
+This project exists to play games you bought on an iPad before their developers port them, not
+to get games for free. Ports of Steam games play only after signing in to a Steam account that
+owns the game ([Steam license check](#steam-license-check)).
+
 ## Tested games
 
 | Game | Version tested | Engine | Route | Status |
@@ -195,6 +199,7 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `stub_overrides` | swaps a stub profile's override files, e.g. Steamworks that signs in offline instead of reporting "no Steam" |
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
+  | `steam_app_id` | the game's Steam app id, for the [Steam license check](#steam-license-check) (found from the Steam library otherwise) |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
 
@@ -386,6 +391,41 @@ What happens during the port (`recomp/mods.py`):
 Mods for other Unity games need a `mods` block in the game's profile, and that game's mod loader
 has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
+## Steam license check
+
+On iOS, Steamworks is replaced by a stub, which would also remove the license check Steam
+does on the Mac. So a port of a Steam game checks the license itself: at the first launch it
+covers the game with a sign-in screen, and the game plays once a Steam account that owns it has
+signed in. The check is made in good faith, not as DRM: the source is public and anyone can
+remove it, but a port built with the released tool, or shared with someone else, does not play
+without the game's license.
+
+- **Signing in**: scan the QR code with the Steam Mobile app (Steam Guard, QR scanner), or enter
+  the account name and password, then approve in the Steam Mobile app or type the Steam Guard
+  code. Everything goes straight to Steam (`api.steampowered.com`), through the service Steam's
+  own apps sign in with; the password is encrypted with the key Steam gives for it. Nothing goes
+  through a server of this project.
+- **The check**: Steam's `IPlayerService/GetOwnedGames`, asked with the account's own token,
+  must list the game's app id. Family Sharing does not count, since the game is not in the
+  borrower's library.
+- **What stays on the device**: the sign-in (a refresh token), the Steam ID and the date of
+  the last check, in the Keychain for this device only; they are not in backups and do not travel
+  with a copy of the app. `Documents/Recomp Steam license.txt` says which account was checked
+  and when.
+- **Each launch** checks again behind a "Checking your Steam license" screen, usually for a
+  second. Offline or with Steam slow to answer, the game starts after a few seconds anyway, for
+  30 days after the last successful check; past that it asks to go online. A refunded game or a
+  sign-in removed in Steam brings the sign-in screen back at the next launch.
+- **Signing out**: delete `Recomp Steam license.txt` (Files, *On My iPad*, the game's folder);
+  the next launch asks to sign in again. Steam lists the sign-in as "Recomp: *game* on *device*"
+  under Settings > Security > Authorized devices, where it can be removed.
+
+When porting, the game's app id comes from its profile's `steam_app_id`, or from the
+`appmanifest_<id>.acf` of the Steam library it is installed in. A game that ships Steamworks
+but has neither (copied out of its Steam library, or not a Steam copy) is refused. Games
+without Steamworks (GOG, itch and other DRM-free builds) get no check. The Mac side is
+`recomp/steam_license.py`, the iOS side `recomp/native/RecompLicense.m` (both routes).
+
 ## Saves across devices
 
 Games whose profile has a `saves` block (Timberborn, Stray, Valheim) share their saves through
@@ -460,7 +500,9 @@ stays on your machine.
 - `recomp/native/appkit/`: the shim for retargeted Mac binaries; `recomp/native/steam_api_stub.c`
 - `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
-  native start-up fixes and `RecompSaves.m`, the iOS side of the save sync
+  native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, and `RecompLicense.m`, the
+  iOS side of the Steam license check
+- `recomp/steam_license.py`: the Mac side of the Steam license check (the app id a port checks)
 - `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`)
 - `recomp/mods.py`: mods compiled into Unity ports (`recomp.py mods`)
 - `recomp/shims/`: managed shims injected into games; `recomp/shims/RecompHarmony`: the Harmony stand-in

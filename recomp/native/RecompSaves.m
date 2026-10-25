@@ -422,18 +422,20 @@ static void StartTimer(void) {
 
 // --- first launch: ask for the folder ----------------------------------------------
 
+// The game's window: windows above it (RecompLicense.m's sign-in cover) are skipped, so
+// the picker waits under the cover until the license is checked.
 static UIViewController *TopController(void) {
     UIWindow *window = nil;
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *w in ((UIWindowScene *)scene).windows)
-            if (w.rootViewController && (!window || w.isKeyWindow)) window = w;
+            if (w.rootViewController && w.windowLevel <= UIWindowLevelNormal && (!window || w.isKeyWindow)) window = w;
     }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     if (!window)
         for (UIWindow *w in UIApplication.sharedApplication.windows)
-            if (w.rootViewController && (!window || w.isKeyWindow)) window = w;
+            if (w.rootViewController && w.windowLevel <= UIWindowLevelNormal && (!window || w.isKeyWindow)) window = w;
 #pragma clang diagnostic pop
     UIViewController *vc = window.rootViewController;
     while (vc.presentedViewController) vc = vc.presentedViewController;

@@ -712,6 +712,8 @@ def inject(game, work):
     register_mods(data, mod_asms)
     write_shim_config(game, data)
     write_save_info(game, xcode)
+    from recomp import steam_license
+    steam_license.write_plist(game.app, game_profile(game), os.path.join(xcode, "Info.plist"), log)
     from recomp import il2cpp_patches, pyenv
     with open(os.path.join(game.data, "ScriptingAssemblies.json")) as f:
         listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]

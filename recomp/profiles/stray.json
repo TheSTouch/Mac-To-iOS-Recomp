@@ -1,6 +1,7 @@
 {
   "name": "Stray",
   "tested": "playable on iPad, early testing (1.5, Steam).",
+  "steam_app_id": 1332010,
   "saves": {
     "mac": "~/Library/Application Support/Stray/SaveGames/7656119*",
     "ios": "Library/Application Support/Stray/SaveGames",

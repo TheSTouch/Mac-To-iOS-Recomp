@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import sys
 
-from recomp import events, iossdk, macho, paths, xcodeproj
+from recomp import events, iossdk, macho, paths, steam_license, xcodeproj
 
 ROOT = paths.CODE
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
@@ -44,7 +44,7 @@ SHIM_ALIASED_CONSTANTS = ["NSFontAttributeName", "NSForegroundColorAttributeName
                           "NSMarkedClauseSegmentAttributeName", "NSDocumentTypeDocumentAttribute",
                           "NSPlainTextDocumentType"]
 SHIM_FRAMEWORKS = ["UIKit", "Foundation", "QuartzCore", "CoreGraphics", "Metal", "GameController", "AVFAudio",
-                   "AudioToolbox"]
+                   "AudioToolbox", "Security"]
 # Imports bound to the shim even though iOS exports them, for every UE4 game.
 INTERCEPT = {
     # The engine refuses to start on a case-sensitive volume; iOS volumes are. The
@@ -152,6 +152,7 @@ def build_shims(work):
     src = os.path.join(NATIVE_SRC, "appkit")
     sources = sorted(os.path.join(src, n) for n in os.listdir(src) if n.endswith((".m", ".c")))
     sources.append(os.path.join(NATIVE_SRC, "RecompSaves.m"))  # shared with the Unity route
+    sources.append(os.path.join(NATIVE_SRC, "RecompLicense.m"))  # likewise
     aliases = []
     for c in SHIM_CLASSES:
         for kind in ("CLASS", "METACLASS"):
@@ -412,6 +413,8 @@ def info_plist(game):
     }
     if game.profile.get("saves"):
         plist["RecompSaves"] = game.profile["saves"]
+    # Read by RecompLicense.m: the Steam app the player's account must own.
+    plist.update(steam_license.plist_keys(game.app, game.profile, log))
     return plist
 
 
