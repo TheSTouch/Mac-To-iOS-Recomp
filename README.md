@@ -12,9 +12,16 @@ with your developer account; never share the resulting app, since it contains th
 
 Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 
-### Timberborn
+<table>
+<tr>
+<td width="25%" align="center"><img src="docs/images/timberborn-ipad.jpg" alt="Timberborn running on an iPad"><br>Timberborn</td>
+<td width="25%" align="center"><img src="docs/images/stray-ipad.jpg" alt="Stray running on an iPad, with the on-screen gamepad"><br>Stray</td>
+<td width="25%"></td>
+<td width="25%"></td>
+</tr>
+</table>
 
-![Timberborn running on an iPad](docs/images/timberborn-ipad.jpg)
+### Timberborn
 
 Works: intro video, menus, new games and saves, building, camera pan, zoom and rotation.
 
@@ -27,8 +34,6 @@ Known limits:
 - mods are not supported yet.
 
 ### Stray
-
-![Stray running on an iPad, with the on-screen gamepad](docs/images/stray-ipad.jpg)
 
 Works: intro, brightness setup, cutscene videos, sound, gameplay with the on-screen gamepad or a
 Bluetooth controller; about 40-50 fps at the iPad's point resolution.
@@ -254,7 +259,7 @@ stays on your machine.
 - `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
 - `recomp/textures.py`: BCn → ASTC texture conversion; `recomp/native/`: native start-up fixes
 - `recomp/shims/`: managed shims injected into games
-- `docs/images/`: screenshots for this README
+- `docs/images/`: screenshots for this README (the gallery holds four per row; add a `<td>` per game)
 - `stubs/`: hand-written native stub overrides
 - `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite (Mono.Cecil); `tools/ilspy.sh`: decompiler
 - `toolchain/`, `build/`: downloaded editors and per-game work (not in git)
