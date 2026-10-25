@@ -8,7 +8,9 @@ around it:
             UIKit (RecompAppKit.dylib) and a Steam stand-in
   xcode     generate a small Xcode project and build it: the run-script phase
             puts the retargeted game into the app, then Xcode signs it with
-            automatic provisioning
+            automatic provisioning; the profile's "saves" block goes into
+            Info.plist for the iCloud Drive save sync (recomp/native/RecompSaves.m,
+            built into the AppKit shim)
   install   install it on a connected device
 
 The Mac bundle's Contents/ folder goes into the app as MacFiles/ (codesign
@@ -149,6 +151,7 @@ def build_shims(work):
     os.makedirs(out, exist_ok=True)
     src = os.path.join(NATIVE_SRC, "appkit")
     sources = sorted(os.path.join(src, n) for n in os.listdir(src) if n.endswith((".m", ".c")))
+    sources.append(os.path.join(NATIVE_SRC, "RecompSaves.m"))  # shared with the Unity route
     aliases = []
     for c in SHIM_CLASSES:
         for kind in ("CLASS", "METACLASS"):
@@ -374,7 +377,7 @@ PLACEHOLDER_MAIN = "// Replaced by the game's executable before signing (see the
 
 def info_plist(game):
     info = game.info
-    return {
+    plist = {
         "CFBundleDevelopmentRegion": "en",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
@@ -403,7 +406,12 @@ def info_plist(game):
         # config files at each launch, from the game's profile.
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
         "RecompIniOverrides": {"Engine": game.profile.get("engine_ini", {})},
+        # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
+        "RecompGame": game.name,
     }
+    if game.profile.get("saves"):
+        plist["RecompSaves"] = game.profile["saves"]
+    return plist
 
 
 ENTITLEMENTS = {
