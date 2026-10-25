@@ -152,6 +152,9 @@ struct GameDetail: View {
                 if game.saves == true {
                     SaveSyncBox(game: game).id(game.id)
                 }
+                if game.mods == true {
+                    ModsBox(game: game).id(game.id)
+                }
                 if !game.checks.isEmpty {
                     GroupBox("Compatibility") {
                         VStack(alignment: .leading, spacing: 4) {
@@ -250,6 +253,93 @@ struct SaveSyncBox: View {
         } catch {
             self.error = error.localizedDescription
             if action != "--status" { await run("--status") }
+        }
+    }
+}
+
+/// Chooses which of the Mac's mods go into the port (`recomp.py mods`). iOS cannot run code
+/// that was not compiled into the app, so a mod's code only works on the iPad when the mod was
+/// installed and selected here before porting; its data files are copied to the iPad after.
+struct ModsBox: View {
+    @EnvironmentObject var state: AppState
+    let game: Game
+    @State private var list: ModList?
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        GroupBox("Mods") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Mods installed for \(game.name) on this Mac. The ticked ones are compiled into the next port and copied to the iPad after it. Adding, updating or removing a mod with code needs a new port; mods made only of data files can also be dropped into Files > \(game.name) > Mods on the iPad.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if busy { ProgressView().controlSize(.small) }
+                    Button("Refresh") { Task { await run([]) } }.disabled(busy)
+                }
+                if let list {
+                    if list.mods.isEmpty {
+                        Label("No mods found in " + list.folders.joined(separator: " or "), systemImage: "puzzlepiece")
+                            .font(.callout)
+                    }
+                    ForEach(list.mods) { mod in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Toggle(isOn: Binding(
+                                get: { mod.selected },
+                                set: { on in Task { await run([on ? "--include" : "--exclude", mod.id]) } })) {
+                                Text("\(mod.name) \(mod.version)").font(.callout.bold())
+                                    + Text("  \(mod.source)").font(.caption).foregroundColor(.secondary)
+                            }
+                            .disabled(busy)
+                            Label(summary(mod), systemImage: symbol(mod))
+                                .font(.caption).foregroundStyle(mod.status == "skipped" ? .orange : .secondary)
+                                .padding(.leading, 20)
+                        }
+                    }
+                }
+                if let error {
+                    Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task { await run([]) }
+    }
+
+    private func summary(_ mod: ModList.Mod) -> String {
+        var text: String
+        switch mod.status {
+        case "compiled": text = mod.harmony ? "Code compiled in; its Harmony patches are woven into the game" : "Code compiled in"
+        case "data only": text = "Data files only"
+        case "excluded": text = "Left out of the next port"
+        case "unchecked": text = mod.reason ?? "Checked on the first port"
+        default: text = "Cannot run on iOS: " + (mod.reason ?? "unknown reason")
+        }
+        if let last = mod.lastPort, last != mod.status, mod.status != "skipped" {
+            text += last == "compiled" || last == "data only" ? " (the installed port still has the previous choice)" : " (not in the installed port yet)"
+        } else if mod.lastPort == nil, mod.selected, mod.status != "skipped" {
+            text += " (not in the installed port yet)"
+        }
+        return text
+    }
+
+    private func symbol(_ mod: ModList.Mod) -> String {
+        switch mod.status {
+        case "compiled": return "cpu"
+        case "data only": return "doc"
+        case "skipped": return "exclamationmark.triangle"
+        default: return "minus.circle"
+        }
+    }
+
+    private func run(_ args: [String]) async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            list = try await Engine.json(ModList.self, ["mods", game.app] + args + ["--json"], home: state.workspace)
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }

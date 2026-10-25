@@ -22,6 +22,17 @@
 //       Replace each method's body with "return <value>" (string, bool or int
 //       return types): for platform checks that know no iOS answer.
 //       --search adds a folder for resolving references (the game's Managed).
+//
+//   asmtool check --search <dir> [--search <dir>]... <assembly.dll>...
+//       For mods compiled in at port time: print one JSON object per assembly
+//       ({path, name, version, sha256, references, unresolved}). "unresolved"
+//       lists the types and members it uses that the search folders (searched
+//       in order: the AOT class library first, then the game) do not define;
+//       IL2CPP's linker would stop the whole build on them.
+//
+//   asmtool harmony --targets <dir> [--search <dir>]... <mod.dll>...
+//       Weave mods' Harmony prefixes and postfixes into the game at port time (Harmony.cs).
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
@@ -32,6 +43,8 @@ return args.Length > 0 && args[0] == "scan" ? Scan(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "internalize" ? Internalize(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "guard" ? Guard(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "returns" ? Returns(args.Skip(1).ToArray())
+     : args.Length > 0 && args[0] == "check" ? Check(args.Skip(1).ToArray())
+     : args.Length > 0 && args[0] == "harmony" ? HarmonyWeaver.Run(args.Skip(1).ToArray())
      : Usage();
 
 static int Usage()
@@ -257,6 +270,52 @@ static int Returns(string[] args)
     if (failed > 0) return 1;
     module.Write(input);
     return 0;
+}
+
+static int Check(string[] args)
+{
+    var search = new List<string>();
+    var inputs = new List<string>();
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--search") search.Add(args[++i]);
+        else inputs.Add(args[i]);
+    }
+    if (inputs.Count == 0) return Usage();
+    foreach (var input in inputs)
+    {
+        var resolver = new DefaultAssemblyResolver();
+        foreach (var d in resolver.GetSearchDirectories()) resolver.RemoveSearchDirectory(d);
+        search.ForEach(resolver.AddSearchDirectory);
+        resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(input)));
+        var bytes = File.ReadAllBytes(input);
+        var result = new Dictionary<string, object> { ["path"] = input, ["sha256"] = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant() };
+        try
+        {
+            using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes), new ReaderParameters { AssemblyResolver = resolver });
+            var unresolved = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var t in module.GetTypeReferences())
+                if (Resolves(() => t.Resolve()) == false) unresolved.Add(t.FullName);
+            foreach (var m in module.GetMemberReferences())
+                if (Resolves(() => m.Resolve()) == false) unresolved.Add(m.FullName);
+            result["name"] = module.Assembly.Name.Name;
+            result["version"] = module.Assembly.Name.Version.ToString();
+            result["references"] = module.AssemblyReferences.Select(r => r.Name).ToList();
+            result["unresolved"] = unresolved.ToList();
+        }
+        catch (BadImageFormatException e)
+        {
+            result["error"] = "not a .NET assembly: " + e.Message;
+        }
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
+    }
+    return 0;
+}
+
+static bool Resolves(Func<object> resolve)
+{
+    try { return resolve() != null; }
+    catch (AssemblyResolutionException) { return false; }
 }
 
 static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition module)

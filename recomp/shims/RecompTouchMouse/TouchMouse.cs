@@ -5,7 +5,7 @@
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
 //   3 fingers: drag = right drag
-//   Esc button (bottom left): Escape key, see EscButton
+//   Key buttons (bottom left): Esc and the profile's extra keys, see KeyButtons
 //   Text fields open the on-screen keyboard, see SoftKeyboard
 //   In play, with no controller: an on-screen gamepad instead (opt-in), see TouchPad
 //
@@ -36,7 +36,7 @@ namespace Recomp
         // makes the centroid jump) do not turn a tap into a drag.
         static float _lastSpread, _travel;
         static bool _sawTouch;
-        static readonly HashSet<int> EscTouches = new HashSet<int>();
+        static readonly Dictionary<int, int> KeyTouches = new Dictionary<int, int>();  // touch id -> key button
         static int _maxFingers, _lastCount;
         static ushort _buttons;
         static bool _releaseNextFrame, _tapPending;
@@ -50,7 +50,7 @@ namespace Recomp
             // and "/Mouse/leftButton" matches a device by name. Reuse one if it exists.
             _mouse = InputSystem.FindControl("/Mouse")?.device as Mouse ?? InputSystem.AddDevice<Mouse>("Mouse");
             Debug.Log("[recomp] driving mouse " + _mouse.name + "; devices: " + string.Join(", ", InputSystem.devices));
-            EscButton.Install();
+            KeyButtons.Install();
             TouchPad.Install();
             InputSystem.onEvent += OnEvent;
             InputSystem.onBeforeUpdate += OnBeforeUpdate;
@@ -70,20 +70,20 @@ namespace Recomp
             }
             eventPtr.handled = true;
             var id = touch->touchId;
-            if (EscTouches.Contains(id))
+            if (KeyTouches.TryGetValue(id, out var key))
             {
                 if (touch->phase == UnityEngine.InputSystem.TouchPhase.Ended)
                 {
-                    EscTouches.Remove(id);
-                    EscButton.Press();
+                    KeyTouches.Remove(id);
+                    KeyButtons.Press(key);
                 }
                 else if (touch->phase == UnityEngine.InputSystem.TouchPhase.Canceled)
-                    EscTouches.Remove(id);
+                    KeyTouches.Remove(id);
                 return;
             }
-            if (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && EscButton.Contains(touch->position))
+            if (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && (key = KeyButtons.At(touch->position)) >= 0)
             {
-                EscTouches.Add(id);
+                KeyTouches[id] = key;
                 return;
             }
             // Touches that begin while the gamepad is shown stay with it until they end.
@@ -118,7 +118,7 @@ namespace Recomp
         {
             if (InputState.currentUpdateType != InputUpdateType.Dynamic) return;
             var now = Time.realtimeSinceStartup;
-            EscButton.Update(now);
+            KeyButtons.Update(now);
             SoftKeyboard.Update(now);
             TouchPad.Update();
             var n = Touches.Count;

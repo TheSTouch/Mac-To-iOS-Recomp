@@ -9,6 +9,12 @@
   recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
   recomp.py saves <Game.app> --enable|--disable|--status|--sync [--json]
   recomp.py saves --sync-all                         share a Mac game's saves with its iOS ports via iCloud Drive
+  recomp.py mods <Game.app> [--include ID]... [--exclude ID]... [--json]
+                                                     the Mac's mods and what the next port does with each;
+                                                     --include/--exclude choose which ones it compiles in
+  recomp.py mods <Game.app> --device NAME|UDID --bundle-id ID [--all]
+                                                     copy the last port's mods to the iPad's mod folder
+                                                     (the unity route's install stage does this too)
 
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
@@ -43,12 +49,22 @@ def cmd_scan(rest):
     from recomp import saves
     for g in games:
         g["saves"] = g.get("status") != "missing" and saves.has_saves(g["app"])
+        g["mods"] = g.get("status") != "missing" and g.get("route") == "unity" and has_mods(g["app"])
     if a.json:
         print(json.dumps(games))
     else:
         for g in sorted(games, key=lambda g: (g["status"], g["name"].lower())):
             print(f"{g['status']:<12} {g['name']:<32} {g['engine']:<28} {g['source']}")
     return 0
+
+
+def has_mods(app):
+    """Whether the game's profile says where its mods live (recomp/mods.py)."""
+    from recomp import unity_ios as u
+    try:
+        return bool((u.game_profile(u.Game(app)) or {}).get("mods"))
+    except (SystemExit, OSError, KeyError, ValueError):
+        return False
 
 
 def cmd_env(rest):
@@ -114,6 +130,7 @@ def cmd_unity(rest):
                 u.xcode(work, a.team)
             elif s == "install":
                 u.install(work, a.device)
+                u.push_mods(game, work, a.device, bundle_id)
         except BaseException as e:
             events.stage(s, "failed")
             if not isinstance(e, SystemExit):
@@ -189,7 +206,53 @@ def cmd_saves(rest):
     return 0
 
 
-COMMANDS = {"scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
+def cmd_mods(rest):
+    from recomp import mods, unity_ios as u
+    p = argparse.ArgumentParser(prog="recomp.py mods")
+    p.add_argument("app")
+    p.add_argument("--include", action="append", default=[], metavar="ID", help="put this mod in the next port")
+    p.add_argument("--exclude", action="append", default=[], metavar="ID", help="leave this mod out of the next port")
+    p.add_argument("--device", help="copy the last port's mods to this iPad")
+    p.add_argument("--bundle-id")
+    p.add_argument("--work")
+    p.add_argument("--unity")
+    p.add_argument("--all", action="store_true", help="with --device: also copy mods whose code was not compiled in")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(rest)
+    game = u.Game(a.app)
+    work = os.path.abspath(a.work or os.path.join(paths.BUILD, game.slug))
+    if a.include or a.exclude:
+        mods.select(work, a.include, a.exclude)
+    try:
+        with open(os.path.join(work, "prepare.json")) as f:
+            last = {m["folder"]: m for m in json.load(f).get("mods", [])}
+    except (OSError, ValueError):
+        last = {}
+    if a.device:
+        # What the installed app holds is what the last port compiled, not what is planned.
+        if not os.path.exists(os.path.join(work, "prepare.json")):
+            sys.exit(f"no port of {game.name} in {work} yet: port the game first")
+        u.push_mods(game, work, a.device, a.bundle_id or f"local.recomp.{game.slug.lower()}", a.all)
+        return 0
+    cfg, found = u.plan_mods(game, work, a.unity)
+    if a.json:
+        print(json.dumps({
+            "supported": cfg is not None,
+            "folders": [r for _, r in mods.mac_roots(cfg)] if cfg else [],
+            "ios": cfg.get("ios") if cfg else None,
+            "mods": [{"id": m["id"], "name": m["name"], "version": m.get("version", ""), "source": m["source"],
+                      "folder": m["folder"], "status": m["status"], "reason": m.get("reason"),
+                      "selected": m["status"] != "excluded", "harmony": bool(m.get("patcher")),
+                      "lastPort": last.get(m["folder"], {}).get("status")} for m in found],
+        }))
+        return 0
+    if cfg is None:
+        sys.exit(f"{game.name}: its profile declares no mod folders")
+    mods.report(found, u.log)
+    return 0
+
+
+COMMANDS = {"mods": cmd_mods, "scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
 
 
 def main():

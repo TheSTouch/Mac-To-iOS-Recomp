@@ -20,6 +20,8 @@ struct Game: Decodable, Identifiable, Hashable {
     let checks: [String]
     /// The game's profile has a saves block: its saves can sync with the iOS port through iCloud Drive.
     let saves: Bool?
+    /// The game's profile says where its mods live: the port can compile them in (recomp/mods.py).
+    let mods: Bool?
 
     var id: String { app }
     var support: Support { Support(rawValue: status) ?? .planned }
@@ -98,6 +100,32 @@ struct SaveSyncStatus: Decodable {
     let syncedGames: Int
     let backup: String?
     let conflicts: Int?
+}
+
+/// `recomp.py mods <app> [--include ID] [--exclude ID] --json` (recomp/mods.py): the mods on this
+/// Mac and what the next port does with each.
+struct ModList: Decodable {
+    struct Mod: Decodable, Identifiable, Hashable {
+        let id: String
+        let name: String
+        let version: String
+        let source: String
+        let folder: String
+        /// "compiled" (its code goes into the port), "data only", "skipped" (reason says why),
+        /// "excluded" (turned off for this game) or "unchecked" (before the first port).
+        let status: String
+        let reason: String?
+        let selected: Bool
+        /// Patches the game through Harmony: woven into the port's code.
+        let harmony: Bool
+        /// What the last port did with it, nil if it was not there.
+        let lastPort: String?
+    }
+
+    let supported: Bool
+    let folders: [String]
+    let ios: String?
+    let mods: [Mod]
 }
 
 /// `recomp.py toolchain <app> --check`.

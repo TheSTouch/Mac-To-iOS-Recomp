@@ -24,7 +24,9 @@ Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 
 ### Timberborn
 
-Works: intro video, menus, new games and saves, building, camera pan, zoom and rotation.
+Works: intro video, menus, new games and saves, building, camera pan, zoom and rotation, and
+[mods](#mods-unity-ports) (tested: Ladder, code and data). A **Dev** key above Esc toggles the
+game's developer mode (Alt+Shift+Z), whose panel can unlock buildings for testing.
 
 Known limits:
 
@@ -32,7 +34,8 @@ Known limits:
   and some buttons are small for fingers (raising the in-game UI scale helps);
 - the local HTTP API's web pages are disabled ([profile](recomp/profiles/timberborn.json)):
   they compile templates at runtime, which IL2CPP cannot do;
-- mods are not supported yet.
+- a mod with code runs only if it was installed on the Mac when the game was ported
+  ([Mods](#mods-unity-ports)); data-only mods can also be added on the iPad through Files.
 
 ### Stray
 
@@ -84,7 +87,9 @@ The app:
    - *Needs work*: a route handles it, but a check found something that stops the port or needs a
      profile first (listed under Compatibility);
    - *Not yet supported*, *Not supported* and *Not installed*;
-3. for a game a route handles (Unity or Unreal), asks up front for everything it needs (iPad,
+3. for a game whose profile knows its mods (Timberborn), lists the mods installed on the Mac in a
+   Mods box with a checkbox each, and what the port can do with them ([Mods](#mods-unity-ports));
+4. for a game a route handles (Unity or Unreal), asks up front for everything it needs (iPad,
    signing team, bundle ID, where to keep the workspace: ~40 GB for Unity, a few GB for Unreal
    when it is on the game's disk; for Unity, permission to download the matching editor), then
    runs the whole port with progress bars, a live log and plain-language hints when something
@@ -115,6 +120,7 @@ python3 recomp.py scan                       # installed games and their support
 python3 recomp.py inspect /path/to/Game.app  # detailed triage of one bundle
 python3 recomp.py env                        # build tools, signing teams, paired devices
 python3 recomp.py saves /path/to/Game.app --enable   # share its saves with the iOS ports (see below)
+python3 recomp.py mods /path/to/Game.app     # its mods on this Mac and what the next port does with them
 ```
 
 Set `RECOMP_HOME` to put the large files (Unity editors, build output) on another disk.
@@ -143,14 +149,16 @@ Stages (run all, or name some): `prepare player inject xcode install`.
    iOS player instead). P/Invokes into libraries iOS lacks (Steamworks, PlayFab Party, Apple's
    Mac plug-ins, a game's own Mac helpers: `STUB_PROFILES` in `recomp/unity_ios.py`) are
    redirected to `__Internal` and a generated C stub (`stubs/*.overrides.c` for functions where 0
-   is the wrong answer). Managed shims from `recomp/shims` are added (touch controls).
+   is the wrong answer). Managed shims from `recomp/shims` are added (touch controls), and the
+   selected mods' DLLs, with their Harmony patches woven in ([Mods](#mods-unity-ports)).
 2. **player**: the matching editor builds the shell for iOS in batchmode, which runs IL2CPP
    over all of it and writes an Xcode project.
 3. **inject**: the shell's data is replaced with the game's (`StreamingAssets` → `Data/Raw`);
    IL2CPP metadata and the iOS default resources stay; serialized files are retargeted to iOS;
    BC textures become ASTC (iOS cannot sample BC); asset bundles get both, repacked, and are
    cached in `cache/bundles/<Game>`; shims are registered in `RuntimeInitializeOnLoads.json`.
-4. **xcode** / **install**: sign with automatic provisioning and install through `devicectl`.
+4. **xcode** / **install**: sign with automatic provisioning and install through `devicectl`;
+   install then copies the ported mods to the iPad's mod folder.
 
 The game must be built with exactly the Unity version it shipped with; `toolchain` reads it from
 the game's `Info.plist`. When a game updates its Unity version, delete `build/<Game>` (its shell
@@ -185,6 +193,8 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `stub_overrides` | swaps a stub profile's override files, e.g. Steamworks that signs in offline instead of reporting "no Steam" |
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
+  | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
+  | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
 
 Debugging on the device: launch with
 `xcrun devicectl device process launch --console --terminate-existing --device <UDID> <bundle id>`
@@ -270,7 +280,7 @@ cursor (in play); in menus touches act as the mouse, and a quick tap off the pad
 | top left | Menu, View |
 | bottom left / near the face buttons | L3 / R3 |
 
-The Esc button (Unity ports) stays on screen with or without a controller.
+The key buttons (Unity ports) stay on screen with or without a controller.
 
 ## Touch controls (Recomp.TouchMouse)
 
@@ -281,14 +291,69 @@ The Esc button (Unity ports) stays on screen with or without a controller.
 | pinch | scroll wheel |
 | 3 finger drag | right drag |
 | 2 finger tap | right click |
-| Esc button (bottom left) | Escape key |
+| key buttons (bottom left) | Esc, and above it the profile's `touch_keys` (Timberborn: Dev) |
 | tap a text field | the iOS keyboard opens (TextMeshPro fields) |
 
 The virtual devices are named `Mouse` and `Keyboard`, like desktop ones: games store their
-bindings as control paths such as `/Mouse/leftButton`, which match a device by name. The Esc
-button presses Escape on whichever keyboard those bindings resolve to. It is drawn with UI Toolkit
-when the game uses it, otherwise as a uGUI overlay.
+bindings as control paths such as `/Mouse/leftButton`, which match a device by name. The key
+buttons press their keys on whichever keyboard those bindings resolve to. They are drawn with UI
+Toolkit when the game uses it, otherwise as a uGUI overlay.
 A real keyboard or trackpad, when connected, works alongside.
+
+## Mods (Unity ports)
+
+iOS does not let an app turn new code into machine code while it runs (no JIT). So a mod's code
+can only run on the iPad if it was compiled into the app when the game was ported. Its data files
+(blueprints, models, textures, translations) are read by the game as usual.
+
+| Kind of mod | How it gets onto the iPad |
+|---|---|
+| **Data only** (no `.dll`) | Any time: drop its folder into Files > On My iPad > Timberborn > Mods. |
+| **With code** (`.dll`) | Install it on the Mac, then port the game. Adding, updating or removing one means porting again. |
+| **With Harmony patches** | The same. Its patches are woven into the game when it is ported (below). |
+
+To add mods with code:
+
+1. Install the mods for the Mac game as usual: subscribe in the Steam Workshop, or put the mod's
+   folder in `~/Documents/Timberborn/Mods`. Start the game on the Mac once to check they work
+   there; mods made for an older game version usually fail on both.
+2. Choose which go into the port: the Mods box in Recomp Helper (one checkbox per mod), or
+   `python3 recomp.py mods <Game.app>` to list them and `--exclude <id>` / `--include <id>` to change
+   the choice. New mods are included unless you exclude them. Each mod shows what the port will do
+   with it: its code is compiled in, it is data only, or it cannot run on iOS and why.
+3. Port the game (Recomp Helper, or `recomp.py unity …`). The install stage also copies the
+   ported mods to the iPad's mod folder (`recomp.py mods <Game.app> --device … --bundle-id …` does
+   that alone). It adds and overwrites files, and leaves other mods in the iPad's folder alone; if
+   an update deleted files from a mod, delete that mod's folder in Files first. Re-porting after
+   a mod change takes ~15-20 minutes once Unity's cache is warm.
+4. On the iPad, the game shows its mod manager at start; tap Start. Mods can be turned off there
+   like on the Mac.
+
+What happens during the port (`recomp/mods.py`):
+
+- the mod folders the game's profile names (`mods.mac`: Timberborn's Mods folder and its Steam
+  Workshop folder) are scanned, and for each mod the version folder the game itself would load
+  (`version-1.1/`, …);
+- each DLL is checked against the iOS class library and this game version (`asmtool check`). A mod
+  that uses something missing (an outdated mod, or an API that needs code generated at run time)
+  is skipped with the reason, rather than stopping the build;
+- the DLLs that pass are compiled with the game. On the iPad, when the game loads a mod DLL, the
+  [libil2cpp patch](recomp/il2cpp_patches.py) recognises it by its SHA-256 and returns the
+  compiled assembly. Until then the mod's code is hidden from the game, so a disabled mod stays
+  off. A DLL that was not compiled in is skipped with one log line;
+- Harmony mods: `0Harmony.dll` is replaced by a stand-in with Harmony's API
+  ([recomp/shims/RecompHarmony](recomp/shims/RecompHarmony)), whose `PatchAll` does nothing, and
+  each mod's `[HarmonyPatch]` classes are woven into the game's assemblies (`asmtool harmony`).
+  The woven patches only act once the game has loaded that mod. Supported: targets given in
+  `[HarmonyPatch]` (method, getter, setter, constructor, with argument types) or by a
+  `TargetMethod()` built from `AccessTools` lookups; prefixes (including ones that skip the
+  original), postfixes, finalizers; `__instance`, `__result`, `__state`, `__runOriginal`,
+  `__originalMethod`, `__exception`, `__0`…, `___field` and arguments by name; `Prepare()` and
+  priorities. Not supported, reported per patch: transpilers, reverse patches, `TargetMethods()`,
+  `__args`, patches made at run time with `harmony.Patch(...)`, and `AccessTools.FieldRefAccess`.
+
+Mods for other Unity games need a `mods` block in the game's profile, and that game's mod loader
+has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
 ## Saves across devices
 
@@ -328,7 +393,7 @@ Limits:
 - saves kept only through Steam Cloud's API are not covered, since Steam is stubbed on iOS.
   Valheim's Steam Cloud worlds and characters are an example: move them to local storage in
   Valheim's menus on the Mac first;
-- saves that need Mac mods do not load on iOS (no mod support yet);
+- saves that need mods load only when the port has the same mods ([Mods](#mods-unity-ports));
 - local (ad-hoc signed) builds of Recomp Helper are a new app to macOS each time, so it asks for
   folder access again after each rebuild. A Developer ID build does not.
 
@@ -366,8 +431,9 @@ stays on your machine.
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
   native start-up fixes and `RecompSaves.m`, the iOS side of the save sync
 - `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`)
-- `recomp/shims/`: managed shims injected into games
+- `recomp/mods.py`: mods compiled into Unity ports (`recomp.py mods`)
+- `recomp/shims/`: managed shims injected into games; `recomp/shims/RecompHarmony`: the Harmony stand-in
 - `docs/images/`: screenshots for this README (the gallery holds four per row; add a `<td>` per game)
 - `stubs/`: hand-written native stub overrides
-- `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite (Mono.Cecil); `tools/ilspy.sh`: decompiler
+- `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite and Harmony weaving (Mono.Cecil); `tools/ilspy.sh`: decompiler
 - `toolchain/`, `build/`: downloaded editors and per-game work (not in git)

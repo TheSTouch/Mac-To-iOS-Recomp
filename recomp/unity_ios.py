@@ -125,12 +125,16 @@ def editor_paths(version, unity_root=None):
     return unity, ios
 
 
+def aot_profile(unity):
+    """The class library IL2CPP compiles against, and its facades."""
+    prof = os.path.join(unity, "Contents", "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "unityaot-macos")
+    return [prof, os.path.join(prof, "Facades")]
+
+
 def engine_assemblies(unity, ios):
     """Assembly names IL2CPP supplies itself: engine modules and the AOT class library."""
     names = set()
-    dirs = [os.path.join(ios, "Variations", "il2cpp", "Releasearm64_managed")]
-    prof = os.path.join(unity, "Contents", "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "unityaot-macos")
-    dirs += [prof, os.path.join(prof, "Facades")]
+    dirs = [os.path.join(ios, "Variations", "il2cpp", "Releasearm64_managed")] + aot_profile(unity)
     for d in dirs:
         if os.path.isdir(d):
             names.update(n for n in os.listdir(d) if n.endswith(".dll"))
@@ -278,6 +282,8 @@ def prepare(game, work, unity, ios):
     for dll in shims:
         shutil.copy2(dll, plugins)
     game_dlls += [os.path.basename(d) for d in shims]
+    mod_list, mod_dlls = prepare_mods(game, work, unity, plugins, game_dlls, engine_names)
+    game_dlls += mod_dlls
     for n in game_dlls:
         with open(os.path.join(plugins, n + ".meta"), "w") as f:
             f.write(plugin_meta(n))
@@ -314,8 +320,101 @@ def prepare(game, work, unity, ios):
     with open(os.path.join(work, "prepare.json"), "w") as f:
         json.dump({"game": game.app, "unity": game.unity_version, "assemblies": game_dlls,
                    "stubbed_modules": sorted(to_stub), "internalized": users,
-                   "shims": [os.path.basename(d)[:-4] for d in shims], "profiles": applied}, f, indent=2)
+                   "shims": [os.path.basename(d)[:-4] for d in shims], "profiles": applied,
+                   "mods": mod_list}, f, indent=2)
     log(f"shell project ready: {shell}")
+
+
+def prepare_mods(game, work, unity, plugins, game_dlls, engine_names):
+    """Compile in the code of the mods installed on the Mac (recomp/mods.py).
+    Writes work/mods.json for inject; returns (mods for prepare.json, plugin file names)."""
+    from recomp import mods
+    table = os.path.join(work, "mods.json")
+    if os.path.exists(table):
+        os.remove(table)
+    cfg = mods.config(game_profile(game))
+    if not cfg:
+        return [], []
+    existing = {n[:-4] for n in game_dlls} | {n[:-4] for n in engine_names}
+    version = game.info.get("CFBundleShortVersionString", "0")
+    harmony = os.path.join(work, "harmony")
+    dotnet_build(os.path.join(SHIMS, "RecompHarmony"), harmony)
+    search = aot_profile(unity) + [game.managed]
+    found, assemblies = mods.prepare(cfg, version, ASMTOOL, search, existing,
+                                     {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, mods.excluded(work))
+    added = []
+    for name, a in sorted(assemblies.items()):
+        if a["path"]:  # not one the game already ships
+            shutil.copy2(a["path"], os.path.join(plugins, name + ".dll"))
+            added.append(name + ".dll")
+    mods.weave(ASMTOOL, plugins, search, found, assemblies)
+    mods.report(found, log)
+    with open(table, "w") as f:
+        json.dump({"assemblies": {n: a["hashes"] for n, a in assemblies.items() if a["path"]}}, f, indent=2)
+    log(f"mods: {len(added)} mod assemblies compiled in" + (f" ({', '.join(n[:-4] for n in added)})" if added else ""))
+    return found, added
+
+
+def plan_mods(game, work, unity=None):
+    """What the next port would do with each mod on the Mac (selection and checks), without
+    building anything. Without the game's Unity editor the checks cannot run: status "unchecked"."""
+    from recomp import mods
+    cfg = mods.config(game_profile(game))
+    if not cfg:
+        return None, []
+    version = game.info.get("CFBundleShortVersionString", "0")
+    skip = mods.excluded(work)
+    base = unity or os.path.join(paths.TOOLCHAIN, f"Unity-{game.unity_version}")
+    unity_app, ios = os.path.join(base, "Unity.app"), os.path.join(base, "PlaybackEngines", "iOSSupport")
+    if not os.path.isdir(unity_app) or not os.path.isdir(ios):
+        found = mods.find(cfg, version)
+        for m in found:
+            m.setdefault("status", "excluded" if m["id"] in skip else "unchecked")
+            if m["status"] == "unchecked":
+                m["reason"] = f"checked once Unity {game.unity_version} is installed (first port)"
+        return cfg, found
+    ensure_asmtool()
+    engine_names = engine_assemblies(unity_app, ios)
+    game_dlls = [n for n in os.listdir(game.managed) if n.endswith(".dll") and not is_engine(n, engine_names)]
+    existing = {n[:-4] for n in game_dlls} | {n[:-4] for n in engine_names}
+    harmony = os.path.join(work, "harmony")
+    if not os.path.exists(os.path.join(harmony, "0Harmony.dll")):
+        dotnet_build(os.path.join(SHIMS, "RecompHarmony"), harmony)
+    found, _ = mods.prepare(cfg, version, ASMTOOL, aot_profile(unity_app) + [game.managed], existing,
+                            {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, skip)
+    return cfg, found
+
+
+def push_mods(game, work, device, bundle_id, everything=False):
+    """Copy the mods the last port handled (compiled in, or data only) to the iPad's mod folder.
+    everything: also mods whose code is not in the port (their data loads, their code is skipped)."""
+    from recomp import mods
+    cfg = mods.config(game_profile(game))
+    if not cfg:
+        return
+    try:
+        with open(os.path.join(work, "prepare.json")) as f:
+            last = {m["folder"]: m for m in json.load(f).get("mods", [])}
+    except (OSError, ValueError):
+        last = {}
+    found = mods.find(cfg, game.info.get("CFBundleShortVersionString", "0"))
+    for m in found:
+        m.update({k: v for k, v in last.get(m["folder"], {}).items() if k in ("status", "reason")})
+        m.setdefault("status", "not ported (installed after the last port)")
+    chosen = [m for m in found if everything or m["status"] in ("compiled", "data only")]
+    if not chosen:
+        log("mods: none to copy to the iPad")
+        return
+    mods.push(chosen, cfg, os.path.join(work, "mods-stage"), device, bundle_id, log)
+    log(f"mods: {len(chosen)} copied to {cfg['ios']}; not copied: " + (", ".join(m["name"] for m in found if m not in chosen) or "none"))
+
+
+def mod_assemblies(work):
+    path = os.path.join(work, "mods.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return json.load(f)["assemblies"]
 
 
 def game_profile(game):
@@ -331,11 +430,13 @@ def game_profile(game):
 
 def write_shim_config(game, data):
     """StreamingAssets/recomp.json (Data/Raw on iOS): per-game switches the managed shims read,
-    e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad"."""
+    e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad",
+    and the extra on-screen keys of its "touch_keys" ([{"label", "keys": [Input System key names]}])."""
     profile = game_profile(game) or {}
     os.makedirs(os.path.join(data, "Raw"), exist_ok=True)
     with open(os.path.join(data, "Raw", "recomp.json"), "w") as f:
-        json.dump({"touchGamepad": bool(profile.get("touch_gamepad"))}, f)
+        json.dump({"touchGamepad": bool(profile.get("touch_gamepad")),
+                   "touchKeys": profile.get("touch_keys", [])}, f)
 
 
 def write_save_info(game, xcode_dir):
@@ -390,6 +491,22 @@ def build_shims(game, out):
         dotnet_build(os.path.join(SHIMS, spec["project"]), out, f"-p:GameManaged={game.managed}")
         built.append(os.path.join(out, spec["assembly"] + ".dll"))
     return built
+
+
+def register_mods(data, assemblies):
+    """List the compiled-in mod assemblies with the game's, so the player can resolve their
+    script types (e.g. a MonoBehaviour in a mod's asset bundle)."""
+    if not assemblies:
+        return
+    sa_path = os.path.join(data, "ScriptingAssemblies.json")
+    with open(sa_path) as f:
+        sa = json.load(f)
+    for name in sorted(assemblies):
+        if name + ".dll" not in sa["names"]:
+            sa["names"].append(name + ".dll")
+            sa["types"].append(16)  # user assembly
+    with open(sa_path, "w") as f:
+        json.dump(sa, f)
 
 
 def register_shims(game, data):
@@ -560,12 +677,14 @@ def inject(game, work):
     merge_boot_config(os.path.join(shell_data, "boot.config"), os.path.join(game.data, "boot.config"),
                       os.path.join(data, "boot.config"))
     register_shims(game, data)
+    mod_asms = mod_assemblies(work)
+    register_mods(data, mod_asms)
     write_shim_config(game, data)
     write_save_info(game, xcode)
     from recomp import il2cpp_patches, pyenv
     with open(os.path.join(game.data, "ScriptingAssemblies.json")) as f:
         listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]
-    il2cpp_patches.apply(xcode, ["mscorlib"] + [n for n in listed if n != "mscorlib"], log)
+    il2cpp_patches.apply(xcode, ["mscorlib"] + [n for n in listed if n != "mscorlib"], log, mod_asms)
     events.progress(None, "Converting textures to ASTC")
     run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "textures.py"), data,
          os.path.join(paths.HOME, "cache", "bundles", game.slug)])

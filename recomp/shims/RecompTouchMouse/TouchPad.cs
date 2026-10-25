@@ -28,7 +28,7 @@ namespace Recomp
         const float DeadZone = 0.1f;
         const float TapSeconds = 0.3f;
         const float TapSlop = 12f;       // points
-        const int SortingOrder = 29999;  // under the Esc button
+        const int SortingOrder = 29999;  // under the key buttons
 
         [Serializable]
         class Config { public bool touchGamepad; }
@@ -68,7 +68,7 @@ namespace Recomp
         static readonly List<PadButton> Buttons = new List<PadButton>();
         static readonly Dictionary<int, Owner> Owners = new Dictionary<int, Owner>();
 
-        static float Unit => Screen.height / 834f;  // iPad points to pixels, as EscButton
+        static float Unit => Screen.height / 834f;  // iPad points to pixels, as KeyButtons
 
         public static void Install()
         {

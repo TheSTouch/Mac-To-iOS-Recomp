@@ -11,13 +11,46 @@
       "ExperimentalSaves"
     ]
   },
+  "mods": {
+    "mac": [
+      "~/Documents/Timberborn/Mods",
+      "steam-workshop:1062090"
+    ],
+    "ios": "Documents/Timberborn/Mods",
+    "manifest": "manifest.json",
+    "version_dirs": "version-",
+    "exclude": [
+      ".*",
+      "src",
+      "obj",
+      "bin",
+      "*.zip",
+      "*.md",
+      "*.sln",
+      "*.csproj",
+      "workshop_data.json"
+    ]
+  },
+  "touch_keys": [
+    {
+      "label": "Dev",
+      "keys": [
+        "leftAlt",
+        "leftShift",
+        "z"
+      ]
+    }
+  ],
   "when_assembly": "Timberborn.HttpApiSystem.dll",
   "guard": {
     "Timberborn.HttpApiSystem.dll": [
       "Timberborn.HttpApiSystem.HttpLeversPageSection::Load",
       "Timberborn.HttpApiSystem.HttpAdapterPageSection::Load",
       "Timberborn.HttpApiSystem.IndexHtmlEndpoint::Load"
+    ],
+    "Timberborn.ModManagerScene.dll": [
+      "Timberborn.ModManagerScene.ModCodeStarter::LoadAssemblies"
     ]
   },
-  "why": "The local HTTP API builds its pages with Handlebars.Net, which compiles templates to delegates with 'in' parameters at runtime; IL2CPP's expression interpreter cannot create those ('byref delegate'). Guarding the page loaders lets a game load; only the optional HTTP API pages are lost."
+  "why": "The local HTTP API builds its pages with Handlebars.Net, which compiles templates to delegates with 'in' parameters at runtime; IL2CPP's expression interpreter cannot create those ('byref delegate'). Guarding the page loaders lets a game load; only the optional HTTP API pages are lost. ModCodeStarter.LoadAssemblies is guarded so a mod DLL that was not compiled into the port is logged and skipped instead of stopping the game at the mod manager."
 }

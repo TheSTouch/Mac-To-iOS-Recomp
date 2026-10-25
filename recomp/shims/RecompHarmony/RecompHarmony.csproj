@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Stand-in for Harmony's 0Harmony.dll in iOS ports: same public API for what mods call, no
+       runtime patching. Their patches are woven into the game at port time (asmtool harmony). -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>0Harmony</AssemblyName>
+    <RootNamespace>HarmonyLib</RootNamespace>
+    <AssemblyVersion>2.4.1.0</AssemblyVersion>
+    <FileVersion>2.4.1.0</FileVersion>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
