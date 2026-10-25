@@ -1,0 +1,10 @@
+{
+  "name": "Valheim",
+  "when_assembly": "assembly_valheim.dll",
+  "stub_overrides": {
+    "steamworks": [
+      "steamworks-offline.overrides.c"
+    ]
+  },
+  "why": "Valheim quits when Steam does not start (SteamManager, ZNet) and has no offline mode, so its Steamworks stub signs in as an offline user: cloud saves off, local worlds and characters only. PlayFab Party (crossplay) fails to initialise, so online play stays off."
+}

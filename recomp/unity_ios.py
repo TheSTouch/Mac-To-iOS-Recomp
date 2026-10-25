@@ -45,6 +45,20 @@ STUB_PROFILES = {
         "modules": ["steam_api", "steam_api64", "sdkencryptedappticket", "sdkencryptedappticket64"],
         "overrides": ["steamworks.overrides.c"],
     },
+    # Crossplay networking: fails to initialise, so games stay offline.
+    "playfab-party": {
+        "modules": ["PlayFabPartyMacOS", "PartyXboxLiveWin32"],
+        "overrides": ["playfab-party.overrides.c"],
+    },
+    # Apple's Unity plug-ins in their Mac build (Game Center and friends).
+    "apple-plugins": {
+        "modules": ["AppleCoreNativeMac", "GameKitWrapper"],
+        "overrides": ["apple-plugins.overrides.c"],
+    },
+    "valheim": {
+        "modules": ["DiskSpacePlugin", "libHasPreciseScrolling", "libMacScreenScale"],
+        "overrides": ["valheim.overrides.c"],
+    },
 }
 
 # Data files that come from the shell build rather than the game: the IL2CPP
@@ -237,11 +251,14 @@ def prepare(game, work, unity, ios):
     # Decide which native libraries to replace with stubs.
     pinvokes = scan_pinvokes(game.managed)
     to_stub, overrides = set(), []
-    for prof in STUB_PROFILES.values():
+    # A game profile can swap a stub profile's overrides ("stub_overrides"),
+    # e.g. Steamworks that signs in instead of reporting "no Steam".
+    swap = (game_profile(game) or {}).get("stub_overrides", {})
+    for key, prof in STUB_PROFILES.items():
         hit = [m for m in prof["modules"] if m in pinvokes and any(u in game_dlls for u in pinvokes[m])]
         if hit:
             to_stub.update(hit)
-            overrides += [os.path.join(STUBS, o) for o in prof["overrides"]]
+            overrides += [os.path.join(STUBS, o) for o in swap.get(key, prof["overrides"])]
     users = sorted({u for m in to_stub for u in pinvokes[m] if u in game_dlls})
 
     for n in game_dlls:
@@ -256,7 +273,7 @@ def prepare(game, work, unity, ios):
         run(cmd + [os.path.join(game.managed, u) for u in users])
         with open(os.path.join(native, "recomp_native_stubs.c.meta"), "w") as f:
             f.write(native_meta("recomp_native_stubs.c"))
-    applied = apply_profiles(game_dlls, plugins)
+    applied = apply_profiles(game, game_dlls, plugins)
     shims = build_shims(game, os.path.join(work, "shims"))
     for dll in shims:
         shutil.copy2(dll, plugins)
@@ -301,7 +318,18 @@ def prepare(game, work, unity, ios):
     log(f"shell project ready: {shell}")
 
 
-def apply_profiles(game_dlls, plugins):
+def game_profile(game):
+    """The recomp/profiles/*.json entry for this game, if any (matched by its when_assembly)."""
+    for name in sorted(os.listdir(PROFILES)):
+        if name.endswith(".json"):
+            with open(os.path.join(PROFILES, name)) as f:
+                profile = json.load(f)
+            if os.path.exists(os.path.join(game.managed, profile.get("when_assembly") or "\0")):
+                return profile
+    return None
+
+
+def apply_profiles(game, game_dlls, plugins):
     """Per-game compatibility rules (recomp/profiles/*.json) for code that cannot run on iOS."""
     applied = []
     for name in sorted(os.listdir(PROFILES)):
@@ -312,9 +340,14 @@ def apply_profiles(game_dlls, plugins):
         if profile.get("when_assembly") not in game_dlls:  # Unreal profiles have none
             continue
         for dll, methods in profile.get("guard", {}).items():
-            cmd = [ASMTOOL, "guard"]
+            cmd = [ASMTOOL, "guard", "--search", game.managed]
             for m in methods:
                 cmd += ["--method", m]
+            run(cmd + [os.path.join(plugins, dll)])
+        for dll, methods in profile.get("returns", {}).items():
+            cmd = [ASMTOOL, "returns", "--search", game.managed]
+            for m, value in methods.items():
+                cmd += ["--method", m, "--value", str(value).lower() if isinstance(value, bool) else str(value)]
             run(cmd + [os.path.join(plugins, dll)])
         log(f"profile {profile['name']}: {profile['why']}")
         applied.append(profile["name"])
@@ -506,7 +539,8 @@ def inject(game, work):
         listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]
     il2cpp_patches.apply(xcode, ["mscorlib"] + [n for n in listed if n != "mscorlib"], log)
     events.progress(None, "Converting textures to ASTC")
-    run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "textures.py"), data])
+    run([pyenv.python(), "-I", os.path.join(ROOT, "recomp", "textures.py"), data,
+         os.path.join(paths.HOME, "cache", "bundles", game.slug)])
     icns = game_icon(game)
     appiconset = os.path.join(xcode, "Unity-iPhone", "Images.xcassets", "AppIcon.appiconset")
     if icns and os.path.isdir(appiconset):

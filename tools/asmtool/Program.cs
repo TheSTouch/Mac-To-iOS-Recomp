@@ -12,10 +12,16 @@
 //       return 0; overrides hold hand-written bodies for functions where 0
 //       means the wrong thing (e.g. "init succeeded").
 //
-//   asmtool guard --method <Namespace.Type::Method> [--method ...] <assembly.dll>
+//   asmtool guard --method <Namespace.Type::Method> [--method ...] [--search <dir>] <assembly.dll>
 //       Rewrite void methods in place so an exception they throw is printed and
 //       swallowed: for optional systems that cannot work on iOS (they would
 //       otherwise abort the game's start-up).
+//
+//   asmtool returns --method <Namespace.Type::Method> --value <value> [--method ... --value ...]
+//                   [--search <dir>] <assembly.dll>
+//       Replace each method's body with "return <value>" (string, bool or int
+//       return types): for platform checks that know no iOS answer.
+//       --search adds a folder for resolving references (the game's Managed).
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
@@ -25,11 +31,12 @@ using Mono.Cecil.Rocks;
 return args.Length > 0 && args[0] == "scan" ? Scan(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "internalize" ? Internalize(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "guard" ? Guard(args.Skip(1).ToArray())
+     : args.Length > 0 && args[0] == "returns" ? Returns(args.Skip(1).ToArray())
      : Usage();
 
 static int Usage()
 {
-    Console.Error.WriteLine("usage: asmtool scan <dir> | asmtool internalize --out <dir> --stub <c> [--overrides <c>] --module <lib> <dll>...");
+    Console.Error.WriteLine("usage: asmtool scan <dir> | asmtool internalize --out <dir> --stub <c> [--overrides <c>] --module <lib> <dll>... | asmtool guard --method <T::M> <dll> | asmtool returns --method <T::M> --value <v> <dll>");
     return 2;
 }
 
@@ -141,16 +148,19 @@ static int Internalize(string[] args)
 static int Guard(string[] args)
 {
     var targets = new List<string>();
+    var search = new List<string>();
     string input = null;
     for (int i = 0; i < args.Length; i++)
     {
         if (args[i] == "--method") targets.Add(args[++i]);
+        else if (args[i] == "--search") search.Add(args[++i]);
         else input = args[i];
     }
     if (input == null || targets.Count == 0) return Usage();
 
     var resolver = new DefaultAssemblyResolver();
     resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(input)));
+    search.ForEach(resolver.AddSearchDirectory);
     var bytes = File.ReadAllBytes(input);  // read fully so the file can be rewritten in place
     using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes), new ReaderParameters { AssemblyResolver = resolver });
     var core = module.TypeSystem.CoreLibrary;
@@ -191,6 +201,57 @@ static int Guard(string[] args)
             });
             body.OptimizeMacros();
             Console.WriteLine($"guarded {method.FullName}");
+        }
+    }
+    if (failed > 0) return 1;
+    module.Write(input);
+    return 0;
+}
+
+static int Returns(string[] args)
+{
+    var targets = new List<(string Method, string Value)>();
+    var search = new List<string>();
+    string input = null;
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--method") targets.Add((args[++i], null));
+        else if (args[i] == "--value" && targets.Count > 0) targets[^1] = (targets[^1].Method, args[++i]);
+        else if (args[i] == "--search") search.Add(args[++i]);
+        else input = args[i];
+    }
+    if (input == null || targets.Count == 0 || targets.Any(t => t.Value == null)) return Usage();
+
+    var resolver = new DefaultAssemblyResolver();
+    resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(input)));
+    search.ForEach(resolver.AddSearchDirectory);
+    var bytes = File.ReadAllBytes(input);  // read fully so the file can be rewritten in place
+    using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes), new ReaderParameters { AssemblyResolver = resolver });
+
+    int failed = 0;
+    foreach (var (target, value) in targets)
+    {
+        var parts = target.Split("::");
+        var type = AllTypes(module).FirstOrDefault(t => t.FullName == parts[0]);
+        var methods = type?.Methods.Where(m => m.Name == parts[1] && m.HasBody).ToList() ?? new();
+        if (methods.Count == 0) { Console.Error.WriteLine($"returns: {target} not found"); failed++; continue; }
+        foreach (var method in methods)
+        {
+            Instruction load = method.ReturnType.MetadataType switch
+            {
+                MetadataType.String => Instruction.Create(OpCodes.Ldstr, value),
+                MetadataType.Boolean when bool.TryParse(value, out var b) => Instruction.Create(b ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0),
+                MetadataType.Int32 when int.TryParse(value, out var n) => Instruction.Create(OpCodes.Ldc_I4, n),
+                _ => null,
+            };
+            if (load == null) { Console.Error.WriteLine($"returns: {target} returns {method.ReturnType}, not a string, bool or int matching '{value}'"); failed++; continue; }
+            var body = method.Body;
+            body.Instructions.Clear();
+            body.ExceptionHandlers.Clear();
+            body.Variables.Clear();
+            body.Instructions.Add(load);
+            body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+            Console.WriteLine($"{method.FullName} now returns {value}");
         }
     }
     if (failed > 0) return 1;
