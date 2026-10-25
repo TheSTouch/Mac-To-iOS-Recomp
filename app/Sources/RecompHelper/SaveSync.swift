@@ -51,10 +51,16 @@ enum SaveSyncAgent {
     }
 
     /// At app launch: re-register an item registered by another build of the app.
-    /// The unregistration has to finish (launchd unloads the job) before registering.
+    /// SMAppService.unregister leaves launchd's loaded job (and its code requirement)
+    /// in place, so the job is booted out first.
     static func refreshIfOutdated() {
         guard !syncedGames().isEmpty, service.status == .enabled,
               UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version else { return }
+        let bootout = Process()
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "gui/\(getuid())/\(plistName.replacingOccurrences(of: ".plist", with: ""))"]
+        try? bootout.run()
+        bootout.waitUntilExit()
         service.unregister { _ in _ = update(wanted: true) }
     }
 
