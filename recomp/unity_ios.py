@@ -28,6 +28,8 @@ EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
 PROFILES = os.path.join(ROOT, "recomp", "profiles")
+# The Unreal route's libsteam_api stand-in; Unity ports get SteamAPI_* from recomp_native_stubs.c.
+NATIVE_SKIP = {"steam_api_stub.c"}
 
 # Managed shims added to the game, each enabled when the game ships the
 # assembly it builds on, and started through RuntimeInitializeOnLoads.json.
@@ -264,8 +266,11 @@ def prepare(game, work, unity, ios):
             f.write(plugin_meta(n))
 
     # Native start-up fixes shared by every port.
-    for n in os.listdir(NATIVE_SRC):
-        shutil.copy2(os.path.join(NATIVE_SRC, n), native)
+    for n in sorted(os.listdir(NATIVE_SRC)):
+        src = os.path.join(NATIVE_SRC, n)
+        if n in NATIVE_SKIP or not os.path.isfile(src) or not n.endswith((".c", ".m", ".mm")):
+            continue
+        shutil.copy2(src, native)
         with open(os.path.join(native, n + ".meta"), "w") as f:
             f.write(native_meta(n))
 
