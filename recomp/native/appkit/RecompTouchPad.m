@@ -26,6 +26,7 @@ static GCController *gPad;
 
 @interface RecompStick : NSObject
 @property CGPoint origin;
+@property CGFloat curve; // response exponent: higher = finer control near the centre
 @property (strong) CAShapeLayer *base, *knob;
 @property (copy) GCControllerDirectionPad * (^input)(GCExtendedGamepad *);
 @end
@@ -61,11 +62,15 @@ static UIColor *Ink(CGFloat a) { return [UIColor colorWithWhite:1 alpha:a]; }
     return b;
 }
 
-- (RecompStick *)stick:(GCControllerDirectionPad * (^)(GCExtendedGamepad *))input {
+static const CGFloat kStickTravel = 110; // points of drag for full deflection
+static const CGFloat kDeadZone = 0.1;
+
+- (RecompStick *)stick:(GCControllerDirectionPad * (^)(GCExtendedGamepad *))input curve:(CGFloat)curve {
     RecompStick *s = [RecompStick new];
     s.input = input;
+    s.curve = curve;
     s.base = [CAShapeLayer layer];
-    s.base.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-70, -70, 140, 140)].CGPath;
+    s.base.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-kStickTravel, -kStickTravel, 2 * kStickTravel, 2 * kStickTravel)].CGPath;
     s.base.fillColor = Ink(0.06).CGColor;
     s.base.strokeColor = Ink(0.3).CGColor;
     s.knob = [CAShapeLayer layer];
@@ -97,8 +102,8 @@ static UIColor *Ink(CGFloat a) { return [UIColor colorWithWhite:1 alpha:a]; }
             [self button:@"L3" at:CGPointMake(56, 60) radius:22 input:^(GCExtendedGamepad *g) { return g.leftThumbstickButton; }],
             [self button:@"R3" at:CGPointMake(-260, 50) radius:22 input:^(GCExtendedGamepad *g) { return g.rightThumbstickButton; }],
         ];
-        _left = [self stick:^(GCExtendedGamepad *g) { return g.leftThumbstick; }];
-        _right = [self stick:^(GCExtendedGamepad *g) { return g.rightThumbstick; }];
+        _left = [self stick:^(GCExtendedGamepad *g) { return g.leftThumbstick; } curve:1.3];
+        _right = [self stick:^(GCExtendedGamepad *g) { return g.rightThumbstick; } curve:1.8]; // camera
     }
     return self;
 }
@@ -136,9 +141,13 @@ static UIColor *Ink(CGFloat a) { return [UIColor colorWithWhite:1 alpha:a]; }
 
 - (void)moveStick:(RecompStick *)s to:(CGPoint)p {
     CGFloat dx = p.x - s.origin.x, dy = p.y - s.origin.y;
-    CGFloat len = hypot(dx, dy), max = 70;
-    if (len > max) { dx *= max / len; dy *= max / len; }
-    [s.input(gPad.extendedGamepad) setValueForXAxis:dx / max yAxis:-dy / max];
+    CGFloat len = hypot(dx, dy);
+    if (len > kStickTravel) { dx *= kStickTravel / len; dy *= kStickTravel / len; len = kStickTravel; }
+    // Dead zone, then a power curve on the magnitude: small drags give small,
+    // precise values; the edge of the circle is still full deflection.
+    CGFloat m = len / kStickTravel, out = m <= kDeadZone ? 0 : pow((m - kDeadZone) / (1 - kDeadZone), s.curve);
+    CGFloat k = len > 0 ? out / m : 0;
+    [s.input(gPad.extendedGamepad) setValueForXAxis:dx / kStickTravel * k yAxis:-dy / kStickTravel * k];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     s.knob.position = CGPointMake(s.origin.x + dx, s.origin.y + dy);
