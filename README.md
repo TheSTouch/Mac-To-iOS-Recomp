@@ -9,6 +9,7 @@ with your developer account; never share the resulting app, since it contains th
 |---|---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) | 1.1.2 (Steam) | Unity 6000.5.11f1, Mono | Unity / Mono | **Playable** |
 | [Stray](https://store.steampowered.com/app/1332010/Stray/) | 1.5 (Steam) | Unreal Engine 4.27, arm64 | Unreal | **Playable** (early testing) |
+| [Valheim](https://store.steampowered.com/app/892970/Valheim/) | 1.0.20 (Steam) | Unity 6000.0.75f1, Mono | Unity / Mono | **Playable** (local worlds) |
 
 Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 
@@ -16,7 +17,7 @@ Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 <tr>
 <td width="25%" align="center"><img src="docs/images/timberborn-ipad.jpg" alt="Timberborn running on an iPad"><br>Timberborn</td>
 <td width="25%" align="center"><img src="docs/images/stray-ipad.jpg" alt="Stray running on an iPad, with the on-screen gamepad"><br>Stray</td>
-<td width="25%"></td>
+<td width="25%" align="center"><img src="docs/images/valheim-ipad.jpg" alt="Valheim running on an iPad, with the on-screen gamepad"><br>Valheim</td>
 <td width="25%"></td>
 </tr>
 </table>
@@ -46,6 +47,25 @@ Known limits:
 - the texture streaming pool is capped to the iPad's memory ([profile](recomp/profiles/stray.json)),
   so distant textures can load later than on a Mac;
 - no Steam: achievements and cloud saves are off, saves stay on the iPad.
+
+### Valheim
+
+Works: menus, character creation (the iOS keyboard opens for the name), new and existing local
+worlds, gameplay with the on-screen gamepad, saving through Logout and loading again.
+
+Known limits:
+
+- local worlds only: online play, crossplay and Steam Cloud are off. Valheim refuses to run without
+  Steam, so the port's Steam stub signs in as an offline user ([profile](recomp/profiles/valheim.json));
+- a Bluetooth controller has not been tried yet;
+- the on-screen gamepad covers parts of the HUD (Menu over hotbar slot 1, RT over the minimap
+  corner, the Esc button over the food and health bars);
+- frame rate not measured yet; the game renders at the iPad's point resolution;
+- the first build converts about 4 GB of asset bundles for iOS (~10 minutes, ~13 GB of RAM at
+  peak); later builds reuse the result. The app is about 4.6 GB, and installing an update needs
+  as much free space again on the iPad;
+- characters and worlds kept in Steam Cloud on the Mac are not in the local save folders: move them
+  to local storage in Valheim's menus to carry them over.
 
 ## Recomp Helper (Mac app)
 
@@ -119,14 +139,16 @@ Stages (run all, or name some): `prepare player inject xcode install`.
 
 1. **prepare**: a shell Unity project in `build/<Game>/shell` gets every game-owned
    assembly as an iOS-only plugin (engine and class-library assemblies come from Unity's
-   iOS player instead). P/Invokes into libraries iOS lacks (Steamworks) are redirected to
-   `__Internal` and a generated C stub (`stubs/*.overrides.c` for functions where 0 is the
-   wrong answer). Managed shims from `recomp/shims` are added (touch → virtual mouse).
+   iOS player instead). P/Invokes into libraries iOS lacks (Steamworks, PlayFab Party, Apple's
+   Mac plug-ins, a game's own Mac helpers: `STUB_PROFILES` in `recomp/unity_ios.py`) are
+   redirected to `__Internal` and a generated C stub (`stubs/*.overrides.c` for functions where 0
+   is the wrong answer). Managed shims from `recomp/shims` are added (touch controls).
 2. **player**: the matching editor builds the shell for iOS in batchmode, which runs IL2CPP
    over all of it and writes an Xcode project.
 3. **inject**: the shell's data is replaced with the game's (`StreamingAssets` → `Data/Raw`);
    IL2CPP metadata and the iOS default resources stay; serialized files are retargeted to iOS;
-   shims are registered in `RuntimeInitializeOnLoads.json`.
+   BC textures become ASTC (iOS cannot sample BC); asset bundles get both, repacked, and are
+   cached in `cache/bundles/<Game>`; shims are registered in `RuntimeInitializeOnLoads.json`.
 4. **xcode** / **install**: sign with automatic provisioning and install through `devicectl`.
 
 The game must be built with exactly the Unity version it shipped with; `toolchain` reads it from
@@ -154,7 +176,14 @@ Two kinds of fixes apply on top of the generic pipeline:
   has been played on an iPad (the scan lists it as *Tested*). Each `guard` method (which must return
   `void`) is rewritten so an exception it throws is logged and swallowed: for optional systems
   that cannot work on iOS and would otherwise abort start-up. A guard that no longer matches
-  a method fails the build.
+  a method fails the build. Other keys:
+
+  | Key | Effect |
+  |---|---|
+  | `returns` | `{"<Assembly>.dll": {"Type::Method": value}}`: the method only returns that string, bool or int (e.g. a platform check with no iOS answer) |
+  | `stub_overrides` | swaps a stub profile's override files, e.g. Steamworks that signs in offline instead of reporting "no Steam" |
+  | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
+  | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
 
 Debugging on the device: launch with
 `xcrun devicectl device process launch --console --terminate-existing --device <UDID> <bundle id>`
@@ -223,10 +252,13 @@ Debugging: shipping builds log almost nothing, but Mac game binaries usually kee
   -p <pid>` after a `devicectl ... launch --start-stopped`); give it ~20 s to load symbols;
 - `tools/xref.py` finds the code that uses a string or address.
 
-## On-screen gamepad (Unreal route)
+## On-screen gamepad
 
-Touches drive a software game controller that the game reads like a real one, so its prompts show
-gamepad buttons. It hides while a physical controller is connected.
+Action games get an on-screen gamepad: every Unreal port, and Unity ports whose profile sets
+`touch_gamepad` (Valheim; not Timberborn, which is played with the mouse). Touches drive a game
+controller that the game reads like a real one, so its prompts show gamepad buttons. It hides while
+a physical controller is connected. In Unity ports it shows only while the game has locked the
+cursor (in play); in menus touches act as the mouse, and a quick tap off the pad's buttons is a click.
 
 | Where | Control |
 |---|---|
@@ -236,6 +268,8 @@ gamepad buttons. It hides while a physical controller is connected.
 | top corners | LB, LT (left), RB, RT (right) |
 | top left | Menu, View |
 | bottom left / near the face buttons | L3 / R3 |
+
+The Esc button (Unity ports) stays on screen with or without a controller.
 
 ## Touch controls (Recomp.TouchMouse)
 
@@ -247,10 +281,12 @@ gamepad buttons. It hides while a physical controller is connected.
 | 3 finger drag | right drag |
 | 2 finger tap | right click |
 | Esc button (bottom left) | Escape key |
+| tap a text field | the iOS keyboard opens (TextMeshPro fields) |
 
 The virtual devices are named `Mouse` and `Keyboard`, like desktop ones: games store their
 bindings as control paths such as `/Mouse/leftButton`, which match a device by name. The Esc
-button presses Escape on whichever keyboard those bindings resolve to.
+button presses Escape on whichever keyboard those bindings resolve to. It is drawn with UI Toolkit
+when the game uses it, otherwise as a uGUI overlay.
 A real keyboard or trackpad, when connected, works alongside.
 
 ## Building the app
