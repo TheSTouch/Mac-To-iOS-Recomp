@@ -9,12 +9,18 @@
     ]
   },
   "unreal_project": "Hk_project",
-  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory; turn off capsule shadows, whose tiled pass blacks out the fog in every 16-pixel tile the cat touches on iOS (hard-edged black blocks around the cat on the title screen)",
+  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory; turn off capsule shadows, whose tiled pass blacks out the fog in every 16-pixel tile the cat touches on iOS (hard-edged black blocks around the cat on the title screen); render at 75% and let MetalFX's temporal upscaler fill in the rest: about 58 frames/s on the title screen of an M1 iPad Pro instead of 45, with no visible difference (50% reaches the 60 frames/s cap but only gains 2 more)",
   "engine_ini": {
     "SystemSettings": {
       "r.Streaming.PoolSize": "auto",
       "r.Streaming.LimitPoolSizeToVRAM": "1",
       "r.CapsuleShadows": "0"
+    }
+  },
+  "game_user_settings_ini": {
+    "/Script/Hk_project.HKGameUserSettings": {
+      "ScalingSolution": "MetalFX",
+      "ScreenPercentage": "75"
     }
   }
 }

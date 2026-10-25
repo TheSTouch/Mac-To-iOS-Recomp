@@ -206,8 +206,10 @@ Game profiles for this route match on the Unreal project folder:
 }
 ```
 
-`engine_ini` keys are written into the game's user config at each launch; `auto` for
-`r.Streaming.PoolSize` sizes the texture pool from the device's RAM. `intercept` lists extra imports
+`engine_ini` keys are written into the game's user config (`Engine.ini`) at each launch, and
+`game_user_settings_ini` keys into `GameUserSettings.ini` (the game's own options, such as its
+upscaler and screen percentage); `auto` for `r.Streaming.PoolSize` sizes the texture pool from the
+device's RAM. `intercept` lists extra imports
 to bind to the shim, and `patches` replaces byte strings in the executable (hex, same length).
 
 Debugging: shipping builds log almost nothing, but Mac game binaries usually keep their symbol table.

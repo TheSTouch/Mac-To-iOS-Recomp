@@ -1,5 +1,6 @@
-// Per-game engine settings (the "engine_ini" of a recomp profile), merged into
-// the game's user config files before the engine starts. Unreal reads
+// Per-game engine settings (the "engine_ini" and "game_user_settings_ini" of a
+// recomp profile), merged into the game's user config files (Engine.ini,
+// GameUserSettings.ini) before the engine starts. Unreal reads
 // <user config dir>/<Name>.ini over the settings in its paks, so a [Section]
 // key written here wins; it is rewritten at every launch in case the game
 // saved over it.

@@ -405,7 +405,8 @@ def info_plist(game):
         # Read by the shim (RecompConfig.m): settings merged into the engine's user
         # config files at each launch, from the game's profile.
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
-        "RecompIniOverrides": {"Engine": game.profile.get("engine_ini", {})},
+        "RecompIniOverrides": {"Engine": game.profile.get("engine_ini", {}),
+                               "GameUserSettings": game.profile.get("game_user_settings_ini", {})},
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }
