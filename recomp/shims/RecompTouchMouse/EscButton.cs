@@ -31,9 +31,10 @@ namespace Recomp
 
         public static void Install()
         {
-            // Games read Keyboard.current unconditionally; give them one if the device has none.
+            // Games read Keyboard.current unconditionally; give them one if the device has none,
+            // named like a desktop keyboard so "/Keyboard/..." binding paths find it.
             if (Keyboard.current == null)
-                InputSystem.AddDevice<Keyboard>("RecompKeyboard");
+                InputSystem.AddDevice<Keyboard>("Keyboard");
         }
 
         public static void Press()

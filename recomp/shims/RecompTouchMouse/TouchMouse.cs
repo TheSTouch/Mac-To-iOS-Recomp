@@ -5,7 +5,7 @@
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
 //   3 fingers: drag = right drag
-//   Esc button (top right): Escape key, see EscButton
+//   Esc button (bottom left): Escape key, see EscButton
 //
 // A real mouse or keyboard, when connected, keeps working alongside.
 using System.Collections.Generic;
@@ -38,13 +38,16 @@ namespace Recomp
         static int _maxFingers, _lastCount;
         static ushort _buttons;
         static bool _releaseNextFrame, _tapPending;
-        static ushort _tapButtons;
+        static ushort _tapButtons, _loggedButtons;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         public static void Install()
         {
             if (_mouse != null) return;
-            _mouse = InputSystem.AddDevice<Mouse>("RecompTouchMouse");
+            // Named "Mouse" like a desktop mouse: games store bindings as control paths,
+            // and "/Mouse/leftButton" matches a device by name. Reuse one if it exists.
+            _mouse = InputSystem.FindControl("/Mouse")?.device as Mouse ?? InputSystem.AddDevice<Mouse>("Mouse");
+            Debug.Log("[recomp] driving mouse " + _mouse.name + "; devices: " + string.Join(", ", InputSystem.devices));
             EscButton.Install();
             InputSystem.onEvent += OnEvent;
             InputSystem.onBeforeUpdate += OnBeforeUpdate;
@@ -166,6 +169,13 @@ namespace Recomp
             _lastSpread = n == 2 ? spread : 0f;
             _lastCount = n;
 
+#if RECOMP_UGUI
+            if (_buttons != _loggedButtons)
+            {
+                PointerDiagnostics.Log(_buttons > _loggedButtons ? "down" : "up", pos, _buttons);
+                _loggedButtons = _buttons;
+            }
+#endif
             var state = new MouseState { position = pos, delta = delta, scroll = new Vector2(0f, scroll), buttons = _buttons };
             InputSystem.QueueStateEvent(_mouse, state);
         }
