@@ -6,6 +6,8 @@
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
 //   3 fingers: drag = right drag
 //   Esc button (bottom left): Escape key, see EscButton
+//   Text fields open the on-screen keyboard, see SoftKeyboard
+//   In play, with no controller: an on-screen gamepad instead (opt-in), see TouchPad
 //
 // A real mouse or keyboard, when connected, keeps working alongside.
 using System.Collections.Generic;
@@ -49,6 +51,7 @@ namespace Recomp
             _mouse = InputSystem.FindControl("/Mouse")?.device as Mouse ?? InputSystem.AddDevice<Mouse>("Mouse");
             Debug.Log("[recomp] driving mouse " + _mouse.name + "; devices: " + string.Join(", ", InputSystem.devices));
             EscButton.Install();
+            TouchPad.Install();
             InputSystem.onEvent += OnEvent;
             InputSystem.onBeforeUpdate += OnBeforeUpdate;
             Debug.Log("[recomp] touch mouse installed");
@@ -83,6 +86,21 @@ namespace Recomp
                 EscTouches.Add(id);
                 return;
             }
+            // Touches that begin while the gamepad is shown stay with it until they end.
+            if (TouchPad.Owns(id) || (touch->phase == UnityEngine.InputSystem.TouchPhase.Began && TouchPad.Visible))
+            {
+                var now = Time.realtimeSinceStartup;
+                switch (touch->phase)
+                {
+                    case UnityEngine.InputSystem.TouchPhase.Began: TouchPad.Begin(id, touch->position, now); break;
+                    case UnityEngine.InputSystem.TouchPhase.Moved:
+                    case UnityEngine.InputSystem.TouchPhase.Stationary: TouchPad.Move(id, touch->position); break;
+                    default:
+                        if (TouchPad.End(id, now)) ClickAt(touch->position);
+                        break;
+                }
+                return;
+            }
             switch (touch->phase)
             {
                 case UnityEngine.InputSystem.TouchPhase.Began:
@@ -101,6 +119,8 @@ namespace Recomp
             if (InputState.currentUpdateType != InputUpdateType.Dynamic) return;
             var now = Time.realtimeSinceStartup;
             EscButton.Update(now);
+            SoftKeyboard.Update(now);
+            TouchPad.Update();
             var n = Touches.Count;
             var center = Vector2.zero;
             foreach (var p in Touches.Values) center += p;
@@ -188,6 +208,13 @@ namespace Recomp
             _travel = 0f;
             _maxFingers = Touches.Count;
             _lastSpread = 0f;
+        }
+
+        // A left click at a spot, for taps the gamepad passes on.
+        static void ClickAt(Vector2 pos)
+        {
+            _last = _lastPos = pos;
+            Tap(1 << (int)MouseButton.Left, "left click (from the touch gamepad)");
         }
 
         // Press now (or next frame if a release is still due), release one frame later.

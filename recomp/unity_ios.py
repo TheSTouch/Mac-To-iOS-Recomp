@@ -329,6 +329,15 @@ def game_profile(game):
     return None
 
 
+def write_shim_config(game, data):
+    """StreamingAssets/recomp.json (Data/Raw on iOS): per-game switches the managed shims read,
+    e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad"."""
+    profile = game_profile(game) or {}
+    os.makedirs(os.path.join(data, "Raw"), exist_ok=True)
+    with open(os.path.join(data, "Raw", "recomp.json"), "w") as f:
+        json.dump({"touchGamepad": bool(profile.get("touch_gamepad"))}, f)
+
+
 def apply_profiles(game, game_dlls, plugins):
     """Per-game compatibility rules (recomp/profiles/*.json) for code that cannot run on iOS."""
     applied = []
@@ -534,6 +543,7 @@ def inject(game, work):
     merge_boot_config(os.path.join(shell_data, "boot.config"), os.path.join(game.data, "boot.config"),
                       os.path.join(data, "boot.config"))
     register_shims(game, data)
+    write_shim_config(game, data)
     from recomp import il2cpp_patches, pyenv
     with open(os.path.join(game.data, "ScriptingAssemblies.json")) as f:
         listed = [n[:-4] if n.endswith(".dll") else n for n in json.load(f)["names"]]

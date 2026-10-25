@@ -7,6 +7,9 @@
 // styled with the game's own theme (needed for text to render). UIDocument is an
 // engine component the game already uses, so it can be added at runtime; a
 // MonoBehaviour of ours could not (the game's data has no script entry for it).
+// Games built on uGUI alone (Valheim) have no theme to borrow: they get the same
+// button as an overlay Canvas with an Image and a Text, replaced by the UI Toolkit
+// one if a theme turns up later.
 // The panel only draws: TouchMouse hit-tests touches against the button and
 // calls Press, so the key does not depend on the game routing UI events to a
 // panel it does not know, and a tap on the button never becomes a mouse click.
@@ -14,6 +17,8 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.UIElements;
+using Image = UnityEngine.UI.Image;
+using Text = UnityEngine.UI.Text;
 
 namespace Recomp
 {
@@ -26,6 +31,8 @@ namespace Recomp
         static Keyboard _keyboard;
         static Button _button;
         static UIDocument _overlay;
+        static GameObject _canvas;          // uGUI stand-in while there is no UI Toolkit theme
+        static RectTransform _canvasButton;
         static float _nextCheck;
         static int _pressFrames;   // 2: press this update, 1: release this update
 
@@ -48,6 +55,13 @@ namespace Recomp
         /// Whether a touch position (Input System screen pixels, origin bottom-left) is on the button.
         public static bool Contains(Vector2 screen)
         {
+            const float slop = 8f;  // a little extra reach for fingers
+            if (_canvasButton != null)
+            {
+                var c = new Vector3[4];
+                _canvasButton.GetWorldCorners(c);  // overlay canvas: world space is screen pixels
+                return screen.x >= c[0].x - slop && screen.x <= c[2].x + slop && screen.y >= c[0].y - slop && screen.y <= c[2].y + slop;
+            }
             if (_button == null || _button.panel == null) return false;
             var root = _overlay.rootVisualElement.layout;
             if (root.width <= 0f || root.height <= 0f) return false;
@@ -55,7 +69,6 @@ namespace Recomp
             float sx = Screen.width / root.width, sy = Screen.height / root.height;
             var x = screen.x / sx;
             var y = (Screen.height - screen.y) / sy;
-            const float slop = 8f;  // a little extra reach for fingers
             return x >= r.xMin - slop && x <= r.xMax + slop && y >= r.yMin - slop && y <= r.yMax + slop;
         }
 
@@ -94,7 +107,18 @@ namespace Recomp
                     break;
                 }
             }
-            if (theme == null) return;  // no UI Toolkit UI yet (or ever): nothing to match
+            if (theme == null)
+            {
+                // No UI Toolkit UI yet (or ever): draw with uGUI once the game shows a canvas.
+                if (_canvas == null && Object.FindAnyObjectByType<Canvas>() != null) CreateCanvas();
+                return;
+            }
+            if (_canvas != null)
+            {
+                Object.Destroy(_canvas);
+                _canvas = null;
+                _canvasButton = null;
+            }
 
             var settings = Object.Instantiate(theme);
             settings.name = "RecompOverlay";
@@ -108,6 +132,40 @@ namespace Recomp
             if (_button == null) _button = Create();
             _overlay.rootVisualElement.Add(_button);
             Debug.Log("[recomp] Esc button added (theme from " + theme.name + ")");
+        }
+
+        static void CreateCanvas()
+        {
+            _canvas = new GameObject("RecompOverlayCanvas");
+            Object.DontDestroyOnLoad(_canvas);
+            var canvas = _canvas.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = SortingOrder;
+            // Sized like the UI Toolkit button on an iPad (72 x 44 points, 16 from the corner).
+            var unit = Screen.height / 834f;
+            var bg = new GameObject("recomp-esc", typeof(RectTransform));
+            bg.transform.SetParent(_canvas.transform, false);
+            _canvasButton = (RectTransform)bg.transform;
+            _canvasButton.anchorMin = _canvasButton.anchorMax = _canvasButton.pivot = Vector2.zero;
+            _canvasButton.anchoredPosition = new Vector2(16, 16) * unit;
+            _canvasButton.sizeDelta = new Vector2(72, 44) * unit;
+            var image = bg.AddComponent<Image>();
+            image.color = new Color(0f, 0f, 0f, 0.35f);
+            image.raycastTarget = false;
+            var label = new GameObject("label", typeof(RectTransform));
+            label.transform.SetParent(bg.transform, false);
+            var lr = (RectTransform)label.transform;
+            lr.anchorMin = Vector2.zero;
+            lr.anchorMax = Vector2.one;
+            lr.offsetMin = lr.offsetMax = Vector2.zero;
+            var text = label.AddComponent<Text>();
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.text = "Esc";
+            text.fontSize = Mathf.RoundToInt(18 * unit);
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = new Color(1f, 1f, 1f, 0.75f);
+            text.raycastTarget = false;
+            Debug.Log("[recomp] Esc button added (uGUI overlay)");
         }
 
         static Button Create()
