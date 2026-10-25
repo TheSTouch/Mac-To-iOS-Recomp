@@ -7,7 +7,9 @@
 //  - Mac-only device and layer properties get the values an Apple Silicon Mac reports;
 //  - metallibs from older tools (file format 2.3, e.g. Bink's) are refused while
 //    their header says macOS; with that flag cleared the same code loads and runs;
-//  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged.
+//  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged;
+//  - command buffers wait while the app is inactive, since iOS refuses GPU work
+//    from the background and the engine would stop with a fatal error.
 #import "RecompAppKit.h"
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
@@ -148,6 +150,46 @@ static id FixNewSpatialScaler(id self, SEL s, id dev) {
     return scaler;
 }
 
+// --- background ------------------------------------------------------------------------
+// iOS refuses GPU work from an app in the background, and the engine treats a refused
+// command buffer as a fatal error: a Mac build never pauses its renderer. While the app
+// is inactive, commits from the game's threads wait until it is active again (the main
+// thread, which the engine never renders on, is not held). The lock also makes the last
+// commit before the hold known, so that work can finish while the GPU is still allowed.
+
+static IMP oCommit, oCommitUnretained;
+static NSCondition *gGate;
+static BOOL gHold;
+static id gLastCommit;
+
+static void Commit(IMP orig, id self, SEL s) {
+    [gGate lock];
+    while (gHold && !NSThread.isMainThread) [gGate wait];
+    gLastCommit = self;
+    ((void (*)(id, SEL))orig)(self, s);
+    [gGate unlock];
+}
+static void FixCommit(id self, SEL s) { Commit(oCommit, self, s); }
+static void FixCommitUnretained(id self, SEL s) { Commit(oCommitUnretained, self, s); }
+
+static void HoldGPUWork(NSNotification *n) {
+    [gGate lock];
+    gHold = YES;
+    id<MTLCommandBuffer> last = gLastCommit;
+    gLastCommit = nil;
+    [gGate unlock];
+    for (int i = 0; i < 100 && last.status < MTLCommandBufferStatusCompleted; i++) usleep(10000);
+    RLOG(@"Metal: app inactive, GPU work held");
+}
+static void ReleaseGPUWork(NSNotification *n) {
+    [gGate lock];
+    BOOL was = gHold;
+    gHold = NO;
+    [gGate broadcast];
+    [gGate unlock];
+    if (was) RLOG(@"Metal: app active, GPU work resumed");
+}
+
 static void NoOp1(id self, SEL s, id a) {}
 static void NoOpRange(id self, SEL s, NSRange r) {}
 static void NoOpSync3(id self, SEL s, id t, NSUInteger slice, NSUInteger level) {}
@@ -192,6 +234,16 @@ __attribute__((constructor)) static void RecompMetalInit(void) {
         Class mfxt = NSClassFromString(@"MTLFXTemporalScalerDescriptor"), mfxs = NSClassFromString(@"MTLFXSpatialScalerDescriptor");
         if (mfxt) Swizzle(mfxt, @selector(newTemporalScalerWithDevice:), (IMP)FixNewTemporalScaler, &oNewTemporalScaler);
         if (mfxs) Swizzle(mfxs, @selector(newSpatialScalerWithDevice:), (IMP)FixNewSpatialScaler, &oNewSpatialScaler);
+
+        gGate = [NSCondition new];
+        id<MTLCommandQueue> q = [dev newCommandQueue];
+        Swizzle(object_getClass([q commandBuffer]), @selector(commit), (IMP)FixCommit, &oCommit);
+        Class uc = object_getClass([q commandBufferWithUnretainedReferences]);
+        if (class_getMethodImplementation(uc, @selector(commit)) != (IMP)FixCommit)
+            Swizzle(uc, @selector(commit), (IMP)FixCommitUnretained, &oCommitUnretained);
+        NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
+        [nc addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n) { HoldGPUWork(n); }];
+        [nc addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n) { ReleaseGPUWork(n); }];
 
         // Buffers and blit encoders come in several concrete classes. Where iOS
         // classes define the managed-memory calls, they only assert; replace those,
