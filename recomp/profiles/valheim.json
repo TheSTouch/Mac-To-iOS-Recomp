@@ -6,5 +6,16 @@
       "steamworks-offline.overrides.c"
     ]
   },
-  "why": "Valheim quits when Steam does not start (SteamManager, ZNet) and has no offline mode, so its Steamworks stub signs in as an offline user: cloud saves off, local worlds and characters only. PlayFab Party (crossplay) fails to initialise, so online play stays off."
+  "returns": {
+    "assembly_valheim.dll": {
+      "GraphicsSettingsManager::GetCurrentPlatform": "MacOS"
+    }
+  },
+  "guard": {
+    "com.rlabrecque.steamworks.net.dll": [
+      "Steamworks.ISteamMatchmakingServerListResponse::.ctor",
+      "Steamworks.ISteamMatchmakingPingResponse::.ctor"
+    ]
+  },
+  "why": "Valheim quits when Steam does not start (SteamManager, ZNet) and has no offline mode, so its Steamworks stub signs in as an offline user: cloud saves off, local worlds and characters only. PlayFab Party (crossplay) fails to initialise, so online play stays off. Graphics settings come in per-platform configurations with none for iOS, so the game takes the Mac's. Steamworks.NET's server-list and ping responders hand instance-method delegates to native code, which IL2CPP refuses; guarding their constructors lets ZSteamMatchmaking start (it is needed to start any world, local ones too)."
 }
