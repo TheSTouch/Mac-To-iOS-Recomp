@@ -1,24 +1,22 @@
 import AppKit
 import CoreServices
 import Foundation
-import ServiceManagement
 
 /// The background item that keeps synced games' saves in step with iCloud Drive
 /// (`recomp.py saves`, see recomp/saves.py).
 ///
-/// It is this app's own executable started by launchd with --sync-saves, so macOS
-/// treats its file access as Recomp Helper's: the player allows Documents and
-/// iCloud Drive once, when turning sync on from the app.
+/// A LaunchAgent in ~/Library/LaunchAgents starts this app's own executable with
+/// --sync-saves, so macOS treats its file access as Recomp Helper's: the player
+/// allows Documents and iCloud Drive once, from the app. It is a plain agent, not
+/// an SMAppService one: launchd ties those to the code signature they were
+/// registered with and refuses every ad-hoc rebuild of the app (exit 78).
 enum SaveSyncAgent {
-    static let plistName = "io.github.thestouch.recomphelper.saves.plist"
-    /// The build that registered the item. launchd keeps the plist and the code
-    /// requirement it was registered with, and refuses to start a rebuilt binary
-    /// (exit 78, "needs LWCR update"), so every new build registers it again.
-    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
-    static var service: SMAppService { .agent(plistName: plistName) }
+    static let label = "io.github.thestouch.recomphelper.savesync"
+    static let plist = "\(NSHomeDirectory())/Library/LaunchAgents/\(label).plist"
     static let gamesFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Recomp Helper/save-sync/games.json")
     static let icloudFolder = "\(NSHomeDirectory())/Library/Mobile Documents/com~apple~CloudDocs/Recomp Saves"
+    private static var job: String { "gui/\(getuid())/\(label)" }
 
     /// Synced games by name -> app path (written by `recomp.py saves --enable`).
     static func syncedGames() -> [String: String] {
@@ -26,66 +24,44 @@ enum SaveSyncAgent {
         return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }
 
-    /// Registers the item while at least one game is synced, unregisters it otherwise.
-    /// Returns a note for the player when something is left for them to do.
+    /// Installs and (re)starts the agent while at least one game is synced, removes it otherwise.
+    /// Returns a note for the player when something did not work.
+    @discardableResult
     static func update(wanted: Bool) -> String? {
-        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/\(plistName)")
-        guard FileManager.default.fileExists(atPath: bundled.path) else {
-            return wanted ? "Saves sync now. Automatic syncing needs the packaged app (scripts/build-app.sh)." : nil
+        launchctl(["bootout", job])
+        guard wanted else {
+            try? FileManager.default.removeItem(atPath: plist)
+            return nil
         }
+        guard let exe = Bundle.main.executablePath, Bundle.main.bundlePath.hasSuffix(".app") else {
+            return "Saves sync now. Automatic syncing needs the packaged app (scripts/build-app.sh)."
+        }
+        let agent: [String: Any] = [
+            "Label": label,
+            "ProgramArguments": [exe, "--sync-saves"],
+            "RunAtLoad": true,
+            "KeepAlive": true,
+            "ProcessType": "Background",
+            "LowPriorityIO": true,
+        ]
         do {
-            if wanted, service.status != .enabled {
-                try service.register()
-            } else if !wanted, service.status == .enabled {
-                try service.unregister()
-            }
+            try FileManager.default.createDirectory(atPath: (plist as NSString).deletingLastPathComponent,
+                                                    withIntermediateDirectories: true)
+            try PropertyListSerialization.data(fromPropertyList: agent, format: .xml, options: 0)
+                .write(to: URL(fileURLWithPath: plist))
         } catch {
-            return "The background item could not be \(wanted ? "added" : "removed"): \(error.localizedDescription)"
+            return "The background item could not be written: \(error.localizedDescription)"
         }
-        UserDefaults.standard.set(wanted ? version : nil, forKey: "saveSyncAgentVersion")
-        if wanted, service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
-            return "Allow Recomp Helper in System Settings > General > Login Items so saves keep syncing."
-        }
-        return nil
+        let (status, output) = launchctl(["bootstrap", "gui/\(getuid())", plist])
+        return status == 0 ? nil : "The background item could not start: \(output)"
     }
 
-    /// At app launch: re-register an item registered by another build of the app.
-    /// launchd keeps the loaded job with the code requirement of the build that
-    /// registered it (ad-hoc builds change it every time; Developer ID builds do
-    /// not), and SMAppService.unregister/register alone does not reload it. So the
-    /// job is booted out, the registration is redone once it is gone, and the whole
-    /// thing is tried once more if the job still does not run.
-    static func refreshIfOutdated() {
-        // The status is not "enabled" here after a rebuild, so it is not checked.
-        guard !syncedGames().isEmpty, UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version
-        else { return }
-        NSLog("[recomp] save sync item: re-registering for build \(version) (status \(service.status.rawValue))")
-        DispatchQueue.global(qos: .utility).async {
-            for attempt in 1...2 {
-                let out = launchctl(["bootout", job]).status
-                var waited = 0
-                while waited < 20, launchctl(["print", job]).status == 0 {
-                    Thread.sleep(forTimeInterval: 0.25)
-                    waited += 1
-                }
-                let done = DispatchSemaphore(value: 0)
-                service.unregister { _ in done.signal() }
-                done.wait()
-                let before = service.status
-                let note = update(wanted: true)
-                Thread.sleep(forTimeInterval: 3)
-                NSLog("[recomp] save sync item, attempt \(attempt): bootout \(out), gone after \(waited) waits, "
-                      + "status before register \(before.rawValue), after \(service.status.rawValue), "
-                      + "\(note ?? "registered"), running \(running())")
-                if running() { return }
-            }
-        }
+    /// At app launch: restart the agent from this copy of the app (it may have been
+    /// rebuilt or moved since the agent was installed).
+    static func refresh() {
+        guard !syncedGames().isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { update(wanted: true) }
     }
-
-    private static var job: String { "gui/\(getuid())/\(plistName.replacingOccurrences(of: ".plist", with: ""))" }
-
-    private static func running() -> Bool { launchctl(["print", job]).output.contains("state = running") }
 
     @discardableResult
     private static func launchctl(_ args: [String]) -> (status: Int32, output: String) {
@@ -93,11 +69,11 @@ enum SaveSyncAgent {
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = args
         p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
+        p.standardError = out
         guard (try? p.run()) != nil else { return (-1, "") }
         let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         p.waitUntilExit()
-        return (p.terminationStatus, text)
+        return (p.terminationStatus, text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @MainActor static func runHeadless() -> Never {

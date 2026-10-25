@@ -6,7 +6,7 @@ enum Main {
     /// launchd starts the app with --sync-saves for the save sync's background item (SaveSync.swift).
     @MainActor static func main() {
         if CommandLine.arguments.contains("--sync-saves") { SaveSyncAgent.runHeadless() }
-        SaveSyncAgent.refreshIfOutdated()
+        SaveSyncAgent.refresh()
         RecompHelperApp.main()
     }
 }

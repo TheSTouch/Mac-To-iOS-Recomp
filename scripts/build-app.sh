@@ -32,9 +32,6 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/engine"
 cp "$BIN" "$APP/Contents/MacOS/RecompHelper"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" app/Info.plist > "$APP/Contents/Info.plist"
 [ -f app/AppIcon.icns ] && cp app/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# The save sync's background item (app/Sources/RecompHelper/SaveSync.swift).
-mkdir -p "$APP/Contents/Library/LaunchAgents"
-cp app/SaveSyncAgent.plist "$APP/Contents/Library/LaunchAgents/io.github.thestouch.recomphelper.saves.plist"
 git archive HEAD recomp.py recomp tools stubs LICENSE | tar -x -C "$APP/Contents/Resources/engine"
 
 if [ -z "${SIGN_ID:-}" ]; then
