@@ -13,6 +13,8 @@ import subprocess
 
 import inspect_app
 
+from recomp import compat
+
 HOME = os.path.expanduser("~")
 STEAM_ROOTS = [os.path.join(HOME, "Library", "Application Support", "Steam")]
 FIXED_ROOTS = [
@@ -76,24 +78,31 @@ def looks_like_game(app):
     return any(n.endswith((".pck", ".pak", ".love")) for n in os.listdir(res)) if os.path.isdir(res) else False
 
 
+def route_of(report):
+    """The port route that handles this game, or None."""
+    if report["engine"] == "Unity" and report.get("engine_backend") == "Mono":
+        return "unity"
+    if report["engine"] == "Unreal" and "arm64" in report["archs"]:
+        return "unreal"
+    return None
+
+
 def status_of(report):
+    """(status, detail, checks). Games a route handles are classified by compat.py; checks says why."""
     engine = report["engine"]
     if not report["archs"]:
-        return "missing", "No game code in this bundle (a launcher shortcut, or not fully installed)."
-    if engine == "Unity" and report.get("engine_backend") == "Mono":
-        return "supported", "Unity (Mono): recompiled to native iPad code with IL2CPP."
+        return "missing", "No game code in this bundle (a launcher shortcut, or not fully installed).", []
+    if route_of(report):
+        return compat.classify(report)
     if engine == "Unity":
-        return "planned", "Unity (IL2CPP): needs the planned binary retarget route."
+        return "planned", "Unity (IL2CPP): needs the planned binary retarget route.", []
     if "x86_64" in report["archs"] and "arm64" not in report["archs"]:
-        return "unsupported", "Intel-only: iPadOS forbids the JIT a translator would need."
+        return "unsupported", "Intel-only: iPadOS forbids the JIT a translator would need.", []
     if engine in ("Godot", "RenPy", "LOVE", "Defold") or engine.startswith(("RPGMaker", "Electron")):
-        return "planned", f"{engine}: planned engine-runtime route."
+        return "planned", f"{engine}: planned engine-runtime route.", []
     if engine in ("Java", "Adobe AIR", "Wine wrapper (not native)", "GameMaker"):
-        return "unsupported", f"{engine}: no generic route."
-    if engine == "Unreal" and "arm64" in report["archs"]:
-        # The route works (recomp.py unreal); the app cannot run it yet.
-        return "planned", "Unreal Engine 4: ports from the command line (recomp.py unreal); not from this app yet."
-    return "planned", "Native Apple Silicon: planned binary retarget route."
+        return "unsupported", f"{engine}: no generic route.", []
+    return "planned", "Native Apple Silicon: planned binary retarget route.", []
 
 
 def scan(extra_dirs=(), quick=True):
@@ -110,7 +119,8 @@ def scan(extra_dirs=(), quick=True):
                 continue
             report = inspect_app.inspect(app, quick=quick)
             report["source"] = source
-            report["status"], report["status_detail"] = status_of(report)
+            report["route"] = route_of(report)
+            report["status"], report["status_detail"], report["checks"] = status_of(report)
             games.append(report)
     return games
 

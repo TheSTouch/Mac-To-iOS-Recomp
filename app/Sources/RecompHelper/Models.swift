@@ -12,8 +12,12 @@ struct Game: Decodable, Identifiable, Hashable {
     let flags: [String]
     let routes: [String]
     let source: String
+    /// "unity" or "unreal" when one of the port routes handles the game.
+    let route: String?
     let status: String
     let statusDetail: String
+    /// What decided a tested / untested / needs-work status (recomp/compat.py).
+    let checks: [String]
 
     var id: String { app }
     var support: Support { Support(rawValue: status) ?? .planned }
@@ -22,11 +26,13 @@ struct Game: Decodable, Identifiable, Hashable {
 }
 
 enum Support: String, CaseIterable {
-    case supported, planned, unsupported, missing
+    case tested, untested, needsWork = "needs_work", planned, unsupported, missing
 
     var title: String {
         switch self {
-        case .supported: return "Supported"
+        case .tested: return "Tested"
+        case .untested: return "Untested: may work out of the box"
+        case .needsWork: return "Needs work"
         case .planned: return "Not yet supported"
         case .unsupported: return "Not supported"
         case .missing: return "Not installed"
@@ -35,7 +41,9 @@ enum Support: String, CaseIterable {
 
     var symbol: String {
         switch self {
-        case .supported: return "checkmark.circle.fill"
+        case .tested: return "checkmark.circle.fill"
+        case .untested: return "questionmark.circle"
+        case .needsWork: return "wrench.and.screwdriver"
         case .planned: return "clock"
         case .unsupported: return "xmark.circle"
         case .missing: return "questionmark.folder"

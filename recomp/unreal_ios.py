@@ -223,9 +223,7 @@ def relink_main(m, idx, shim_syms, intercept):
         return target or shim
 
     m.remap_imports(rebind)
-    if unresolved:
-        sys.exit("symbols with no iOS equivalent and no shim:\n  " + "\n  ".join(sorted(unresolved)))
-    return new, moved
+    return new, moved, sorted(unresolved)
 
 
 def retarget_binary(src, dst, rel, game, idx, shim_syms, sdk):
@@ -236,7 +234,9 @@ def retarget_binary(src, dst, rel, game, idx, shim_syms, sdk):
         return
     main = rel == os.path.join("MacOS", game.executable)
     if main:
-        dylibs, moved = relink_main(m, idx, shim_syms, INTERCEPT | set(game.profile.get("intercept", [])))
+        dylibs, moved, unresolved = relink_main(m, idx, shim_syms, INTERCEPT | set(game.profile.get("intercept", [])))
+        if unresolved:
+            sys.exit("symbols with no iOS equivalent and no shim:\n  " + "\n  ".join(unresolved))
         rpaths = ["@executable_path/Frameworks"]
         for p in m.rpaths():
             p = re.sub(r"^@(loader|executable)_path/", f"@executable_path/{DATA}/MacOS/", p)
@@ -281,6 +281,38 @@ def undefined_missing(path, idx):
         mm = re.match(r"\s*\(undefined\)\s*(weak )?external (\S+) \(from ([^)]+)\)", line)
         if mm and mm.group(3) in ("libSystem", "libc++", "libobjc") and not mm.group(1) and mm.group(2) not in every:
             out.append(mm.group(2))
+    return out
+
+
+def blockers(game, idx, shim_syms):
+    """What would stop prepare, found without writing anything: one line per problem."""
+    out = []
+    main = os.path.join("MacOS", game.executable)
+    for rel in game.binaries():
+        if os.path.basename(rel) == "libsteam_api.dylib":
+            continue
+        src = os.path.join(game.contents, rel)
+        try:
+            m = macho.MachO(src)
+        except ValueError as e:
+            out.append(f"{rel}: {str(e).replace(src + ': ', '')}.")
+            continue
+        if m.platform() != macho.PLATFORM_MACOS:
+            continue
+        if rel == main:
+            unresolved = relink_main(m, idx, shim_syms, INTERCEPT | set(game.profile.get("intercept", [])))[2]
+            unresolved = [re.sub(r" \(from .*/([^/]+)\)$", r" (\1)", x) for x in unresolved]
+            if unresolved:
+                shown = ", ".join(unresolved[:12]) + (f" and {len(unresolved) - 12} more" if len(unresolved) > 12 else "")
+                out.append(f"{rel}: {len(unresolved)} imports with no iOS equivalent and no shim (recomp/native/appkit): "
+                           f"{shown}.")
+            continue
+        for _cmd, path in m.dylibs():
+            if _is_system(path) and not iossdk.framework_path(idx, path):
+                out.append(f"{rel}: links {path}, which iOS does not have.")
+        missing = undefined_missing(src, idx)
+        if missing:
+            out.append(f"{rel}: imports iOS lacks: {', '.join(missing[:12])}.")
     return out
 
 

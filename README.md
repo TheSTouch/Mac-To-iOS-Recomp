@@ -54,12 +54,31 @@ The app:
 
 1. scans Steam libraries, `/Applications`, `~/Applications`, GOG, Epic, itch and Heroic folders,
    plus any folders you add;
-2. sorts what it finds into *Supported*, *Not yet supported*, *Not supported* and *Not installed*,
-   with the reason for each game;
-3. for a supported game, asks up front for everything it needs (iPad, signing team, bundle ID,
+2. sorts what it finds, with the reason for each game, into:
+   - *Tested*: a game profile records it as played on an iPad;
+   - *Untested: may work out of the box*: a route handles it and none of the checks below found
+     anything that route is known to trip over;
+   - *Needs work*: a route handles it, but a check found something that stops the port or needs a
+     profile first (listed under Compatibility);
+   - *Not yet supported*, *Not supported* and *Not installed*;
+3. for a Unity game, asks up front for everything it needs (iPad, signing team, bundle ID,
    where to keep the ~40 GB workspace, permission to download the matching Unity editor),
    then runs the whole port with progress bars, a live log and plain-language hints when
    something needs your attention (unlock the iPad, sign in to Xcode, …).
+
+The checks (`recomp/compat.py`), which run on every scan:
+
+- **Unity (Mono)**: Unity 6 (the line the libil2cpp patches were written against); no native plugin
+  that game code calls without a stub (`stubs/`); no library that generates code at run time
+  (Harmony, MonoMod, Handlebars.Net). The Mac build's CPU does not matter: the .NET code is
+  recompiled. A game on Unity's legacy input still counts, with a note: taps act as left clicks,
+  but the other touch gestures need the Input System package.
+- **Unreal (arm64)**: Unreal Engine 4's bundle layout; every Mach-O thin arm64; and a dry run of
+  the `prepare` stage's import binding: every import of the game's binaries must bind to iOS or to
+  `RecompAppKit.dylib`. That needs Xcode; the result is cached until the game or the shim changes.
+
+Passing the checks is a good sign, not a promise: what a game does at run time (memory, shaders,
+input, code paths the checks cannot see) only shows on the iPad.
 
 Requirements: an Apple Silicon or Intel Mac on macOS 14+, Xcode with the iOS SDK, the
 .NET SDK (`brew install dotnet`), an Apple Developer account signed in to Xcode, a free
@@ -120,13 +139,15 @@ Two kinds of fixes apply on top of the generic pipeline:
   ```json
   {
     "name": "Timberborn",
+    "tested": "playable on iPad (1.1.2, Steam).",
     "when_assembly": "Timberborn.HttpApiSystem.dll",
     "guard": {"<Assembly>.dll": ["Namespace.Type::Method"]},
     "why": "shown in the build log"
   }
   ```
 
-  A profile applies when the game ships `when_assembly`. Each `guard` method (which must return
+  A profile applies when the game ships `when_assembly`. `tested`, when present, says the game
+  has been played on an iPad (the scan lists it as *Tested*). Each `guard` method (which must return
   `void`) is rewritten so an exception it throws is logged and swallowed: for optional systems
   that cannot work on iOS and would otherwise abort start-up. A guard that no longer matches
   a method fails the build.
@@ -175,6 +196,7 @@ Game profiles for this route match on the Unreal project folder:
 ```json
 {
   "name": "Stray",
+  "tested": "playable on iPad, early testing (1.5, Steam).",
   "unreal_project": "Hk_project",
   "engine_ini": {"SystemSettings": {"r.Streaming.PoolSize": "auto"}},
   "why": "shown in the build log"
@@ -251,7 +273,7 @@ stays on your machine.
 - `recomp.py`: CLI
 - `app/`: Recomp Helper, the SwiftUI front end (talks to `recomp.py` through `RECOMP_EVENTS=1` progress lines)
 - `scripts/`: app build, signing, notarization and icon
-- `recomp/discover.py`: game scanning and environment checks; `recomp/events.py`: progress events and failure hints
+- `recomp/discover.py`: game scanning and environment checks; `recomp/compat.py`: tested / untested / needs-work checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
 - `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project

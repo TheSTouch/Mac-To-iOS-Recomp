@@ -1,5 +1,6 @@
 {
   "name": "Timberborn",
+  "tested": "playable on iPad (1.1.2, Steam).",
   "when_assembly": "Timberborn.HttpApiSystem.dll",
   "guard": {
     "Timberborn.HttpApiSystem.dll": [

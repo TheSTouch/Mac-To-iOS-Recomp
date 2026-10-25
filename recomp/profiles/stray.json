@@ -1,5 +1,6 @@
 {
   "name": "Stray",
+  "tested": "playable on iPad, early testing (1.5, Steam).",
   "unreal_project": "Hk_project",
   "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory",
   "engine_ini": {

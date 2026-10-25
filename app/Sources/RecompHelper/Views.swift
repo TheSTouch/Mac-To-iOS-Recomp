@@ -80,7 +80,9 @@ struct GameRow: View {
 
 func color(_ s: Support) -> Color {
     switch s {
-    case .supported: return .green
+    case .tested: return .green
+    case .untested: return .teal
+    case .needsWork: return .yellow
     case .planned: return .orange
     case .unsupported: return .red
     case .missing: return .secondary
@@ -126,7 +128,7 @@ struct GameDetail: View {
                         Text(game.statusDetail).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if game.support == .supported {
+                    if game.route == "unity" {
                         Button("Port to iPad…") { setup = true }
                             .buttonStyle(.borderedProminent).controlSize(.large)
                     }
@@ -137,6 +139,13 @@ struct GameDetail: View {
                     row("Mac-only frameworks", game.macOnlyFrameworks.isEmpty ? "none" : game.macOnlyFrameworks.joined(separator: ", "))
                     row("Found in", game.source)
                     row("Location", game.app)
+                }
+                if !game.checks.isEmpty {
+                    GroupBox("Compatibility") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(game.checks, id: \.self) { Label($0, systemImage: "checklist").font(.callout) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 if !game.flags.isEmpty {
                     GroupBox("Notes") {

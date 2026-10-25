@@ -45,7 +45,7 @@ final class AppState: ObservableObject {
             let args = ["scan", "--json"] + customFolders.flatMap { ["--extra", $0] }
             games = try await Engine.json([Game].self, args, home: workspace)
             environment = try await env
-            if selection == nil { selection = games(.supported).first?.id }
+            if selection == nil { selection = (games(.tested) + games(.untested)).first?.id }
         } catch {
             self.error = error.localizedDescription
         }

@@ -236,7 +236,7 @@ def inspect(app, quick=False):
         flags.append("Mac App Store build (check for FairPlay encryption with `otool -l | grep cryptid`).")
     if any(n.startswith("libsteam_api") for n in names):
         flags.append("Links the Steamworks API: needs a stub libsteam_api for iOS (no Steam client there).")
-    if "x86_64" in all_archs and "arm64" not in all_archs:
+    if "x86_64" in all_archs and "arm64" not in all_archs and not (engine == "Unity" and backend == "Mono"):
         flags.append("Intel-only: no arm64 code to reuse.")
     if engine == "Native / unknown" and "OpenGL" in mac_only:
         flags.append("Uses desktop OpenGL: iPadOS has none; needs a GL->Metal layer (e.g. MoltenGL/ANGLE/gl4es-style).")
