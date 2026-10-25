@@ -7,6 +7,8 @@
   recomp.py toolchain <Game.app> [--check]           fetch (or check for) the Unity editor + iOS support that game needs
   recomp.py unity <Game.app> [stages] [options]      Unity/Mono route (IL2CPP recompilation)
   recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
+  recomp.py saves <Game.app> --enable|--disable|--status [--json]
+                                                     sync the Mac game's saves with its iOS port via iCloud Drive
 
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
@@ -38,6 +40,9 @@ def cmd_scan(rest):
     p.add_argument("--json", action="store_true")
     a = p.parse_args(rest)
     games = discover.scan(a.extra)
+    from recomp import saves
+    for g in games:
+        g["saves"] = g.get("status") != "missing" and saves.has_saves(g["app"])
     if a.json:
         print(json.dumps(games))
     else:
@@ -161,7 +166,26 @@ def cmd_unreal(rest):
     return 0
 
 
-COMMANDS = {"scan": cmd_scan, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
+def cmd_saves(rest):
+    from recomp import saves
+    p = argparse.ArgumentParser(prog="recomp.py saves")
+    p.add_argument("app")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--enable", action="store_true")
+    g.add_argument("--disable", action="store_true")
+    g.add_argument("--status", action="store_true")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(rest)
+    game = saves.Game(a.app)
+    st = saves.enable(game) if a.enable else saves.disable(game) if a.disable else saves.status(game)
+    if a.json:
+        print(json.dumps(st))
+    else:
+        saves.show(st)
+    return 0
+
+
+COMMANDS = {"scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
 
 
 def main():
