@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Refuse commits that would put game files or personal details in this public repo.
+
+Blocks staged files that look like game content (binaries, Unity data, app bundles),
+anything over 1 MB, and added lines matching the regexes in .git/private-patterns
+(one per line, case-insensitive). That file is local only: listing the patterns in
+the repo would publish them.
+
+Enable once per clone:  git config core.hooksPath .githooks
+"""
+import os
+import re
+import subprocess
+import sys
+
+GAME_FILE = re.compile(
+    r"(\.(dll|dylib|so|a|exe|pdb|mdb|assets|ress|resource|unity3d|bundle|pak|pck|ucas|utoc|"
+    r"ipa|xcarchive|app|dmg|pkg|framework|metallib)(/|$))"
+    r"|(^|/)(globalgamemanagers|level\d+|sharedassets\d+|data\.unity3d|global-metadata\.dat)",
+    re.IGNORECASE)
+MAX_BYTES = 1024 * 1024
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
+
+
+def main():
+    problems = []
+    staged = [p for p in git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z").split("\0") if p]
+    for path in staged:
+        if GAME_FILE.search(path):
+            problems.append(f"{path}: looks like game content or a build product")
+        size = int(git("cat-file", "-s", f":{path}").strip() or 0)
+        if size > MAX_BYTES:
+            problems.append(f"{path}: {size // 1024} KB is over the 1 MB limit")
+
+    patterns_file = os.path.join(git("rev-parse", "--git-dir").strip(), "private-patterns")
+    if os.path.exists(patterns_file):
+        with open(patterns_file) as f:
+            patterns = [re.compile(l.strip(), re.IGNORECASE) for l in f if l.strip() and not l.startswith("#")]
+        current = None
+        for line in git("diff", "--cached", "-U0", "--no-color").splitlines():
+            if line.startswith("+++ "):
+                current = line[6:] if line.startswith("+++ b/") else None
+            elif line.startswith("+") and current:
+                for p in patterns:
+                    if p.search(line):
+                        problems.append(f"{current}: personal detail matching /{p.pattern}/: {line[1:].strip()[:80]}")
+    else:
+        problems.append(f"{patterns_file} is missing: create it before committing (see this hook's docstring)")
+
+    if problems:
+        print("pre-commit: refusing to commit to a public repo:", file=sys.stderr)
+        for p in problems:
+            print("  " + p, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

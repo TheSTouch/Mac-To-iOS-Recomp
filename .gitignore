@@ -12,3 +12,14 @@ recomp/shims/*/bin/
 recomp/shims/*/obj/
 # Per-machine triage output (lists local games and paths)
 reports/
+# Never commit game content or build products (also enforced by .githooks/pre-commit)
+*.dll
+*.dylib
+*.ipa
+*.app/
+*.assets
+*.resS
+*.resource
+*.unity3d
+*.pak
+*.pck
