@@ -3,6 +3,28 @@
 Port macOS games you own to your own iPad. Builds are for personal sideloading
 with your developer account; never share the resulting app, since it contains the game.
 
+## Tested games
+
+| Game | Version tested | Engine | Route | Status |
+|---|---|---|---|---|
+| [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) | 1.1.2 (Steam) | Unity 6000.5.11f1, Mono | Unity / Mono | **Playable** |
+
+Tested on an iPad Pro 11" (M1), iPadOS 26.2.
+
+### Timberborn
+
+![Timberborn running on an iPad](docs/images/timberborn-ipad.jpg)
+
+Works: intro video, menus, new games and saves, building, camera pan, zoom and rotation.
+
+Known limits:
+
+- the game is designed for a mouse: there is no hover (tooltips, highlight under the cursor),
+  and some buttons are small for fingers (raising the in-game UI scale helps);
+- the local HTTP API's web pages are disabled ([profile](recomp/profiles/timberborn.json)):
+  they compile templates at runtime, which IL2CPP cannot do;
+- mods are not supported yet.
+
 ## Recomp Helper (Mac app)
 
 Download the notarized DMG from [Releases](../../releases), or build it yourself (below).
@@ -61,6 +83,36 @@ Stages (run all, or name some): `prepare player inject xcode install`.
    shims are registered in `RuntimeInitializeOnLoads.json`.
 4. **xcode** / **install**: sign with automatic provisioning and install through `devicectl`.
 
+The game must be built with exactly the Unity version it shipped with; `toolchain` reads it from
+the game's `Info.plist`. When a game updates its Unity version, delete `build/<Game>` (its shell
+project and Xcode output belong to the old editor) and run every stage again.
+
+Two kinds of fixes apply on top of the generic pipeline:
+
+- **libil2cpp patches** (`recomp/il2cpp_patches.py`) fill reflection calls that IL2CPP leaves
+  unimplemented and restore Mono's assembly order. Each checks the exact original source text
+  and stops the build when a Unity version differs, rather than patching blindly.
+- **Game profiles** (`recomp/profiles/<game>.json`) hold game-specific rules:
+
+  ```json
+  {
+    "name": "Timberborn",
+    "when_assembly": "Timberborn.HttpApiSystem.dll",
+    "guard": {"<Assembly>.dll": ["Namespace.Type::Method"]},
+    "why": "shown in the build log"
+  }
+  ```
+
+  A profile applies when the game ships `when_assembly`. Each `guard` method (which must return
+  `void`) is rewritten so an exception it throws is logged and swallowed: for optional systems
+  that cannot work on iOS and would otherwise abort start-up. A guard that no longer matches
+  a method fails the build.
+
+Debugging on the device: launch with
+`xcrun devicectl device process launch --console --terminate-existing --device <UDID> <bundle id>`
+(iPad unlocked). The shims log lines starting with `[recomp]`. Games that write their own logs or
+error reports put them under the app's `Documents`, visible in the Files app.
+
 ## Touch controls (Recomp.TouchMouse)
 
 | Gesture | Mouse |
@@ -70,7 +122,11 @@ Stages (run all, or name some): `prepare player inject xcode install`.
 | pinch | scroll wheel |
 | 3 finger drag | right drag |
 | 2 finger tap | right click |
+| Esc button (bottom left) | Escape key |
 
+The virtual devices are named `Mouse` and `Keyboard`, like desktop ones: games store their
+bindings as control paths such as `/Mouse/leftButton`, which match a device by name. The Esc
+button presses Escape on whichever keyboard those bindings resolve to.
 A real keyboard or trackpad, when connected, works alongside.
 
 ## Building the app
@@ -100,7 +156,10 @@ stays on your machine.
 - `scripts/`: app build, signing, notarization and icon
 - `recomp/discover.py`: game scanning and environment checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
+- `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules
+- `recomp/textures.py`: BCn → ASTC texture conversion; `recomp/native/`: native start-up fixes
 - `recomp/shims/`: managed shims injected into games
+- `docs/images/`: screenshots for this README
 - `stubs/`: hand-written native stub overrides
 - `tools/inspect_app.py`: triage; `tools/asmtool`: assembly scan/rewrite (Mono.Cecil); `tools/ilspy.sh`: decompiler
 - `toolchain/`, `build/`: downloaded editors and per-game work (not in git)
