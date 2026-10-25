@@ -18,6 +18,8 @@ struct Game: Decodable, Identifiable, Hashable {
     let statusDetail: String
     /// What decided a tested / untested / needs-work status (recomp/compat.py).
     let checks: [String]
+    /// The game's profile has a saves block: its saves can sync with the iOS port through iCloud Drive.
+    let saves: Bool?
 
     var id: String { app }
     var support: Support { Support(rawValue: status) ?? .planned }
@@ -74,6 +76,24 @@ struct BuildEnvironment: Decodable {
     let home: String
 
     var missingTools: [String] { tools.filter { !$0.value }.map(\.key).sorted() }
+}
+
+/// `recomp.py saves <app> --status|--enable|--disable --json` (recomp/saves.py).
+struct SaveSyncStatus: Decodable {
+    struct Entry: Decodable, Hashable {
+        let name: String
+        let state: String
+        let lastChange: String?
+    }
+
+    let enabled: Bool
+    let icloud: Bool
+    let root: String?
+    let cloud: String?
+    let entries: [Entry]
+    let lastChange: String?
+    let backup: String?
+    let conflicts: Int?
 }
 
 /// `recomp.py toolchain <app> --check`.

@@ -140,6 +140,9 @@ struct GameDetail: View {
                     row("Found in", game.source)
                     row("Location", game.app)
                 }
+                if game.saves == true {
+                    SaveSyncBox(game: game).id(game.id)
+                }
                 if !game.checks.isEmpty {
                     GroupBox("Compatibility") {
                         VStack(alignment: .leading, spacing: 4) {
@@ -165,6 +168,67 @@ struct GameDetail: View {
         GridRow {
             Text(k).foregroundStyle(.secondary)
             Text(v).textSelection(.enabled)
+        }
+    }
+}
+
+/// Turns the iCloud Drive save sync on and off for the Mac game (`recomp.py saves`).
+struct SaveSyncBox: View {
+    @EnvironmentObject var state: AppState
+    let game: Game
+    @State private var status: SaveSyncStatus?
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        GroupBox("Saves") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Toggle("Sync saves with iCloud Drive", isOn: Binding(
+                        get: { status?.enabled ?? false },
+                        set: { on in Task { await run(on ? "--enable" : "--disable") } }))
+                        .disabled(busy || status == nil || status?.icloud == false)
+                    if busy { ProgressView().controlSize(.small) }
+                }
+                Text("The Mac game then saves straight into iCloud Drive/Recomp Saves/\(game.name), the folder its iPad port syncs with. Steam Cloud keeps working. Quit the game before changing this.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let s = status {
+                    if !s.icloud {
+                        Label("iCloud Drive is off on this Mac. Turn it on in System Settings > your name > iCloud.",
+                              systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    }
+                    ForEach(s.entries, id: \.self) { e in
+                        Label("\(e.name): \(e.state)" + (e.lastChange.map { ", last change \($0.replacingOccurrences(of: "T", with: " "))" } ?? ""),
+                              systemImage: e.state == "linked" ? "icloud" : "internaldrive")
+                            .font(.callout)
+                    }
+                    if let backup = s.backup {
+                        Label("Backup of the previous saves: \(backup)", systemImage: "archivebox").font(.caption)
+                            .textSelection(.enabled)
+                    }
+                    if let n = s.conflicts, n > 0 {
+                        Label("\(n) files differed on the Mac and in iCloud Drive: the newest is used, the other is kept next to it as a .conflict copy.",
+                              systemImage: "doc.on.doc").font(.caption)
+                    }
+                }
+                if let error {
+                    Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task { await run("--status") }
+    }
+
+    private func run(_ action: String) async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            status = try await Engine.json(SaveSyncStatus.self, ["saves", game.app, action, "--json"], home: state.workspace)
+        } catch {
+            self.error = error.localizedDescription
+            if action != "--status" { await run("--status") }
         }
     }
 }
