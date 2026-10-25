@@ -1,0 +1,437 @@
+"""Port a Unity (Mono) macOS game to iPadOS by recompiling its managed code with IL2CPP.
+
+Stages, each runnable on its own (see recomp.py):
+  prepare   generate a shell Unity project holding the game's own assemblies as iOS plugins
+  player    run the matching Unity editor in batchmode to produce an iOS Xcode project
+  inject    replace the shell's data in that Xcode project with the game's real data
+  xcode     build and sign the app with xcodebuild
+  install   install it on a connected device
+"""
+import hashlib
+import json
+import os
+import plistlib
+import re
+import shutil
+import struct
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASMTOOL = os.path.join(ROOT, "tools", "bin", "asmtool", "asmtool")
+STUBS = os.path.join(ROOT, "stubs")
+EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
+SHIMS = os.path.join(ROOT, "recomp", "shims")
+
+# Managed shims added to the game, each enabled when the game ships the
+# assembly it builds on, and started through RuntimeInitializeOnLoads.json.
+SHIM_SPECS = [
+    {"project": "RecompTouchMouse", "assembly": "Recomp.TouchMouse", "requires": "Unity.InputSystem.dll",
+     "init": {"nameSpace": "Recomp", "className": "TouchMouse", "methodName": "Install", "loadTypes": 1}},
+]
+
+# Native libraries with a hand-written override file in stubs/. Their P/Invokes
+# are redirected to a generated static stub instead of a library iOS lacks.
+STUB_PROFILES = {
+    "steamworks": {
+        "modules": ["steam_api", "steam_api64", "sdkencryptedappticket", "sdkencryptedappticket64"],
+        "overrides": ["steamworks.overrides.c"],
+    },
+}
+
+# Data files that come from the shell build rather than the game: the IL2CPP
+# metadata must describe the code we compiled, and the default resources hold
+# iOS-compiled built-in shaders.
+KEEP_FROM_SHELL = {"Managed", "unity default resources", "Resources/unity default resources"}
+
+# Serialized-file target platform ids (BuildTarget).
+TARGET_OSX, TARGET_IOS = 2, 9
+
+
+def log(msg):
+    print(f"[recomp] {msg}", flush=True)
+
+
+def run(cmd, **kw):
+    log("$ " + " ".join(cmd))
+    subprocess.run(cmd, check=True, **kw)
+
+
+class Game:
+    def __init__(self, app):
+        self.app = os.path.abspath(app.rstrip("/"))
+        contents = os.path.join(self.app, "Contents")
+        with open(os.path.join(contents, "Info.plist"), "rb") as f:
+            self.info = plistlib.load(f)
+        self.data = os.path.join(contents, "Resources", "Data")
+        self.managed = os.path.join(self.data, "Managed")
+        if not os.path.isdir(self.managed):
+            sys.exit(f"{self.app}: no Contents/Resources/Data/Managed - not a Unity Mono build")
+        m = re.search(r"Unity Player version (\S+) \((\w+)\)", self.info.get("CFBundleGetInfoString", ""))
+        if not m:
+            sys.exit("Could not read the Unity version from Info.plist")
+        self.unity_version, self.changeset = m.group(1), m.group(2)
+        self.name = self.info.get("CFBundleName") or os.path.splitext(os.path.basename(self.app))[0]
+        self.slug = re.sub(r"[^A-Za-z0-9]", "", self.name)
+
+
+def editor_paths(version, unity_root=None):
+    base = unity_root or os.path.join(ROOT, "toolchain", f"Unity-{version}")
+    unity = os.path.join(base, "Unity.app")
+    ios = os.path.join(base, "PlaybackEngines", "iOSSupport")
+    if not os.path.isdir(unity) or not os.path.isdir(ios):
+        sys.exit(f"Unity {version} with iOS support not found under {base}.\n"
+                 "Run: python3 recomp.py toolchain <Game.app>")
+    return unity, ios
+
+
+def engine_assemblies(unity, ios):
+    """Assembly names IL2CPP supplies itself: engine modules and the AOT class library."""
+    names = set()
+    dirs = [os.path.join(ios, "Variations", "il2cpp", "Releasearm64_managed")]
+    prof = os.path.join(unity, "Contents", "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "unityaot-macos")
+    dirs += [prof, os.path.join(prof, "Facades")]
+    for d in dirs:
+        if os.path.isdir(d):
+            names.update(n for n in os.listdir(d) if n.endswith(".dll"))
+    return names
+
+
+def is_engine(name, engine_names):
+    return name in engine_names or name == "UnityEngine.dll" or re.fullmatch(r"UnityEngine\.\w+Module\.dll", name) is not None
+
+
+def ensure_asmtool():
+    if not os.path.exists(ASMTOOL):
+        run(["dotnet", "build", os.path.join(ROOT, "tools", "asmtool"), "-c", "Release", "-nologo", "-v", "q",
+             "-o", os.path.dirname(ASMTOOL)])
+
+
+def scan_pinvokes(managed_dir):
+    ensure_asmtool()
+    out = subprocess.run([ASMTOOL, "scan", managed_dir], capture_output=True, text=True, check=True).stdout
+    libs = {}
+    section = None
+    for line in out.splitlines():
+        if line.startswith("== "):
+            section = line
+        elif "P/Invoke" in (section or "") and ": " in line:
+            lib, users = line.rsplit(": ", 1)
+            libs[lib] = users.split(", ")
+    return libs
+
+
+def plugin_meta(name):
+    guid = hashlib.md5(("recomp:" + name).encode()).hexdigest()
+    return f"""fileFormatVersion: 2
+guid: {guid}
+PluginImporter:
+  externalObjects: {{}}
+  serializedVersion: 2
+  iconMap: {{}}
+  executionOrder: {{}}
+  defineConstraints: []
+  isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 1
+  validateReferences: 0
+  platformData:
+  - first:
+      Any:
+    second:
+      enabled: 0
+      settings: {{}}
+  - first:
+      Editor: Editor
+    second:
+      enabled: 0
+      settings:
+        DefaultValueInitialized: true
+  - first:
+      iPhone: iOS
+    second:
+      enabled: 1
+      settings: {{}}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+"""
+
+
+def native_meta(name):
+    guid = hashlib.md5(("recomp-native:" + name).encode()).hexdigest()
+    return f"""fileFormatVersion: 2
+guid: {guid}
+PluginImporter:
+  externalObjects: {{}}
+  serializedVersion: 2
+  iconMap: {{}}
+  executionOrder: {{}}
+  defineConstraints: []
+  isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 1
+  platformData:
+  - first:
+      Any:
+    second:
+      enabled: 0
+      settings: {{}}
+  - first:
+      iPhone: iOS
+    second:
+      enabled: 1
+      settings: {{}}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+"""
+
+
+def prepare(game, work, unity, ios):
+    shell = os.path.join(work, "shell")
+    plugins = os.path.join(shell, "Assets", "Plugins", "Game")
+    native = os.path.join(shell, "Assets", "Plugins", "iOS")
+    if os.path.isdir(shell):
+        # Keep Library/ (the import cache) but regenerate everything we own.
+        for sub in ("Assets", "Packages", "ProjectSettings"):
+            shutil.rmtree(os.path.join(shell, sub), ignore_errors=True)
+    os.makedirs(plugins)
+    os.makedirs(native)
+    os.makedirs(os.path.join(shell, "Packages"))
+    os.makedirs(os.path.join(shell, "ProjectSettings"))
+
+    engine_names = engine_assemblies(unity, ios)
+    game_dlls = sorted(n for n in os.listdir(game.managed) if n.endswith(".dll") and not is_engine(n, engine_names))
+    log(f"{len(game_dlls)} game assemblies to recompile, {len(os.listdir(game.managed)) - len(game_dlls)} supplied by Unity")
+
+    # Decide which native libraries to replace with stubs.
+    pinvokes = scan_pinvokes(game.managed)
+    to_stub, overrides = set(), []
+    for prof in STUB_PROFILES.values():
+        hit = [m for m in prof["modules"] if m in pinvokes and any(u in game_dlls for u in pinvokes[m])]
+        if hit:
+            to_stub.update(hit)
+            overrides += [os.path.join(STUBS, o) for o in prof["overrides"]]
+    users = sorted({u for m in to_stub for u in pinvokes[m] if u in game_dlls})
+
+    for n in game_dlls:
+        if n not in users:
+            shutil.copy2(os.path.join(game.managed, n), os.path.join(plugins, n))
+    if users:
+        cmd = [ASMTOOL, "internalize", "--out", plugins, "--stub", os.path.join(native, "recomp_native_stubs.c")]
+        for o in overrides:
+            cmd += ["--overrides", o]
+        for m in sorted(to_stub):
+            cmd += ["--module", m]
+        run(cmd + [os.path.join(game.managed, u) for u in users])
+        with open(os.path.join(native, "recomp_native_stubs.c.meta"), "w") as f:
+            f.write(native_meta("recomp_native_stubs.c"))
+    shims = build_shims(game, os.path.join(work, "shims"))
+    for dll in shims:
+        shutil.copy2(dll, plugins)
+    game_dlls += [os.path.basename(d) for d in shims]
+    for n in game_dlls:
+        with open(os.path.join(plugins, n + ".meta"), "w") as f:
+            f.write(plugin_meta(n))
+
+    # Preserve every game assembly from the managed linker: reflection-driven
+    # code (dependency injection, serializers) would otherwise lose types.
+    with open(os.path.join(shell, "Assets", "link.xml"), "w") as f:
+        f.write("<linker>\n")
+        for n in game_dlls:
+            f.write(f'  <assembly fullname="{n[:-4]}" preserve="all"/>\n')
+        f.write("</linker>\n")
+
+    builtin = os.path.join(unity, "Contents", "Resources", "PackageManager", "BuiltInPackages")
+    modules = sorted(n for n in os.listdir(builtin) if n.startswith("com.unity.modules.") and not n.endswith(".sha1"))
+    with open(os.path.join(shell, "Packages", "manifest.json"), "w") as f:
+        json.dump({"dependencies": {m: "1.0.0" for m in modules}}, f, indent=2)
+    with open(os.path.join(shell, "ProjectSettings", "ProjectVersion.txt"), "w") as f:
+        f.write(f"m_EditorVersion: {game.unity_version}\nm_EditorVersionWithRevision: {game.unity_version} ({game.changeset})\n")
+
+    shutil.copytree(EDITOR_SRC, os.path.join(shell, "Assets", "Editor"))
+    with open(os.path.join(work, "prepare.json"), "w") as f:
+        json.dump({"game": game.app, "unity": game.unity_version, "assemblies": game_dlls,
+                   "stubbed_modules": sorted(to_stub), "internalized": users,
+                   "shims": [os.path.basename(d)[:-4] for d in shims]}, f, indent=2)
+    log(f"shell project ready: {shell}")
+
+
+def active_shims(game):
+    return [spec for spec in SHIM_SPECS if os.path.exists(os.path.join(game.managed, spec["requires"]))]
+
+
+def build_shims(game, out):
+    built = []
+    for spec in active_shims(game):
+        proj = os.path.join(SHIMS, spec["project"])
+        run(["dotnet", "build", proj, "-c", "Release", "-o", out, "-nologo", "-v", "q", f"-p:GameManaged={game.managed}"])
+        built.append(os.path.join(out, spec["assembly"] + ".dll"))
+    return built
+
+
+def register_shims(game, data):
+    """Add the shims to the game's assembly list and startup hooks."""
+    shims = active_shims(game)
+    if not shims:
+        return
+    sa_path = os.path.join(data, "ScriptingAssemblies.json")
+    with open(sa_path) as f:
+        sa = json.load(f)
+    rt_path = os.path.join(data, "RuntimeInitializeOnLoads.json")
+    with open(rt_path) as f:
+        rt = json.load(f)
+    for spec in shims:
+        dll = spec["assembly"] + ".dll"
+        if dll not in sa["names"]:
+            sa["names"].append(dll)
+            sa["types"].append(16)  # user assembly
+        entry = dict(spec["init"], assemblyName=spec["assembly"], isUnityClass=False)
+        if entry not in rt["root"]:
+            rt["root"].append(entry)
+    with open(sa_path, "w") as f:
+        json.dump(sa, f)
+    with open(rt_path, "w") as f:
+        json.dump(rt, f)
+    log(f"registered shims: {', '.join(s['assembly'] for s in shims)}")
+
+
+def player(game, work, unity, bundle_id, team):
+    shell = os.path.join(work, "shell")
+    out = os.path.join(work, "xcode")
+    logfile = os.path.join(work, "unity-build.log")
+    exe = os.path.join(unity, "Contents", "MacOS", "Unity")
+    cmd = [exe, "-batchmode", "-nographics", "-quit", "-projectPath", shell, "-buildTarget", "iOS",
+           "-executeMethod", "Recomp.Build.Run", "-logFile", logfile,
+           "-recompOut", out, "-recompBundleId", bundle_id, "-recompTeam", team,
+           "-recompProduct", game.name, "-recompVersion", game.info.get("CFBundleShortVersionString", "1.0").split("-")[0]]
+    log(f"Unity batchmode build (log: {logfile})")
+    r = subprocess.run(cmd)
+    if r.returncode != 0 or not os.path.isdir(out):
+        tail = subprocess.run(["tail", "-60", logfile], capture_output=True, text=True).stdout
+        sys.exit(f"Unity build failed ({r.returncode}). Last log lines:\n{tail}")
+    log(f"Xcode project: {out}")
+
+
+def patch_target_platform(path, target):
+    """Rewrite the BuildTarget field in a Unity SerializedFile header, in place.
+
+    The header starts with four big-endian u32 (metadata size, file size, format
+    version, data offset) and a u8 endianness flag plus 3 reserved bytes; format
+    22+ then repeats the sizes as u32 + 3x u64. The metadata that follows begins
+    with the NUL-terminated Unity version and the u32 target platform.
+    """
+    with open(path, "r+b") as f:
+        head = f.read(64)
+        if len(head) < 48:
+            return False
+        version = struct.unpack(">I", head[8:12])[0]
+        if version < 9 or version > 30:
+            return False
+        endian = head[16]
+        meta_start = 48 if version >= 22 else 20
+        f.seek(meta_start)
+        chunk = f.read(64)
+        nul = chunk.find(b"\0")
+        if nul <= 0 or not re.fullmatch(rb"\d+\.\d+\.\w+", chunk[:nul]):
+            return False
+        pos = meta_start + nul + 1
+        fmt = ">I" if endian else "<I"
+        f.seek(pos)
+        current = struct.unpack(fmt, f.read(4))[0]
+        if current == target:
+            return True
+        if current not in (TARGET_OSX, 5, 19, 24, 27):  # standalone targets only
+            return False
+        f.seek(pos)
+        f.write(struct.pack(fmt, target))
+        return True
+
+
+def inject(game, work):
+    xcode = os.path.join(work, "xcode")
+    data = os.path.join(xcode, "Data")
+    if not os.path.isdir(data):
+        sys.exit(f"{data} missing - run the player stage first")
+    shell_data = os.path.join(work, "shell-data")
+    if not os.path.isdir(shell_data):
+        shutil.copytree(data, shell_data)  # pristine copy of what Unity produced
+
+    shutil.rmtree(data)
+    os.makedirs(data)
+    patched = 0
+    for name in os.listdir(game.data):
+        src = os.path.join(game.data, name)
+        if name == "Managed":
+            continue
+        if name == "StreamingAssets":
+            shutil.copytree(src, os.path.join(data, "Raw"))
+            continue
+        dst = os.path.join(data, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+    # Shell-owned pieces override the game's copies.
+    for rel in KEEP_FROM_SHELL:
+        src = os.path.join(shell_data, rel)
+        if os.path.exists(src):
+            dst = os.path.join(data, rel)
+            if os.path.isdir(dst):
+                shutil.rmtree(dst)
+            elif os.path.exists(dst):
+                os.remove(dst)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
+    # The shell's boot.config carries iOS player switches; keep the game's build guid.
+    merge_boot_config(os.path.join(shell_data, "boot.config"), os.path.join(game.data, "boot.config"),
+                      os.path.join(data, "boot.config"))
+    register_shims(game, data)
+    for dirpath, _, files in os.walk(data):
+        for n in files:
+            p = os.path.join(dirpath, n)
+            if n.endswith((".resS", ".resource", ".json", ".config", ".dat")) or "Raw" in p.split(os.sep):
+                continue
+            if patch_target_platform(p, TARGET_IOS):
+                patched += 1
+    log(f"game data injected into {data} ({patched} serialized files retargeted to iOS)")
+
+
+def merge_boot_config(shell_cfg, game_cfg, out):
+    def read(p):
+        d = {}
+        if os.path.exists(p):
+            for line in open(p):
+                if "=" in line:
+                    k, v = line.rstrip("\n").split("=", 1)
+                    d[k] = v
+        return d
+    merged = read(shell_cfg)
+    g = read(game_cfg)
+    if "build-guid" in g:
+        merged["build-guid"] = g["build-guid"]
+    with open(out, "w") as f:
+        for k, v in merged.items():
+            f.write(f"{k}={v}\n")
+
+
+def xcode(work, team):
+    proj = os.path.join(work, "xcode", "Unity-iPhone.xcodeproj")
+    derived = os.path.join(work, "DerivedData")
+    run(["xcodebuild", "-project", proj, "-scheme", "Unity-iPhone", "-configuration", "Release",
+         "-destination", "generic/platform=iOS", "-derivedDataPath", derived,
+         "-allowProvisioningUpdates", f"DEVELOPMENT_TEAM={team}", "CODE_SIGN_STYLE=Automatic",
+         "build"])
+    products = os.path.join(derived, "Build", "Products", "Release-iphoneos")
+    apps = [n for n in os.listdir(products) if n.endswith(".app")]
+    log(f"built: {', '.join(os.path.join(products, a) for a in apps)}")
+
+
+def install(work, device):
+    products = os.path.join(work, "DerivedData", "Build", "Products", "Release-iphoneos")
+    apps = [n for n in os.listdir(products) if n.endswith(".app")]
+    if not apps:
+        sys.exit("no built .app - run the xcode stage first")
+    run(["xcrun", "devicectl", "device", "install", "app", "--device", device, os.path.join(products, apps[0])])

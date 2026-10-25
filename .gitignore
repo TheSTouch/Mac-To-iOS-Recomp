@@ -1,0 +1,14 @@
+# Downloaded Unity editors and installers (large, re-downloadable)
+toolchain/
+# Per-game work directories: shell projects, Xcode projects, game data copies
+build/
+# Compiled helper tools
+tools/bin/
+tools/asmtool/bin/
+tools/asmtool/obj/
+__pycache__/
+.DS_Store
+recomp/shims/*/bin/
+recomp/shims/*/obj/
+# Per-machine triage output (lists local games and paths)
+reports/
