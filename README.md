@@ -8,6 +8,7 @@ with your developer account; never share the resulting app, since it contains th
 | Game | Version tested | Engine | Route | Status |
 |---|---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) | 1.1.2 (Steam) | Unity 6000.5.11f1, Mono | Unity / Mono | **Playable** |
+| [Stray](https://store.steampowered.com/app/1332010/Stray/) | 1.5 (Steam) | Unreal Engine 4.27, arm64 | Unreal | **Playable** (early testing) |
 
 Tested on an iPad Pro 11" (M1), iPadOS 26.2.
 
@@ -24,6 +25,22 @@ Known limits:
 - the local HTTP API's web pages are disabled ([profile](recomp/profiles/timberborn.json)):
   they compile templates at runtime, which IL2CPP cannot do;
 - mods are not supported yet.
+
+### Stray
+
+![Stray running on an iPad, with the on-screen gamepad](docs/images/stray-ipad.jpg)
+
+Works: intro, brightness setup, cutscene videos, sound, gameplay with the on-screen gamepad or a
+Bluetooth controller; about 40-50 fps at the iPad's point resolution.
+
+Known limits:
+
+- early testing: only the opening area has been played;
+- short freezes the first time a scene appears, while Metal compiles its shaders (they are cached for
+  later runs);
+- the texture streaming pool is capped to the iPad's memory ([profile](recomp/profiles/stray.json)),
+  so distant textures can load later than on a Mac;
+- no Steam: achievements and cloud saves are off, saves stay on the iPad.
 
 ## Recomp Helper (Mac app)
 
@@ -58,7 +75,8 @@ Set `RECOMP_HOME` to put the large files (Unity editors, build output) on anothe
 | Route | Games | How |
 |---|---|---|
 | **Unity / Mono** (implemented) | Unity games whose `Data/Managed` holds .NET assemblies | Recompile the game's assemblies to native ARM64 code with the matching Unity version's IL2CPP, then run the game's own data on Unity's iOS player |
-| Mach-O retarget (planned) | Native arm64 games (Unreal, custom engines) | Re-mark the binaries as iOS, redirect Mac-only imports to shim frameworks |
+| **Unreal** (implemented, command line) | Unreal Engine 4 games built for Apple Silicon | Re-mark the game's own arm64 binaries as iOS and bind what iOS lacks (AppKit, Mac display and audio APIs) to a shim library |
+| Mach-O retarget (planned) | Other native arm64 games (custom engines) | Same retargeting, with shims for what each engine uses |
 | Engine runtime swap (planned) | Godot, Ren'Py, LÖVE, HTML5 | Run the game's data on the engine's iOS runtime |
 | Static recompilation | Intel-only games | Per-game project; iPadOS forbids JIT, so no Rosetta-style translation |
 
@@ -113,6 +131,80 @@ Debugging on the device: launch with
 (iPad unlocked). The shims log lines starting with `[recomp]`. Games that write their own logs or
 error reports put them under the app's `Documents`, visible in the Files app.
 
+## Unreal route
+
+```
+python3 recomp.py unreal <Game.app> --team <TEAMID> --bundle-id <id> --device <iPad name or UDID>
+```
+
+Stages (run all, or name some): `prepare xcode install`. The Recomp Helper app lists these games
+but cannot port them yet.
+
+1. **prepare**: every Mach-O in the bundle is rewritten for iOS (`recomp/macho.py`): the platform
+   becomes iOS, framework paths take their iOS form, and the main executable's imports are rebound
+   library by library. Symbols iOS does not export (or that the route intercepts, listed in
+   `INTERCEPT` in `recomp/unreal_ios.py`) bind to `RecompAppKit.dylib`, built from
+   `recomp/native/appkit`; `libsteam_api.dylib` is replaced by a stub that reports Steam as not running.
+   The engine's two `Contents/UE4/` path strings are patched to the bundle's `MacFiles/` folder.
+2. **xcode**: a small generated Xcode project builds a placeholder app; its script phase puts the
+   game's executable, the shim and APFS clones of the game data (instant on the same disk) into the
+   bundle before Xcode signs it with automatic provisioning.
+3. **install**: through `devicectl`. The whole app (about 8 GB for Stray) is copied each time.
+
+What the shim provides:
+
+- **AppKit on UIKit**: application lifecycle, windows (shown full screen, scaled to fit), views
+  hosting the game's `CAMetalLayer`, events from the keyboard, trackpad and mouse, screens, cursors,
+  menus, pasteboard, alerts;
+- **Mac system APIs**: Quartz display modes and CVDisplayLink, keyboard layouts, the IOKit GPU entries
+  Unreal looks for (answered with the real Metal device), CoreAudio's device queries (one output at the
+  session's sample rate) and macOS audio units mapped to their iOS counterparts;
+- **Metal differences**: managed storage becomes shared, Mac GPU families are reported, and
+  metallibs from older tools load once their macOS flag is cleared;
+- **case-insensitive file lookups**, as on a Mac's default volume (games ask for
+  `libAPEXFramework.dylib` and ship `libApexFramework.dylib`);
+- an **on-screen gamepad** (below), and per-game engine settings from the profile.
+
+Game profiles for this route match on the Unreal project folder:
+
+```json
+{
+  "name": "Stray",
+  "unreal_project": "Hk_project",
+  "engine_ini": {"SystemSettings": {"r.Streaming.PoolSize": "auto"}},
+  "why": "shown in the build log"
+}
+```
+
+`engine_ini` keys are written into the game's user config at each launch; `auto` for
+`r.Streaming.PoolSize` sizes the texture pool from the device's RAM. `intercept` lists extra imports
+to bind to the shim, and `patches` replaces byte strings in the executable (hex, same length).
+
+Debugging: shipping builds log almost nothing, but Mac game binaries usually keep their symbol table.
+
+- the shim logs lines starting with `[recomp]`: unimplemented AppKit methods (they return zero instead
+  of crashing), a backtrace when the game calls `exit`/`abort` with an error, and every 10 s the frame
+  rate and the memory left;
+- copy an empty file named `recomp-screenshot` into the app's `Documents` (`devicectl device copy to
+  --domain-type appDataContainer`) to get `recomp-screen.png` back from the same folder;
+- `xcrun lldb` can attach to the game on the device (`device select <UDID>`, `device process attach
+  -p <pid>` after a `devicectl ... launch --start-stopped`); give it ~20 s to load symbols;
+- `tools/xref.py` finds the code that uses a string or address.
+
+## On-screen gamepad (Unreal route)
+
+Touches drive a software game controller that the game reads like a real one, so its prompts show
+gamepad buttons. It hides while a physical controller is connected.
+
+| Where | Control |
+|---|---|
+| left half of the screen | move stick (appears where the finger lands) |
+| right half of the screen | camera stick |
+| bottom right | A, B, X, Y |
+| top corners | LB, LT (left), RB, RT (right) |
+| top left | Menu, View |
+| bottom left / near the face buttons | L3 / R3 |
+
 ## Touch controls (Recomp.TouchMouse)
 
 | Gesture | Mouse |
@@ -156,10 +248,13 @@ stays on your machine.
 - `scripts/`: app build, signing, notarization and icon
 - `recomp/discover.py`: game scanning and environment checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
-- `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules
+- `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
+  the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
+- `recomp/native/appkit/`: the shim for retargeted Mac binaries; `recomp/native/steam_api_stub.c`
+- `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
 - `recomp/textures.py`: BCn → ASTC texture conversion; `recomp/native/`: native start-up fixes
 - `recomp/shims/`: managed shims injected into games
 - `docs/images/`: screenshots for this README
 - `stubs/`: hand-written native stub overrides
-- `tools/inspect_app.py`: triage; `tools/asmtool`: assembly scan/rewrite (Mono.Cecil); `tools/ilspy.sh`: decompiler
+- `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite (Mono.Cecil); `tools/ilspy.sh`: decompiler
 - `toolchain/`, `build/`: downloaded editors and per-game work (not in git)
