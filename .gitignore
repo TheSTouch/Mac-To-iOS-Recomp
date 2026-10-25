@@ -23,3 +23,5 @@ reports/
 *.unity3d
 *.pak
 *.pck
+app/.build/
+dist/

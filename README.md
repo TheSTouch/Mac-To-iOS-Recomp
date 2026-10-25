@@ -3,13 +3,35 @@
 Port macOS games you own to your own iPad. Builds are for personal sideloading
 with your developer account; never share the resulting app, since it contains the game.
 
-## Triage first
+## Recomp Helper (Mac app)
+
+Download the notarized DMG from [Releases](../../releases), or build it yourself (below).
+The app:
+
+1. scans Steam libraries, `/Applications`, `~/Applications`, GOG, Epic, itch and Heroic folders,
+   plus any folders you add;
+2. sorts what it finds into *Supported*, *Not yet supported*, *Not supported* and *Not installed*,
+   with the reason for each game;
+3. for a supported game, asks up front for everything it needs (iPad, signing team, bundle ID,
+   where to keep the ~40 GB workspace, permission to download the matching Unity editor),
+   then runs the whole port with progress bars, a live log and plain-language hints when
+   something needs your attention (unlock the iPad, sign in to Xcode, …).
+
+Requirements: an Apple Silicon or Intel Mac on macOS 14+, Xcode with the iOS SDK, the
+.NET SDK (`brew install dotnet`), an Apple Developer account signed in to Xcode, a free
+Unity Personal license (open Unity Hub once and sign in), and an iPad paired with the Mac.
+
+## Command line
 
 ```
-python3 recomp.py inspect /path/to/Game.app
+python3 recomp.py scan                       # installed games and their support status
+python3 recomp.py inspect /path/to/Game.app  # detailed triage of one bundle
+python3 recomp.py env                        # build tools, signing teams, paired devices
 ```
 
-This reports the engine, CPU architectures, Mac-only frameworks and which route applies:
+Set `RECOMP_HOME` to put the large files (Unity editors, build output) on another disk.
+
+`inspect` reports the engine, CPU architectures, Mac-only frameworks and which route applies:
 
 | Route | Games | How |
 |---|---|---|
@@ -51,9 +73,32 @@ Stages (run all, or name some): `prepare player inject xcode install`.
 
 A real keyboard or trackpad, when connected, works alongside.
 
+## Building the app
+
+```
+scripts/build-app.sh                                     # local, ad-hoc signed, in dist/
+SIGN_ID="Developer ID Application: <name> (<TEAMID>)" NOTARY_PROFILE=<profile> scripts/build-app.sh
+```
+
+The second form signs with the hardened runtime, builds a DMG, notarizes and staples it.
+Create the notary profile once with
+`xcrun notarytool store-credentials <profile> --apple-id <apple-id> --team-id <TEAMID>`.
+The app bundles the engine from `git archive HEAD`, so only committed files ship.
+`swift scripts/make-icon.swift` regenerates the icon.
+
+## Contributing
+
+This repository is public. Never commit game files or personal details: enable the guard
+once per clone with `git config core.hooksPath .githooks`, and list your own private
+strings (name, email, team ID, device names) as regexes in `.git/private-patterns`, which
+stays on your machine.
+
 ## Layout
 
 - `recomp.py`: CLI
+- `app/`: Recomp Helper, the SwiftUI front end (talks to `recomp.py` through `RECOMP_EVENTS=1` progress lines)
+- `scripts/`: app build, signing, notarization and icon
+- `recomp/discover.py`: game scanning and environment checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
 - `recomp/shims/`: managed shims injected into games
 - `stubs/`: hand-written native stub overrides

@@ -164,7 +164,12 @@ def recommend(engine, all_archs, mac_only):
     return ["retarget"] if has_arm else ["recompile"]
 
 
-def inspect(app):
+# Folders whose Mach-O files matter; quick mode looks for code only here.
+CODE_DIRS = ("Contents/MacOS", "Contents/Frameworks", "Contents/PlugIns")
+
+
+def inspect(app, quick=False):
+    """Triage one bundle. quick: cap the file walk and skip sizes, for library scans."""
     app = os.path.abspath(app.rstrip("/"))
     contents = os.path.join(app, "Contents")
     info_path = os.path.join(contents, "Info.plist")
@@ -180,11 +185,15 @@ def inspect(app):
 
     names, rels, binaries = [], [], []
     total = 0
-    for path, name in walk(app):
+    for path, name in walk(app, limit=20000 if quick else 200000):
         names.append(name)
-        rels.append(path[len(app):])
+        rel = path[len(app):]
+        rels.append(rel)
+        if quick and not rel.lstrip("/").startswith(CODE_DIRS):
+            continue
         if os.path.isfile(path) and not os.path.islink(path):
-            total += os.path.getsize(path)
+            if not quick:
+                total += os.path.getsize(path)
             if is_macho(path):
                 binaries.append(path)
 
@@ -231,7 +240,7 @@ def inspect(app):
         flags.append("Intel-only: no arm64 code to reuse.")
     if engine == "Native / unknown" and "OpenGL" in mac_only:
         flags.append("Uses desktop OpenGL: iPadOS has none; needs a GL->Metal layer (e.g. MoltenGL/ANGLE/gl4es-style).")
-    if total > 4 * 1024**3:
+    if not quick and total > 4 * 1024**3:
         flags.append(f"Bundle is {total / 1024**3:.1f} GB: check iPad storage and RAM limits.")
 
     return {
@@ -239,7 +248,7 @@ def inspect(app):
         "name": info.get("CFBundleName") or os.path.basename(app),
         "bundle_id": info.get("CFBundleIdentifier"),
         "min_macos": info.get("LSMinimumSystemVersion"),
-        "size_mb": round(total / 1024**2, 1),
+        "size_mb": None if quick else round(total / 1024**2, 1),
         "engine": engine,
         "engine_backend": backend,
         "archs": sorted(all_archs),

@@ -16,9 +16,13 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASMTOOL = os.path.join(ROOT, "tools", "bin", "asmtool", "asmtool")
+from recomp import events, paths
+
+ROOT = paths.CODE
+# Built helpers live under HOME: CODE may be a signed, read-only app bundle.
+ASMTOOL = os.path.join(paths.HOME, "bin", "asmtool", "asmtool")
 STUBS = os.path.join(ROOT, "stubs")
 EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
@@ -57,6 +61,24 @@ def run(cmd, **kw):
     subprocess.run(cmd, check=True, **kw)
 
 
+def stream(cmd, on_line, **kw):
+    """Run cmd, passing each output line to on_line; raise on failure."""
+    log("$ " + " ".join(cmd))
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, **kw)
+    for line in proc.stdout:
+        on_line(line.rstrip("\n"))
+    if proc.wait() != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def dotnet_build(project, out, *props):
+    """Build a .NET project from a copy under HOME, keeping obj/ out of CODE."""
+    src = os.path.join(paths.HOME, "src", os.path.basename(project))
+    shutil.rmtree(src, ignore_errors=True)
+    shutil.copytree(project, src, ignore=shutil.ignore_patterns("bin", "obj"))
+    run(["dotnet", "build", src, "-c", "Release", "-nologo", "-v", "q", "-o", out, *props])
+
+
 class Game:
     def __init__(self, app):
         self.app = os.path.abspath(app.rstrip("/"))
@@ -76,7 +98,7 @@ class Game:
 
 
 def editor_paths(version, unity_root=None):
-    base = unity_root or os.path.join(ROOT, "toolchain", f"Unity-{version}")
+    base = unity_root or os.path.join(paths.TOOLCHAIN, f"Unity-{version}")
     unity = os.path.join(base, "Unity.app")
     ios = os.path.join(base, "PlaybackEngines", "iOSSupport")
     if not os.path.isdir(unity) or not os.path.isdir(ios):
@@ -103,8 +125,7 @@ def is_engine(name, engine_names):
 
 def ensure_asmtool():
     if not os.path.exists(ASMTOOL):
-        run(["dotnet", "build", os.path.join(ROOT, "tools", "asmtool"), "-c", "Release", "-nologo", "-v", "q",
-             "-o", os.path.dirname(ASMTOOL)])
+        dotnet_build(os.path.join(ROOT, "tools", "asmtool"), os.path.dirname(ASMTOOL))
 
 
 def scan_pinvokes(managed_dir):
@@ -266,8 +287,7 @@ def active_shims(game):
 def build_shims(game, out):
     built = []
     for spec in active_shims(game):
-        proj = os.path.join(SHIMS, spec["project"])
-        run(["dotnet", "build", proj, "-c", "Release", "-o", out, "-nologo", "-v", "q", f"-p:GameManaged={game.managed}"])
+        dotnet_build(os.path.join(SHIMS, spec["project"]), out, f"-p:GameManaged={game.managed}")
         built.append(os.path.join(out, spec["assembly"] + ".dll"))
     return built
 
@@ -312,11 +332,53 @@ def player(game, work, unity, bundle_id, team):
            "-recompOut", out, "-recompBundleId", bundle_id, "-recompTeam", team,
            "-recompProduct", game.name, "-recompVersion", game.info.get("CFBundleShortVersionString", "1.0").split("-")[0]]
     log(f"Unity batchmode build (log: {logfile})")
-    r = subprocess.run(cmd)
-    if r.returncode != 0 or not os.path.isdir(out):
+    if os.path.exists(logfile):
+        os.remove(logfile)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    follow_unity_log(logfile, proc)
+    if proc.returncode != 0 or not os.path.isdir(out):
         tail = subprocess.run(["tail", "-60", logfile], capture_output=True, text=True).stdout
-        sys.exit(f"Unity build failed ({r.returncode}). Last log lines:\n{tail}")
+        sys.exit(f"Unity build failed ({proc.returncode}). Last log lines:\n{tail}")
     log(f"Xcode project: {out}")
+
+
+# Unity's build system prints "[ done/total  time] step"; IL2CPP and the
+# player build dominate the run, so their counter is the progress bar.
+BEE_PROGRESS = re.compile(r"^\[\s*(\d+)/\s*(\d+)\s")
+
+
+def follow_unity_log(logfile, proc):
+    """Turn the Unity log into progress events until the editor exits."""
+    pos, last_emit = 0, 0.0
+    phase = "Starting Unity"
+    phases = [("Requested script compilation", "Compiling scripts"), ("Building player", "Building player"),
+              ("il2cpp", "Converting code with IL2CPP"), ("Xcode", "Writing Xcode project")]
+    while True:
+        done = proc.poll() is not None
+        if os.path.exists(logfile):
+            with open(logfile, errors="replace") as f:
+                f.seek(pos)
+                chunk = f.read()
+                pos = f.tell()
+            for line in chunk.splitlines():
+                events.check_hints(line)
+                for needle, name in phases:
+                    if needle in line:
+                        phase = name
+                m = BEE_PROGRESS.match(line)
+                now = time.time()
+                if m and now - last_emit > 0.5:
+                    a, b = int(m.group(1)), int(m.group(2))
+                    events.progress(a / b if b else None, f"{phase}: step {a} of {b}")
+                    last_emit = now
+                elif now - last_emit > 2:
+                    events.progress(None, phase)
+                    last_emit = now
+                if line.startswith(("Error", "error")) or ": error" in line:
+                    events.emit("log", line=line)
+        if done:
+            return
+        time.sleep(0.5)
 
 
 def patch_target_platform(path, target):
@@ -424,10 +486,31 @@ def merge_boot_config(shell_cfg, game_cfg, out):
 def xcode(work, team):
     proj = os.path.join(work, "xcode", "Unity-iPhone.xcodeproj")
     derived = os.path.join(work, "DerivedData")
-    run(["xcodebuild", "-project", proj, "-scheme", "Unity-iPhone", "-configuration", "Release",
-         "-destination", "generic/platform=iOS", "-derivedDataPath", derived,
-         "-allowProvisioningUpdates", f"DEVELOPMENT_TEAM={team}", "CODE_SIGN_STYLE=Automatic",
-         "build"])
+    sources = sum(1 for _, _, files in os.walk(os.path.join(work, "xcode"))
+                  for n in files if n.endswith((".cpp", ".c", ".m", ".mm")))
+    compiled = [0]
+    tail = []
+
+    def on_line(line):
+        events.check_hints(line)
+        tail.append(line)
+        del tail[:-40]
+        if line.startswith("CompileC "):
+            compiled[0] += 1
+            if compiled[0] % 20 == 0:
+                events.progress(min(compiled[0] / max(sources, 1), 0.99), f"Compiling: {compiled[0]} of ~{sources} files")
+        elif line.startswith(("Ld ", "CodeSign ")):
+            events.progress(None, line.split(" ")[0].replace("Ld", "Linking").replace("CodeSign", "Signing"))
+        elif " error: " in line:
+            events.emit("log", line=line)
+
+    try:
+        stream(["xcodebuild", "-project", proj, "-scheme", "Unity-iPhone", "-configuration", "Release",
+                "-destination", "generic/platform=iOS", "-derivedDataPath", derived,
+                "-allowProvisioningUpdates", f"DEVELOPMENT_TEAM={team}", "CODE_SIGN_STYLE=Automatic",
+                "build"], on_line)
+    except subprocess.CalledProcessError:
+        sys.exit("xcodebuild failed. Last lines:\n" + "\n".join(tail))
     products = os.path.join(derived, "Build", "Products", "Release-iphoneos")
     apps = [n for n in os.listdir(products) if n.endswith(".app")]
     log(f"built: {', '.join(os.path.join(products, a) for a in apps)}")
@@ -438,4 +521,7 @@ def install(work, device):
     apps = [n for n in os.listdir(products) if n.endswith(".app")]
     if not apps:
         sys.exit("no built .app - run the xcode stage first")
-    run(["xcrun", "devicectl", "device", "install", "app", "--device", device, os.path.join(products, apps[0])])
+    def on_line(line):
+        events.check_hints(line)
+        print(line, flush=True)
+    stream(["xcrun", "devicectl", "device", "install", "app", "--device", device, os.path.join(products, apps[0])], on_line)
