@@ -11,8 +11,10 @@ import ServiceManagement
 /// iCloud Drive once, when turning sync on from the app.
 enum SaveSyncAgent {
     static let plistName = "io.github.thestouch.recomphelper.saves.plist"
-    /// Bumped when the bundled plist changes, so an installed item picks it up.
-    static let version = 2
+    /// The build that registered the item. launchd keeps the plist and the code
+    /// requirement it was registered with, and refuses to start a rebuilt binary
+    /// (exit 78, "needs LWCR update"), so every new build registers it again.
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
     static var service: SMAppService { .agent(plistName: plistName) }
     static let gamesFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Recomp Helper/save-sync/games.json")
@@ -40,7 +42,7 @@ enum SaveSyncAgent {
         } catch {
             return "The background item could not be \(wanted ? "added" : "removed"): \(error.localizedDescription)"
         }
-        UserDefaults.standard.set(version, forKey: "saveSyncAgentVersion")
+        UserDefaults.standard.set(wanted ? version : nil, forKey: "saveSyncAgentVersion")
         if wanted, service.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
             return "Allow Recomp Helper in System Settings > General > Login Items so saves keep syncing."
@@ -48,12 +50,12 @@ enum SaveSyncAgent {
         return nil
     }
 
-    /// At app launch: re-register an item installed by an older version of the app.
+    /// At app launch: re-register an item registered by another build of the app.
+    /// The unregistration has to finish (launchd unloads the job) before registering.
     static func refreshIfOutdated() {
         guard !syncedGames().isEmpty, service.status == .enabled,
-              UserDefaults.standard.integer(forKey: "saveSyncAgentVersion") != version else { return }
-        try? service.unregister()
-        _ = update(wanted: true)
+              UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version else { return }
+        service.unregister { _ in _ = update(wanted: true) }
     }
 
     @MainActor static func runHeadless() -> Never {
