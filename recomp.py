@@ -6,8 +6,10 @@
   recomp.py env [--json]                             build tools, signing teams, connected devices
   recomp.py toolchain <Game.app> [--check]           fetch (or check for) the Unity editor + iOS support that game needs
   recomp.py unity <Game.app> [stages] [options]      Unity/Mono route (IL2CPP recompilation)
+  recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
 
 Unity stages, in order (default: all): prepare player inject xcode install
+Unreal stages, in order (default: all): prepare xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
 
 Large files (Unity editors, build output) go under $RECOMP_HOME, default this folder.
@@ -26,6 +28,7 @@ sys.path.insert(0, ROOT)
 from recomp import events, paths  # noqa: E402
 
 STAGES = ["prepare", "player", "inject", "xcode", "install"]
+UNREAL_STAGES = ["prepare", "xcode", "install"]
 
 
 def cmd_scan(rest):
@@ -115,7 +118,50 @@ def cmd_unity(rest):
     return 0
 
 
-COMMANDS = {"scan": cmd_scan, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity}
+def cmd_unreal(rest):
+    from recomp import unreal_ios as u
+    p = argparse.ArgumentParser(prog="recomp.py unreal")
+    p.add_argument("app")
+    p.add_argument("stages", nargs="*")
+    p.add_argument("--team")
+    p.add_argument("--bundle-id")
+    p.add_argument("--device")
+    p.add_argument("--work")
+    a = p.parse_args(rest)
+    bad = [s for s in a.stages if s not in UNREAL_STAGES]
+    if bad:
+        p.error(f"unknown stage(s) {bad}; choose from {UNREAL_STAGES}")
+    game = u.Game(a.app)
+    work = os.path.abspath(a.work or os.path.join(paths.BUILD, game.slug))
+    os.makedirs(work, exist_ok=True)
+    bundle_id = a.bundle_id or f"local.recomp.{game.slug.lower()}"
+    stages = a.stages or UNREAL_STAGES
+    if "xcode" in stages and not a.team:
+        sys.exit("xcode needs --team (see: recomp.py env)")
+    if "install" in stages and not a.device:
+        sys.exit("install needs --device (see: recomp.py env)")
+    u.log(f"{game.name}: Unreal ({', '.join(game.projects)}) -> {work}")
+    for s in UNREAL_STAGES:
+        if s not in stages:
+            continue
+        events.stage(s, "start")
+        try:
+            if s == "prepare":
+                u.prepare(game, work)
+            elif s == "xcode":
+                u.xcode(game, work, a.team, bundle_id)
+            elif s == "install":
+                u.install(work, a.device)
+        except BaseException as e:
+            events.stage(s, "failed")
+            if not isinstance(e, SystemExit):
+                traceback.print_exc()
+            raise
+        events.stage(s, "done")
+    return 0
+
+
+COMMANDS = {"scan": cmd_scan, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
 
 
 def main():

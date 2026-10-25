@@ -90,6 +90,9 @@ def status_of(report):
         return "planned", f"{engine}: planned engine-runtime route."
     if engine in ("Java", "Adobe AIR", "Wine wrapper (not native)", "GameMaker"):
         return "unsupported", f"{engine}: no generic route."
+    if engine == "Unreal" and "arm64" in report["archs"]:
+        # The route works (recomp.py unreal); the app cannot run it yet.
+        return "planned", "Unreal Engine 4: ports from the command line (recomp.py unreal); not from this app yet."
     return "planned", "Native Apple Silicon: planned binary retarget route."
 
 

@@ -304,7 +304,7 @@ def apply_profiles(game_dlls, plugins):
             continue
         with open(os.path.join(PROFILES, name)) as f:
             profile = json.load(f)
-        if profile["when_assembly"] not in game_dlls:
+        if profile.get("when_assembly") not in game_dlls:  # Unreal profiles have none
             continue
         for dll, methods in profile.get("guard", {}).items():
             cmd = [ASMTOOL, "guard"]

@@ -29,5 +29,7 @@ dist/
 /src/
 /bin/
 /venv/
+# iOS SDK export index, rebuilt from the installed Xcode
+/cache/
 # Claude Code settings are per machine
 .claude/
