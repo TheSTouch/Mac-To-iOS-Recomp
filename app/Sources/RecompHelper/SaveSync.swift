@@ -57,8 +57,10 @@ enum SaveSyncAgent {
     /// job is booted out, the registration is redone once it is gone, and the whole
     /// thing is tried once more if the job still does not run.
     static func refreshIfOutdated() {
-        guard !syncedGames().isEmpty, service.status == .enabled,
-              UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version else { return }
+        // The status is not "enabled" here after a rebuild, so it is not checked.
+        guard !syncedGames().isEmpty, UserDefaults.standard.string(forKey: "saveSyncAgentVersion") != version
+        else { return }
+        NSLog("[recomp] save sync item: re-registering for build \(version) (status \(service.status.rawValue))")
         DispatchQueue.global(qos: .utility).async {
             for attempt in 1...2 {
                 let out = launchctl(["bootout", job]).status
