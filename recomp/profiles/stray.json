@@ -9,11 +9,12 @@
     ]
   },
   "unreal_project": "Hk_project",
-  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory",
+  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory; turn off capsule shadows, whose tiled pass blacks out the fog in every 16-pixel tile the cat touches on iOS (hard-edged black blocks around the cat on the title screen)",
   "engine_ini": {
     "SystemSettings": {
       "r.Streaming.PoolSize": "auto",
-      "r.Streaming.LimitPoolSizeToVRAM": "1"
+      "r.Streaming.LimitPoolSizeToVRAM": "1",
+      "r.CapsuleShadows": "0"
     }
   }
 }
