@@ -128,7 +128,7 @@ struct GameDetail: View {
                         Text(game.statusDetail).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if game.route == "unity" {
+                    if game.route == "unity" || game.route == "unreal" {
                         Button("Port to iPad…") { setup = true }
                             .buttonStyle(.borderedProminent).controlSize(.large)
                     }
@@ -199,7 +199,13 @@ struct PortSetup: View {
                 }
                 if let free = state.freeSpace(at: state.workspace) {
                     LabeledContent("Free space", value: ByteCountFormatter.string(fromByteCount: free, countStyle: .file))
-                    if free < 40_000_000_000 {
+                    if game.route == "unreal" {
+                        // The app holds the game's data as APFS clones, free on the game's own disk.
+                        if free < 2_000_000_000 {
+                            Text("An Unreal port needs a few GB, and as much as the game itself when the workspace is not on the game's disk. Choose a bigger disk.")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    } else if free < 40_000_000_000 {
                         Text("A Unity port needs about 40 GB (editor, generated code, the game's data). Choose a bigger disk.")
                             .font(.caption).foregroundStyle(.orange)
                     }

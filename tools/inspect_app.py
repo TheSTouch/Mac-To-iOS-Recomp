@@ -245,7 +245,9 @@ def inspect(app, quick=False):
 
     return {
         "app": app,
-        "name": info.get("CFBundleName") or os.path.basename(app),
+        # The bundle's file name is what Finder and stores show; CFBundleName can be a
+        # build product name (Unreal: "Stray-Mac-Shipping").
+        "name": os.path.basename(app)[:-len(".app")] if app.endswith(".app") else info.get("CFBundleName") or os.path.basename(app),
         "bundle_id": info.get("CFBundleIdentifier"),
         "min_macos": info.get("LSMinimumSystemVersion"),
         "size_mb": None if quick else round(total / 1024**2, 1),

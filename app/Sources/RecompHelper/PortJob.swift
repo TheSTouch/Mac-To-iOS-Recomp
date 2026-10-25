@@ -50,10 +50,20 @@ final class PortJob: ObservableObject, Identifiable {
         ("install", "Install on iPad"),
     ]
 
+    static let unrealStages: [(String, String)] = [
+        ("prepare", "Retarget game code to iOS"),
+        ("xcode", "Build and sign iPad app"),
+        ("install", "Install on iPad"),
+    ]
+
+    /// The engine command for the game's route: "unity" or "unreal".
+    let route: String
+
     init(game: Game, settings: Settings) {
         self.game = game
         self.settings = settings
-        stages = Self.unityStages.map { Stage(id: $0.0, title: $0.1) }
+        route = game.route ?? "unity"
+        stages = (route == "unreal" ? Self.unrealStages : Self.unityStages).map { Stage(id: $0.0, title: $0.1) }
     }
 
     var workFolder: URL {
@@ -66,6 +76,11 @@ final class PortJob: ObservableObject, Identifiable {
 
     private func check() async {
         phase = .checking
+        if route == "unreal" {
+            // Nothing to download: the game's own binaries are retargeted.
+            await runPipeline()
+            return
+        }
         do {
             let status = try await Engine.json(ToolchainStatus.self, ["toolchain", game.app, "--check"], home: settings.workspace)
             if status.installed {
@@ -96,12 +111,12 @@ final class PortJob: ObservableObject, Identifiable {
         Task {
             phase = .running
             mark("install", .pending)
-            _ = await run(["unity", game.app, "install"] + unityOptions)
+            _ = await run([route, game.app, "install"] + portOptions)
             if case .running = phase { phase = .finished }
         }
     }
 
-    private var unityOptions: [String] {
+    private var portOptions: [String] {
         ["--team", settings.team, "--bundle-id", settings.bundleId, "--device", settings.device]
     }
 
@@ -110,7 +125,7 @@ final class PortJob: ObservableObject, Identifiable {
         if toolchainMissing {
             guard await run(["toolchain", game.app]) else { return }
         }
-        guard await run(["unity", game.app] + unityOptions) else { return }
+        guard await run([route, game.app] + portOptions) else { return }
         phase = .finished
         fraction = 1
         detail = "Installed. Open it from your iPad's home screen."

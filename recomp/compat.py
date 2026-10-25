@@ -204,11 +204,9 @@ def unreal(report):
     except (OSError, subprocess.CalledProcessError, SystemExit) as e:
         return ("untested", "Untested: Unreal Engine 4, arm64. Imports not checked.",
                 [f"Could not check the imports (needs Xcode's iOS SDK): {e}"])
-    cli = "Port it from the command line: recomp.py unreal."
     if blockers:
-        return "needs_work", f"Unreal Engine 4: the route applies, but something here needs work first. {cli}", blockers
-    return ("untested", f"Untested: Unreal Engine 4, arm64, every import binds on iOS. May work out of the box. {cli}",
-            [])
+        return "needs_work", "Unreal Engine 4: the route applies, but something here needs work first.", blockers
+    return "untested", "Untested: Unreal Engine 4, arm64, every import binds on iOS. May work out of the box.", []
 
 
 def classify(report):

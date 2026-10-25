@@ -61,10 +61,11 @@ The app:
    - *Needs work*: a route handles it, but a check found something that stops the port or needs a
      profile first (listed under Compatibility);
    - *Not yet supported*, *Not supported* and *Not installed*;
-3. for a Unity game, asks up front for everything it needs (iPad, signing team, bundle ID,
-   where to keep the ~40 GB workspace, permission to download the matching Unity editor),
-   then runs the whole port with progress bars, a live log and plain-language hints when
-   something needs your attention (unlock the iPad, sign in to Xcode, …).
+3. for a game a route handles (Unity or Unreal), asks up front for everything it needs (iPad,
+   signing team, bundle ID, where to keep the workspace: ~40 GB for Unity, a few GB for Unreal
+   when it is on the game's disk; for Unity, permission to download the matching editor), then
+   runs the whole port with progress bars, a live log and plain-language hints when something
+   needs your attention (unlock the iPad, sign in to Xcode, …).
 
 The checks (`recomp/compat.py`), which run on every scan:
 
@@ -99,7 +100,7 @@ Set `RECOMP_HOME` to put the large files (Unity editors, build output) on anothe
 | Route | Games | How |
 |---|---|---|
 | **Unity / Mono** (implemented) | Unity games whose `Data/Managed` holds .NET assemblies | Recompile the game's assemblies to native ARM64 code with the matching Unity version's IL2CPP, then run the game's own data on Unity's iOS player |
-| **Unreal** (implemented, command line) | Unreal Engine 4 games built for Apple Silicon | Re-mark the game's own arm64 binaries as iOS and bind what iOS lacks (AppKit, Mac display and audio APIs) to a shim library |
+| **Unreal** (implemented) | Unreal Engine 4 games built for Apple Silicon | Re-mark the game's own arm64 binaries as iOS and bind what iOS lacks (AppKit, Mac display and audio APIs) to a shim library |
 | Mach-O retarget (planned) | Other native arm64 games (custom engines) | Same retargeting, with shims for what each engine uses |
 | Engine runtime swap (planned) | Godot, Ren'Py, LÖVE, HTML5 | Run the game's data on the engine's iOS runtime |
 | Static recompilation | Intel-only games | Per-game project; iPadOS forbids JIT, so no Rosetta-style translation |
@@ -163,8 +164,7 @@ error reports put them under the app's `Documents`, visible in the Files app.
 python3 recomp.py unreal <Game.app> --team <TEAMID> --bundle-id <id> --device <iPad name or UDID>
 ```
 
-Stages (run all, or name some): `prepare xcode install`. The Recomp Helper app lists these games
-but cannot port them yet.
+Stages (run all, or name some): `prepare xcode install`. Recomp Helper runs the same stages.
 
 1. **prepare**: every Mach-O in the bundle is rewritten for iOS (`recomp/macho.py`): the platform
    becomes iOS, framework paths take their iOS form, and the main executable's imports are rebound
