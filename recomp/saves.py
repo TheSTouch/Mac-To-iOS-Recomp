@@ -31,6 +31,7 @@ Profile schema: "saves": {"mac": "<save root, ~ and glob characters allowed>",
 A glob matching several folders (one per Steam account, say) uses the most
 recently changed one.
 """
+import ctypes
 import datetime
 import filecmp
 import glob
@@ -60,6 +61,24 @@ SAME_TIME = 1.0
 
 def log(msg):
     print(f"[recomp] {msg}", file=sys.stderr, flush=True)
+
+
+def allow_downloads():
+    """Let this process read iCloud Drive files that are not downloaded yet.
+
+    macOS keeps such files as dataless placeholders and fills them in when they
+    are read, except for processes it treats as background ones (Recomp Helper's
+    background item), where the read fails with EDEADLK ("Resource deadlock
+    avoided") unless the process asks for materialization.
+    """
+    IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS, IOPOL_MATERIALIZE_DATALESS_FILES_ON = 3, 0, 2
+    try:
+        libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)
+        if libc.setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS,
+                               IOPOL_MATERIALIZE_DATALESS_FILES_ON) != 0:
+            log(f"cannot allow iCloud downloads: {os.strerror(ctypes.get_errno())}")
+    except (OSError, AttributeError) as e:
+        log(f"cannot allow iCloud downloads: {e}")
 
 
 class Game:
@@ -223,6 +242,7 @@ def sync(game, why):
     """One two-way sync of the game's include entries. Returns the counts."""
     root, cloud = mac_root(game), icloud_game(game)
     out = {"to_cloud": 0, "to_mac": 0, "conflicts": 0, "errors": []}
+    allow_downloads()
     if not root:
         return out  # the game has not saved on this Mac yet; iCloud saves wait for its folder
     names = include(game)
