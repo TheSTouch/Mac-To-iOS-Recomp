@@ -47,9 +47,10 @@ namespace Recomp
         static bool _releaseNextFrame, _tapPending;
         static ushort _tapButtons, _loggedButtons;
         static bool _penDown, _sawPen;
-        // Placement mode: where the player last aimed (the ghost stays there), whether the mouse
-        // goes back there once a touch on the game's UI or a camera gesture is over, and the
-        // frames left before Place clicks there.
+        // The spot on the map the last touch there lifted at (while placing: where the player aimed,
+        // the ghost stays there), whether the mouse goes back there once a touch on the game's UI
+        // is over (so the game sees it leave: no lingering hover, tooltip or hover-preview), and
+        // the frames left before Place clicks there.
         static Vector2 _aim;
         static bool _hasAim, _restoreAim;
         static int _restoreWait, _probeFrames, _placeIn;
@@ -229,7 +230,7 @@ namespace Recomp
                         _buttons = 0;
                         if (_maxFingers == 2 && now - _modeStart < TapSeconds && _travel < MoveThreshold)
                             Tap(1 << (int)MouseButton.Right, "right click (two-finger tap)");
-                        End();
+                        End(camera: true);
                         break;
                     }
                     if (n == _lastCount)
@@ -280,11 +281,18 @@ namespace Recomp
             _lastSpread = 0f;
         }
 
-        // A gesture other than aiming is over: while placing, the mouse goes back to the aimed spot.
-        static void End()
+        // A gesture other than aiming is over. A touch that lifted on the map leaves the mouse there
+        // and becomes the spot to return to; after a touch on the game's UI (or a camera gesture
+        // while placing) the mouse goes back to that spot.
+        static void End(bool camera = false)
         {
             _mode = Mode.None;
-            if (Placement.Active && _hasAim)
+            if (!camera && !Placement.MouseOverUI(_lastPos))
+            {
+                _aim = _lastPos;
+                _hasAim = true;
+            }
+            else if (_hasAim && (!camera || Placement.Active))
             {
                 _restoreAim = true;
                 _restoreWait = 0;
@@ -306,10 +314,15 @@ namespace Recomp
             return true;
         }
 
+        // Placing starts or stops: the ghost starts at the last spot touched on the map.
         internal static void ResetAim()
         {
-            _hasAim = _restoreAim = false;
             _placeIn = 0;
+            if (_hasAim && Touches.Count == 0)
+            {
+                _restoreAim = true;
+                _restoreWait = 0;
+            }
         }
 
         // A left click at a spot, for taps the gamepad passes on.

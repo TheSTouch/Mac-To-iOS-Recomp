@@ -3,7 +3,9 @@
 // lifts, so there is no time to rotate. While a game mod says a building is being placed
 // (Active), a touch on the world only moves the mouse: the ghost follows and stays where
 // the finger lifts, and the mod's Place button clicks there (see TouchMouse). Touches on
-// the game's UI click as usual. With Rows on, touches act directly again, so a drag draws
+// the game's UI click as usual, and the mouse then goes back to the aimed spot (outside
+// placing too: to the last spot touched on the map, so the game sees the mouse leave its
+// buttons instead of hovering them). With Rows on, touches act directly again, so a drag draws
 // a row (paths, walls) and places it when the finger lifts.
 //
 // The game side lives in a mod built into the port (Timberborn: recomp/builtin_mods/
