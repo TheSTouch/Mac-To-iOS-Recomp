@@ -65,7 +65,7 @@ Known limits:
   peak); later builds reuse the result. The app is about 4.6 GB, and installing an update needs
   as much free space again on the iPad;
 - characters and worlds kept in Steam Cloud on the Mac are not in the local save folders: move them
-  to local storage in Valheim's menus to carry them over.
+  to local storage in Valheim's menus to carry them over ([Saves across devices](#saves-across-devices)).
 
 ## Recomp Helper (Mac app)
 
@@ -114,6 +114,7 @@ Unity Personal license (open Unity Hub once and sign in), and an iPad paired wit
 python3 recomp.py scan                       # installed games and their support status
 python3 recomp.py inspect /path/to/Game.app  # detailed triage of one bundle
 python3 recomp.py env                        # build tools, signing teams, paired devices
+python3 recomp.py saves /path/to/Game.app --enable   # share its saves with the iOS ports (see below)
 ```
 
 Set `RECOMP_HOME` to put the large files (Unity editors, build output) on another disk.
@@ -289,6 +290,48 @@ button presses Escape on whichever keyboard those bindings resolve to. It is dra
 when the game uses it, otherwise as a uGUI overlay.
 A real keyboard or trackpad, when connected, works alongside.
 
+## Saves across devices
+
+Games whose profile has a `saves` block (Timberborn, Stray, Valheim) share their saves through
+iCloud Drive, in `iCloud Drive/Recomp Saves/<Game>/`, which Files and Finder both show. No Apple ID
+setup or iCloud entitlement is needed; it works with any developer account.
+
+- **iPad / iPhone**: at the first launch the port asks "Sync saves with your other devices through
+  iCloud Drive?". Choose folder, then pick iCloud Drive > Recomp Saves (or its `<Game>` folder;
+  create it if it does not exist). The port then syncs at launch (before the game reads its saves,
+  at most 15 s), when it goes to the background, when it quits, and every 5 minutes.
+  "Not now" writes `Recomp Saves.txt` in the app's folder (Files > On My iPad > `<Game>`); delete it
+  to be asked again. With sync on, that file shows the folder, the last sync and any errors; rename
+  it to `Recomp Saves off.txt` to stop syncing.
+- **Mac**: in Recomp Helper, select the game and turn on *Sync saves with iCloud Drive* (or
+  `python3 recomp.py saves <Game.app> --enable`). The Mac game keeps saving to its usual folder and
+  Steam Cloud keeps working; Recomp Helper copies the saves both ways right after the game quits,
+  when saves arrive from iOS, and hourly. macOS asks once to let Recomp Helper read Documents and
+  iCloud Drive, and lists it under Login Items > Allow in the Background (leave it on). The first
+  `--enable` backs the saves up to `~/Library/Application Support/Recomp Helper/save-backups/`.
+  `recomp.py saves <Game.app> --status|--sync|--disable` does the rest.
+
+Rules:
+
+- per file, the newest version wins;
+- when a file changed on two devices since they last synced, the other version is kept next to it as
+  `<name>.conflict-<device>-<yyyyMMdd-HHmm><ext>`. If both devices were offline at the same time,
+  iCloud Drive may keep the second one as `<name> 2<ext>` instead. Nothing is lost either way;
+- deleting a save never deletes it on other devices: delete it everywhere;
+- a device's first sync compares dates only, so a fresh install's default file can win over older
+  progress (the older one is kept as a conflict copy). Turn sync on before playing on a new device.
+
+Limits:
+
+- saves only move while the game is not running on the Mac, and while the port runs or is in the
+  background on iOS;
+- saves kept only through Steam Cloud's API are not covered, since Steam is stubbed on iOS.
+  Valheim's Steam Cloud worlds and characters are an example: move them to local storage in
+  Valheim's menus on the Mac first;
+- saves that need Mac mods do not load on iOS (no mod support yet);
+- local (ad-hoc signed) builds of Recomp Helper are a new app to macOS each time, so it asks for
+  folder access again after each rebuild. A Developer ID build does not.
+
 ## Building the app
 
 ```
@@ -320,7 +363,9 @@ stays on your machine.
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
 - `recomp/native/appkit/`: the shim for retargeted Mac binaries; `recomp/native/steam_api_stub.c`
 - `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
-- `recomp/textures.py`: BCn → ASTC texture conversion; `recomp/native/`: native start-up fixes
+- `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
+  native start-up fixes and `RecompSaves.m`, the iOS side of the save sync
+- `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`)
 - `recomp/shims/`: managed shims injected into games
 - `docs/images/`: screenshots for this README (the gallery holds four per row; add a `<td>` per game)
 - `stubs/`: hand-written native stub overrides
