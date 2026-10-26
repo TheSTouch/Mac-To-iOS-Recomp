@@ -168,6 +168,7 @@ namespace Recomp.Touchscreen
             SweepColony();
             SweepView();
             ArrangeView();
+            PlaceColonyDrawer();
             KeepPlaceLast();
             var root = _gameUI.panel?.visualTree.layout ?? default;
             var safe = SafeArea();
@@ -337,6 +338,22 @@ namespace Recomp.Touchscreen
             _uiLayout.AddTopLeft(_colonyTab, int.MinValue);
             _uiLayout.AddTopLeft(_colonyDrawer, int.MaxValue);
             SweepColony();
+        }
+
+        // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels
+        // and arrows (drawn 1.45x), which it overlapped at the strip's height.
+        void PlaceColonyDrawer()
+        {
+            if (_colonyDrawer == null || _topBar == null) return;
+            var bottom = _topBar.worldBound.yMax;
+            _topBar.Query<VisualElement>().ForEach(e =>
+            {
+                if (e.resolvedStyle.display == DisplayStyle.None || !e.visible) return;
+                var r = e.worldBound;
+                if (r.height > 0f && r.width > 0f && r.yMax > bottom) bottom = r.yMax;
+            });
+            var top = bottom - _topLeft.worldBound.yMin + Gap;
+            if (top > 0f && _colonyDrawer.style.top != top) _colonyDrawer.style.top = top;
         }
 
         void SweepColony()
