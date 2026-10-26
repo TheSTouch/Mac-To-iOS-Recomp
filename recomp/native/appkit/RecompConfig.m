@@ -2,8 +2,13 @@
 // recomp profile), merged into the game's user config files (Engine.ini,
 // GameUserSettings.ini) before the engine starts. Unreal reads
 // <user config dir>/<Name>.ini over the settings in its paks, so a [Section]
-// key written here wins; it is rewritten at every launch in case the game
-// saved over it.
+// key written here wins.
+//
+// On an iPhone, RecompIniOverridesPhone (the profile's "iphone" block over the
+// generic phone defaults, see unreal_ios.py) is laid over RecompIniOverrides key
+// by key: phone values win, base keys it does not name are kept.
+//
+// Keys are rewritten at every launch, in case the game saved over them.
 //
 // The value "auto" for r.Streaming.PoolSize sizes the texture pool from the
 // device's RAM: Mac builds size it for a GPU with its own memory, while an
@@ -17,6 +22,17 @@ static NSString *Resolve(NSString *key, NSString *value) {
         return [NSString stringWithFormat:@"%llu", MIN(MAX(mb * 15 / 100, 600ULL), 3000ULL)];
     }
     return value;
+}
+
+// base with over's keys laid on top, section by section.
+static NSDictionary *Overlay(NSDictionary *base, NSDictionary *over) {
+    NSMutableDictionary *out = [base mutableCopy] ?: [NSMutableDictionary new];
+    for (NSString *section in over) {
+        NSMutableDictionary *keys = [out[section] mutableCopy] ?: [NSMutableDictionary new];
+        [keys addEntriesFromDictionary:over[section]];
+        out[section] = keys;
+    }
+    return out;
 }
 
 static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sections) {
@@ -50,16 +66,21 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
         NSString *dir = info[@"RecompConfigDir"];
         NSDictionary *files = info[@"RecompIniOverrides"];
+        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+        NSDictionary *phoneFiles = phone ? info[@"RecompIniOverridesPhone"] : nil;
         if (!dir) return;
         dir = [NSHomeDirectory() stringByAppendingPathComponent:dir];
-        for (NSString *name in files) {
-            NSDictionary *sections = files[name];
+        NSMutableSet *names = [NSMutableSet setWithArray:[files allKeys]];
+        [names addObjectsFromArray:[phoneFiles allKeys]];
+        NSString *set = phoneFiles ? @"iPhone settings over the base" : @"base settings";
+        for (NSString *name in names) {
+            NSDictionary *sections = Overlay(files[name], phoneFiles[name]);
             if (![sections count]) continue;
             Merge([dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]], sections);
             NSMutableArray *applied = [NSMutableArray new];
             for (NSString *sec in sections)
                 for (NSString *k in sections[sec]) [applied addObject:[NSString stringWithFormat:@"%@=%@", k, Resolve(k, sections[sec][k])]];
-            RLOG(@"config: %@.ini: %@", name, [applied componentsJoinedByString:@", "]);
+            RLOG(@"config: %@.ini (%@): %@", name, set, [applied componentsJoinedByString:@", "]);
         }
     }
 }

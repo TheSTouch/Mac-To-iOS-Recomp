@@ -65,6 +65,20 @@ INTERCEPT = {
     "_AudioObjectSetPropertyData", "_AudioObjectAddPropertyListener", "_AudioObjectRemovePropertyListener",
     "_AudioComponentFindNext", "_AUGraphAddNode", "_AudioUnitSetProperty", "_AUGraphInitialize", "_AUGraphStart",
 }
+# Settings every Unreal game gets on an iPhone, under the profile's "iphone"
+# block (same shape as its engine_ini / game_user_settings_ini): a phone has a
+# smaller power and heat budget than an M-series iPad, and on its small screen
+# medium quality (1; 0 is low, 3 epic) looks close to epic.
+PHONE_DEFAULTS = {
+    "engine_ini": {},
+    "game_user_settings_ini": {
+        "ScalabilityGroups": {
+            "sg.ResolutionQuality": "70", "sg.ViewDistanceQuality": "1", "sg.EffectsQuality": "1",
+            "sg.TextureQuality": "1", "sg.ShadowQuality": "1", "sg.PostProcessQuality": "1",
+            "sg.FoliageQuality": "1", "sg.ShadingQuality": "1",
+        },
+    },
+}
 SHIM_NAME = "RecompAppKit.dylib"
 SHIM_INSTALL = "@executable_path/Frameworks/" + SHIM_NAME
 
@@ -376,6 +390,20 @@ done
 PLACEHOLDER_MAIN = "// Replaced by the game's executable before signing (see the Bundle game phase).\nint main(void) { return 0; }\n"
 
 
+def overlay(base, over):
+    """{file: {section: {key: value}}} with over's keys laid on base's, section by section."""
+    out = {f: {sec: dict(keys) for sec, keys in sections.items()} for f, sections in base.items()}
+    for f, sections in over.items():
+        for sec, keys in sections.items():
+            out.setdefault(f, {}).setdefault(sec, {}).update(keys)
+    return out
+
+
+def ini_overrides(block):
+    """A profile block's settings as the shim reads them (RecompConfig.m): by user config file name."""
+    return {"Engine": block.get("engine_ini", {}), "GameUserSettings": block.get("game_user_settings_ini", {})}
+
+
 def info_plist(game):
     info = game.info
     plist = {
@@ -404,10 +432,11 @@ def info_plist(game):
         "NSAppTransportSecurity": {"NSAllowsArbitraryLoads": True},
         "ITSAppUsesNonExemptEncryption": False,
         # Read by the shim (RecompConfig.m): settings merged into the engine's user
-        # config files at each launch, from the game's profile.
+        # config files at each launch, from the game's profile; on an iPhone, the
+        # phone set is laid over them.
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
-        "RecompIniOverrides": {"Engine": game.profile.get("engine_ini", {}),
-                               "GameUserSettings": game.profile.get("game_user_settings_ini", {})},
+        "RecompIniOverrides": ini_overrides(game.profile),
+        "RecompIniOverridesPhone": overlay(ini_overrides(PHONE_DEFAULTS), ini_overrides(game.profile.get("iphone", {}))),
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }
