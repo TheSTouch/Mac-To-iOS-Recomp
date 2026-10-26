@@ -6,7 +6,7 @@
 // corners (the game's square-large--green), the title, a close button, and the game's own
 // panel (Common/DevPanel/DevPanel.uxml, DebuggingUI.DevPanel) moved inside it, so its filter,
 // favourites and commands keep working: the filter first, the commands as full-width buttons
-// about 44 pt tall with their favourite +/- beside them, scrolling. The game's title button
+// about 33 pt tall with their favourite +/- squares beside them, scrolling. The game's title button
 // (which folded the list) is hidden and the list always shown. A tap on the backdrop closes it
 // too, and so does turning developer mode off.
 using System;
@@ -21,7 +21,9 @@ namespace Recomp.TheSTouchscreen
     public class DevControls : IPostLoadableSingleton, IUnloadableSingleton, IUpdatableSingleton
     {
         const string KeyLabel = "Debug";
-        const float RowHeight = 80f, FontSize = 28f, HeadingSize = 34f, TitleSize = 38f, Gap = 12f;  // panel units (~0.54 pt each)
+        // Panel units (~0.54 pt each on an iPhone 17). A row's whole width is its touch target, so
+        // 60 units (33 pt) is enough there; the +/- squares are as tall as the row, the close button 44 pt.
+        const float RowHeight = 60f, FontSize = 22f, HeadingSize = 26f, TitleSize = 32f, CloseSize = 80f, Gap = 10f;
         static readonly Color Yellow = new Color(0.95f, 0.87f, 0.6f);
 
         static bool _devMode;  // read by the key's visibility, which outlives this scene
@@ -98,7 +100,7 @@ namespace Recomp.TheSTouchscreen
             header.style.flexDirection = FlexDirection.Row;
             header.style.alignItems = Align.Center;
             header.style.marginBottom = Gap;
-            header.Add(BugIcon(56f));
+            header.Add(BugIcon(48f));
             var title = new Label("Development controls");
             title.style.flexGrow = 1f;
             title.style.fontSize = TitleSize;
@@ -108,7 +110,7 @@ namespace Recomp.TheSTouchscreen
             header.Add(title);
             var close = NineSlice<Button>("Timberborn.CoreUI.NineSliceButton", common);
             close.text = "X";
-            close.style.width = close.style.height = RowHeight;
+            close.style.width = close.style.height = CloseSize;
             close.style.fontSize = FontSize;
             close.style.color = Yellow;
             close.clicked += () => Show(false);
@@ -201,7 +203,7 @@ namespace Recomp.TheSTouchscreen
                 s.height = s.minHeight = RowHeight;
                 s.fontSize = FontSize;
                 s.unityTextAlign = TextAnchor.MiddleLeft;
-                s.paddingLeft = 16f;
+                s.paddingLeft = 12f;
             }
             foreach (var name in new[] { "Add", "Remove" })
             {
