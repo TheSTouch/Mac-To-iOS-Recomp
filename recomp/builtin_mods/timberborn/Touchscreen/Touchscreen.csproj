@@ -12,7 +12,7 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
-    <GameAssembly Include="$(GameManaged)/Bindito.Core.dll;$(GameManaged)/Timberborn.SingletonSystem.dll;$(GameManaged)/Timberborn.ToolSystem.dll;$(GameManaged)/Timberborn.BlockObjectTools.dll;$(GameManaged)/Timberborn.BlockSystem.dll;$(GameManaged)/Timberborn.BlueprintSystem.dll;$(GameManaged)/UnityEngine.CoreModule.dll;$(GameManaged)/UnityEngine.UIElementsModule.dll;$(GameManaged)/UnityEngine.TextRenderingModule.dll;$(RecompShims)/Recomp.TouchMouse.dll" />
+    <GameAssembly Include="$(GameManaged)/Bindito.Core.dll;$(GameManaged)/Timberborn.SingletonSystem.dll;$(GameManaged)/Timberborn.ToolSystem.dll;$(GameManaged)/Timberborn.UILayoutSystem.dll;$(GameManaged)/Timberborn.BlockObjectTools.dll;$(GameManaged)/Timberborn.BlockSystem.dll;$(GameManaged)/Timberborn.BlueprintSystem.dll;$(GameManaged)/UnityEngine.CoreModule.dll;$(GameManaged)/UnityEngine.UIElementsModule.dll;$(GameManaged)/UnityEngine.TextRenderingModule.dll;$(RecompShims)/Recomp.TouchMouse.dll" />
     <Reference Include="@(GameAssembly)" Private="false" />
   </ItemGroup>
 </Project>

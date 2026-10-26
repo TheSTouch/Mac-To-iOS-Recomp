@@ -113,7 +113,7 @@ namespace Recomp.Touchscreen
             return b;
         }
 
-        static StyleBackground Image(string path)
+        internal static StyleBackground Image(string path)
         {
             var texture = Resources.Load<Texture2D>(path);
             if (texture != null) return new StyleBackground(texture);
