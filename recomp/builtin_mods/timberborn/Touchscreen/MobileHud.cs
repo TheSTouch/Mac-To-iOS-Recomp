@@ -46,7 +46,7 @@ namespace Recomp.Touchscreen
         const float ColumnScale = 1.6f, TopBarScale = 1.45f, ColonyScale = 1.3f, ViewScale = 1.3f;
         const float ColumnWidth = 62f, ColumnGap = 6f;
         const float StripHeight = 80f, ColonyTabWidth = 130f, ViewTabWidth = 88f, Gap = 8f;
-        const float OverlayButtonsScale = 1.3f;
+        const float OverlayButtonsScale = 1.7f;
         const float BelowStrip = 150f;          // top of the View drawer until the block above it is laid out
         const float RailButton = 76f, RailIcon = 44f, RailGap = 6f;
         const float AwayFromIsland = 1f / 3f;  // the share of the safe area's side margin kept away from the island
@@ -484,7 +484,16 @@ namespace Recomp.Touchscreen
             for (int i = 0; i < order.Count; i++)
                 if (_viewDrawer.IndexOf(order[i]) != i) _viewDrawer.Insert(i, order[i]);
             foreach (var e in order) e.style.marginLeft = e.style.marginRight = 0f;
-            var width = district?.layout.width ?? 0f;
+            // The game pads working hours and the levels on the right (25 and 8 units, room for
+            // the clock and a reset button): without it the box is the bar seen, so the bars
+            // scale to Global view's box and centre on it.
+            foreach (var e in new[] { hours, levels })
+                if (e != null && e.style.paddingRight != 0f)
+                {
+                    e.style.paddingLeft = e.style.paddingRight = 0f;
+                    e.style.minWidth = 0f;
+                }
+            var width = district?.Q("DistrictHeader")?.layout.width ?? district?.layout.width ?? 0f;
             if (hours != null) FitWidth(hours, width);
             if (levels != null) FitWidth(levels, width);
             if (district != null) ArrangeDistrict(district, hours, width);
@@ -562,7 +571,19 @@ namespace Recomp.Touchscreen
             {
                 list.style.position = Position.Relative;
                 list.style.top = list.style.bottom = list.style.left = list.style.right = StyleKeyword.Auto;
+                list.style.paddingTop = 0f;
                 list.style.alignSelf = Align.Stretch;
+                // Its open/close arrow hangs below the list in the game (absolute): in the flow at
+                // its end, so it sits against Global view's box when the list is closed.
+                var arrowToggle = list.Q("ExtensionToggler");
+                if (arrowToggle != null)
+                {
+                    var a = arrowToggle.style;
+                    a.position = Position.Relative;
+                    a.top = a.bottom = a.left = a.right = StyleKeyword.Auto;
+                    a.marginTop = a.marginBottom = 0f;
+                    a.alignSelf = Align.Center;
+                }
             }
         }
 
