@@ -10,16 +10,17 @@
 //   margin is there for the island's side; the other side has just the rounded corners). The
 //   port's Esc and Dev keys sit in the island's strip (the profile's "touch_keys_corner": "island").
 // - Top strip, 80 units tall: a Colony tab, the goods counters drawn 1.45 times larger with
-//   their breakdowns closed, the speed buttons at 80 x 66, and a View tab at the right end.
-//   Date and weather stay under the speed buttons.
+//   their breakdowns closed, and a View tab at the right end. Left of the tab, a column of the
+//   speed buttons (scaled to the date's width), date and weather, with the day clock left of
+//   it, as tall as the column.
 // - The bottom bar becomes a column on the left edge, drawn 1.6 times larger and scrolled by
 //   dragging: the general tools (Select ... Priority), the 15 building groups and Options. An
 //   open group's tools go into a second column beside it, both the full height under the strip.
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
 //   narrow columns.
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
-//   pinned levers. View drawer: working hours, layers, districts, the overlay buttons and
-//   the day clock. Both drawn larger.
+//   pinned levers. View drawer: the overlay buttons centred at the top, the district switcher,
+//   then working hours and the visible levels scaled to the switcher's width. Both drawn larger.
 // - The tool panel moves to the bottom edge, centred, its description folded to the title (a tap on
 //   it unfolds it) and the building's cost (the green box) to its right; rotate, flip, Rows and
 //   Place go into a rail on the right edge, as large square icon buttons of one size without
@@ -43,8 +44,8 @@ namespace Recomp.Touchscreen
         const float ColumnScale = 1.6f, TopBarScale = 1.45f, ColonyScale = 1.3f, ViewScale = 1.6f;
         const float ColumnWidth = 62f, ColumnGap = 6f;
         const float StripHeight = 80f, ColonyTabWidth = 130f, ViewTabWidth = 88f, Gap = 8f;
-        const float SpeedWidth = 80f, SpeedHeight = 66f;
-        const float BelowStrip = 150f;          // top of the View drawer, under the speed and date block
+        const float OverlayButtonsScale = 1.5f;
+        const float BelowStrip = 150f;          // top of the View drawer until the block above it is laid out
         const float RailButton = 76f, RailIcon = 44f, RailGap = 6f;
         const float AwayFromIsland = 1f / 3f;  // the share of the safe area's side margin kept away from the island
         const float NotificationLogHeight = 90f;
@@ -58,6 +59,7 @@ namespace Recomp.Touchscreen
         readonly UILayout _uiLayout;
         VisualElement _gameUI, _absolute, _topLeft, _topRight, _topBar, _bottomSlot, _bar, _subSection;
         VisualElement _colonyDrawer, _viewDrawer, _rail, _placementPanel, _toolPanel;
+        VisualElement _timeBlock, _timeColumn, _clockHolder, _clock, _speed, _speedRow, _date;
         readonly HashSet<VisualElement> _descriptions = new HashSet<VisualElement>();  // the game makes one per tool
         ScrollView _column, _toolsColumn;
         Button _colonyTab, _viewTab;
@@ -145,10 +147,17 @@ namespace Recomp.Touchscreen
                 if (_column.style.display != display) _column.style.display = display;
                 LayOutToolsColumn(shown);
             }
+            if (_timeBlock != null)
+            {
+                // Shown with the game's top-right slot (the batch control window hides it).
+                var display = _topRight.resolvedStyle.display;
+                if (_timeBlock.style.display != display) _timeBlock.style.display = display;
+            }
             if (Time.unscaledTime < _nextCheck) return;
             _nextCheck = Time.unscaledTime + CheckSeconds;
             SweepColony();
             SweepView();
+            ArrangeView();
             KeepPlaceLast();
             var root = _gameUI.panel?.visualTree.layout ?? default;
             var safe = SafeArea();
@@ -335,31 +344,57 @@ namespace Recomp.Touchscreen
             }
         }
 
-        // Speed (larger), date and weather stay in the block, which moves left of a View tab at the
-        // strip's right end; the rest of the block, the clock too, goes into the drawer under the tab.
+        // Left of a View tab at the strip's right end: the speed buttons, date and weather in a
+        // column, the speed buttons scaled to the date's width, and the game's day clock left of the
+        // column, as tall as it. The rest of the top-right block goes into the drawer under the tab:
+        // the overlay buttons centred at the top and larger, the district switcher under them, then
+        // working hours and the visible levels scaled to the switcher's width.
         void LayOutView()
         {
-            var speed = _topRight.Q("SpeedControlPanel");
-            if (speed != null)
+            _timeBlock = new VisualElement { name = "TouchscreenTimeBlock", pickingMode = PickingMode.Ignore };
+            CarryStyles(_topRight.Q("SpeedControlPanel") ?? _topRight.Q("DatePanel") ?? _topRight, _timeBlock);
+            var s = _timeBlock.style;
+            s.position = Position.Absolute;
+            s.right = ViewTabWidth + Gap;
+            s.top = 0f;
+            s.flexDirection = FlexDirection.Row;
+            s.alignItems = Align.FlexStart;
+            _clockHolder = new VisualElement { name = "TouchscreenClock", pickingMode = PickingMode.Ignore };
+            _clockHolder.style.marginRight = Gap / 2f;
+            _clockHolder.style.marginTop = 4f;
+            _timeColumn = new VisualElement { pickingMode = PickingMode.Ignore };
+            _timeColumn.style.alignItems = Align.Center;
+            _timeBlock.Add(_clockHolder);
+            _timeBlock.Add(_timeColumn);
+            foreach (var name in TopRightKept)
             {
-                speed.style.paddingRight = 4f;
-                speed.Query<Button>().ForEach(b =>
-                {
-                    b.style.width = SpeedWidth;
-                    b.style.height = SpeedHeight;
-                    b.style.justifyContent = Justify.Center;
-                    b.style.alignItems = Align.Center;
-                });
+                var child = ChildWith(_topRight, name);
+                if (child == null) continue;
+                child.style.marginLeft = child.style.marginRight = 0f;
+                child.style.alignSelf = Align.Center;  // the game's style puts some at the end
+                _timeColumn.Add(child);
             }
-            _topRight.style.right = ViewTabWidth + Gap;
-            _topRight.style.height = StyleKeyword.Auto;
-            _topRight.style.flexWrap = Wrap.NoWrap;
-            _topRight.style.alignItems = Align.FlexEnd;
+            _speed = _timeColumn.Q("SpeedControlPanel");
+            _date = _timeColumn.Q("DatePanel");
+            if (_speed != null)
+            {
+                // The game pads the speed buttons' right for the clock, which overlapped the block:
+                // the buttons and their frame alone, to be scaled to the date's width.
+                var wrapper = _speed.parent == _timeColumn ? _speed : _speed.parent;
+                wrapper.style.paddingRight = 0f;
+                wrapper.style.minWidth = 0f;
+                wrapper.style.height = StyleKeyword.Auto;
+                _speed.style.paddingRight = _speed.style.paddingLeft = 4f;
+                _speed.style.minWidth = 0f;
+                _speed.style.flexGrow = 0f;
+                _speedRow = wrapper;
+            }
+            _uiLayout.AddAbsoluteItem(_timeBlock);
 
             _viewDrawer = Drawer("TouchscreenViewDrawer");
             _viewDrawer.style.right = 0f;
             _viewDrawer.style.top = BelowStrip;
-            _viewDrawer.style.alignItems = Align.FlexEnd;
+            _viewDrawer.style.alignItems = Align.Center;
             Scale(_viewDrawer, ViewScale, 100f, 0f);
             _viewTab = Tab("TouchscreenView", "UI/Images/Game/ico-eye", "View", ViewTabWidth, () => Toggle(_viewDrawer, _viewTab));
             _viewTab.style.position = Position.Absolute;
@@ -370,27 +405,86 @@ namespace Recomp.Touchscreen
             SweepView();
         }
 
+        static VisualElement ChildWith(VisualElement parent, string name)
+        {
+            foreach (var child in parent.Children())
+                if (child.name == name || child.Q(name) != null) return child;
+            return null;
+        }
+
+        // What the game adds to the top-right block: the clock beside the column, the rest into the drawer.
         void SweepView()
         {
             if (_viewDrawer == null) return;
-            var moved = new List<VisualElement>();
-            foreach (var child in _topRight.Children())
-            {
-                var kept = false;
-                foreach (var name in TopRightKept) kept |= child.name == name || child.Q(name) != null;
-                if (!kept) moved.Add(child);
-            }
+            var moved = new List<VisualElement>(_topRight.Children());
             foreach (var e in moved)
             {
-                _viewDrawer.Add(e);
-                if (e.name == "Clock" || e.Q("Clock") != null)
+                if (_clock == null && (e.name == "Clock" || e.Q("Clock") != null))
                 {
-                    // Absolute in the block (over the date), in line in the drawer.
-                    e.style.position = Position.Relative;
-                    e.style.top = e.style.right = StyleKeyword.Auto;
-                    e.style.marginTop = 4f;
+                    // Absolute over the block's top-right corner in the game; at the holder's corner here.
+                    _clock = e;
+                    var c = e.style;
+                    c.position = Position.Absolute;
+                    c.left = c.top = 0f;
+                    c.right = c.bottom = StyleKeyword.Auto;
+                    c.marginLeft = c.marginRight = c.marginTop = c.marginBottom = 0f;
+                    _clockHolder.Add(e);
+                }
+                else _viewDrawer.Add(e);
+            }
+        }
+
+        // Each check, once laid out: sizes that depend on the game's own (the date's width, the
+        // column's height, the switcher's width), and the drawer's order.
+        void ArrangeView()
+        {
+            if (_timeColumn == null) return;
+            if (_speedRow != null && _date != null) FitWidth(_speedRow, _date.layout.width);
+            var height = _timeColumn.layout.height;
+            if (_clock != null && height > 0f)
+            {
+                var size = Mathf.Max(_clock.layout.width, _clock.layout.height);
+                if (size > 0f)
+                {
+                    _clockHolder.style.width = _clockHolder.style.height = height - 4f;
+                    Scale(_clock, (height - 4f) / size, 0f, 0f);
                 }
             }
+            if (_timeBlock.layout.height > 0f) _viewDrawer.style.top = _timeBlock.layout.yMax + Gap;
+
+            VisualElement district = null, hours = null, levels = null;
+            var order = new List<VisualElement>();
+            foreach (var child in _viewDrawer.Children())
+            {
+                if (child.name == "DistrictPanel" || child.Q("DistrictPanel") != null) district = child;
+                else if (child.Q("WorkingHours") != null) hours = child;
+                else if (child.name == "LevelVisibilityPanel" || child.Q("LevelVisibilityPanel") != null) levels = child;
+                else order.Add(child);
+            }
+            foreach (var other in order) ScaleCentred(other, OverlayButtonsScale);
+            foreach (var e in new[] { district, hours, levels })
+                if (e != null) order.Add(e);
+            for (int i = 0; i < order.Count; i++)
+                if (_viewDrawer.IndexOf(order[i]) != i) _viewDrawer.Insert(i, order[i]);
+            foreach (var e in order) e.style.marginLeft = e.style.marginRight = 0f;
+            var width = district?.layout.width ?? 0f;
+            if (hours != null) FitWidth(hours, width);
+            if (levels != null) FitWidth(levels, width);
+        }
+
+        // Scaled about its top centre to a width (its parent centres it), leaving room under it for
+        // the height it gains.
+        static void FitWidth(VisualElement e, float width)
+        {
+            var w = e.layout.width;
+            if (w > 0f && width > 0f) ScaleCentred(e, width / w);
+        }
+
+        static void ScaleCentred(VisualElement e, float k)
+        {
+            if (e.style.scale.value.value.x == k) return;
+            Scale(e, k, 50f, 0f);
+            e.style.marginBottom = Mathf.Max(0f, e.layout.height * (k - 1f)) + 4f;
         }
 
         // The placement panel (rotate, flip and the Touchscreen's Place and Rows) on the right edge:
