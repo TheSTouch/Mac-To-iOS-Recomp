@@ -52,24 +52,27 @@ enum Engine {
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
-        return try await withCheckedThrowingContinuation { cont in
-            p.terminationHandler = { proc in
+        try p.run()
+        // Read both pipes while it runs: the scan prints more than a pipe holds (16 KB when the
+        // kernel has no big pipes left), and a full pipe would block the engine forever.
+        let (data, errData) = await withCheckedContinuation { cont in
+            DispatchQueue.global().async {
+                let errRead = DispatchGroup()
+                nonisolated(unsafe) var errData = Data()
+                DispatchQueue.global().async(group: errRead) { errData = err.fileHandleForReading.readDataToEndOfFile() }
                 let data = out.fileHandleForReading.readDataToEndOfFile()
-                guard proc.terminationStatus == 0 else {
-                    let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    cont.resume(throwing: EngineError.failed(msg.trimmingCharacters(in: .whitespacesAndNewlines)))
-                    return
-                }
-                do {
-                    let dec = JSONDecoder()
-                    dec.keyDecodingStrategy = .convertFromSnakeCase
-                    cont.resume(returning: try dec.decode(T.self, from: data))
-                } catch {
-                    cont.resume(throwing: error)
-                }
+                errRead.wait()
+                p.waitUntilExit()
+                cont.resume(returning: (data, errData))
             }
-            do { try p.run() } catch { cont.resume(throwing: error) }
         }
+        guard p.terminationStatus == 0 else {
+            let msg = String(data: errData, encoding: .utf8) ?? ""
+            throw EngineError.failed(msg.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        return try dec.decode(T.self, from: data)
     }
 
     /// Run and report every output line as it arrives; returns the exit status.
