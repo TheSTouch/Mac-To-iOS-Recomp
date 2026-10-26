@@ -12,12 +12,17 @@
 // again in the new order each time the phone turns (unless the engine carried it over), and
 // each request is checked once it has applied, since iOS may read the size in the other order.
 //
+// A game whose own UI needs a different layout constant on a phone gets it through
+// static_fields: a static field of one of its types set once at startup (checked again when the
+// first scene has loaded, in case the type's static constructor ran later).
+//
 // Every 30 seconds a phone also logs its frame rate and memory ("[recomp] phone stats"),
 // the numbers a profile's "iphone" block is tuned from.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -30,12 +35,16 @@ namespace Recomp
         class Pref { public string key, type, value; }
 
         [Serializable]
+        class Field { public string assembly, name, type, value; }   // name: "Namespace.Type::field"
+
+        [Serializable]
         class Phone
         {
             public float renderScale;          // 0: native
             public int targetFrameRate;        // 0: the game's own
             public int qualityLevel = -1;      // -1: the game's own
             public Pref[] playerPrefs;
+            public Field[] staticFields;
             public bool portrait;              // the iPhone also plays upright
             public float portraitHorizontalFov; // degrees across upright; 0: the game's field of view
         }
@@ -53,6 +62,7 @@ namespace Recomp
         static int _long, _short, _width, _height, _setFrame, _attempts;
         static bool _portrait, _upright, _check, _rotated;
         static readonly bool[] _turned = new bool[2];
+        static Field[] _fields;
         static int _rotatedFrame;
         static float _rotatedTime;
         static ProfilerRecorder _memory;
@@ -148,6 +158,12 @@ namespace Recomp
             if (set.Count > 0) PlayerPrefs.Save();
             if (set.Count > 0) applied.Add("player prefs set: " + string.Join(", ", set));
             if (kept.Count > 0) applied.Add("player prefs kept (the player's own): " + string.Join(", ", kept));
+            _fields = phone.staticFields ?? new Field[0];
+            if (_fields.Length > 0)
+            {
+                applied.Add("static fields: " + string.Join(", ", Array.ConvertAll(_fields, SetField)));
+                SceneManager.sceneLoaded += CheckFields;
+            }
             Debug.Log("[recomp] phone settings: " + string.Join("; ", applied) +
                       $"; screen {Screen.width}x{Screen.height}, safe area {Screen.safeArea}");
         }
@@ -161,6 +177,56 @@ namespace Recomp
                 return;
             SceneManager.sceneLoaded -= OnSceneLoaded;
             Request($"the game reset the screen to {Screen.width}x{Screen.height} (scene {scene.name})");
+        }
+
+        // A static_fields entry's field and its value in the field's type (null when not found).
+        static FieldInfo Resolve(Field f, out object value)
+        {
+            value = null;
+            var parts = f.name.Split(new[] { "::" }, StringSplitOptions.None);
+            var type = Type.GetType(parts[0] + ", " + Path.GetFileNameWithoutExtension(f.assembly));
+            var field = parts.Length == 2 && type != null
+                ? type.GetField(parts[1], BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic) : null;
+            if (field == null) return null;
+            object raw = f.type == "int" ? int.Parse(f.value, CultureInfo.InvariantCulture)
+                       : f.type == "float" ? float.Parse(f.value, CultureInfo.InvariantCulture)
+                       : (object)f.value;
+            value = Convert.ChangeType(raw, field.FieldType, CultureInfo.InvariantCulture);
+            return field;
+        }
+
+        // Sets one static_fields entry; returns what it did, for the log.
+        static string SetField(Field f)
+        {
+            try
+            {
+                var field = Resolve(f, out var value);
+                if (field == null) return f.name + " not found";
+                var was = field.GetValue(null);   // runs the type's static constructor first
+                field.SetValue(null, value);
+                return $"{f.name} {was} -> {field.GetValue(null)}";
+            }
+            catch (Exception e)
+            {
+                return $"{f.name} failed: {e.Message}";
+            }
+        }
+
+        static void CheckFields(Scene scene, LoadSceneMode mode)
+        {
+            SceneManager.sceneLoaded -= CheckFields;
+            var reset = new List<string>();
+            foreach (var f in _fields)
+            {
+                try
+                {
+                    var field = Resolve(f, out var value);
+                    if (field != null && !Equals(field.GetValue(null), value)) reset.Add(SetField(f));
+                }
+                catch (Exception) { }   // SetField logged it at startup
+            }
+            if (reset.Count > 0)
+                Debug.Log($"[recomp] phone settings: static fields were reset by scene {scene.name}, set again: " + string.Join(", ", reset));
         }
 
         // Whether the view stands upright: the display's own size turns with it (layer bounds,

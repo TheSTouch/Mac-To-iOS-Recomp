@@ -78,6 +78,8 @@ KEEP_FROM_SHELL = {"Managed", "unity default resources", "Resources/unity defaul
 #   player_prefs       {key: value}, each written only when the player has none yet
 #   portrait           true: the iPhone also plays upright (home indicator down) and rotates with
 #                      the phone; the iPad stays landscape (Info.plist ~ipad key, and at runtime)
+#   static_fields      {"<Assembly>.dll": {"Namespace.Type::field": value}}: a static field of the game's
+#                      set at startup (e.g. a UI layout constant; per game only)
 #   portrait_horizontal_fov  upright, the degrees across a perspective camera shows (default: the
 #                      game's own, vertical, field of view, so upright is as wide as landscape is tall)
 PHONE_DEFAULTS = {"render_scale": 0.75, "portrait": False}
@@ -478,14 +480,17 @@ def phone_settings(profile):
     """recomp.json "phone": the profile's "iphone" block over PHONE_DEFAULTS, shaped for
     JsonUtility (PlayerPrefs as a list, each value as a string with its type)."""
     phone = dict(PHONE_DEFAULTS, **(profile.get("iphone") or {}))
-    prefs = []
-    for key, value in (phone.get("player_prefs") or {}).items():
+    def typed(value):
         kind = "int" if isinstance(value, (bool, int)) else "float" if isinstance(value, float) else "string"
-        prefs.append({"key": key, "type": kind, "value": str(int(value) if isinstance(value, bool) else value)})
+        return {"type": kind, "value": str(int(value) if isinstance(value, bool) else value)}
+    prefs = [dict(typed(value), key=key) for key, value in (phone.get("player_prefs") or {}).items()]
+    fields = [dict(typed(value), assembly=dll, name=name)
+              for dll, values in (phone.get("static_fields") or {}).items() for name, value in values.items()]
     return {"renderScale": float(phone.get("render_scale") or 0),
             "targetFrameRate": int(phone.get("target_frame_rate") or 0),
             "qualityLevel": int(phone["quality_level"]) if phone.get("quality_level") is not None else -1,
             "playerPrefs": prefs,
+            "staticFields": fields,
             "portrait": bool(phone.get("portrait")),
             "portraitHorizontalFov": float(phone.get("portrait_horizontal_fov") or 0)}
 

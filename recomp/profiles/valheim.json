@@ -7,7 +7,12 @@
   "touch_gamepad": true,
   "iphone": {
     "render_scale": 0.75,
-    "portrait": true
+    "portrait": true,
+    "static_fields": {
+      "assembly_guiutils.dll": {
+        "GuiScaler::m_minWidth": 1400
+      }
+    }
   },
   "stub_overrides": {
     "steamworks": [
@@ -33,5 +38,5 @@
       "characters_local"
     ]
   },
-  "why": "Valheim quits when Steam does not start (SteamManager, ZNet) and has no offline mode, so its Steamworks stub signs in as an offline user: cloud saves off, local worlds and characters only. PlayFab Party (crossplay) fails to initialise, so online play stays off. Graphics settings come in per-platform configurations with none for iOS, so the game takes the Mac's. Steamworks.NET's server-list and ping responders hand instance-method delegates to native code, which IL2CPP refuses; guarding their constructors lets ZSteamMatchmaking start (it is needed to start any world, local ones too)."
+  "why": "Valheim quits when Steam does not start (SteamManager, ZNet) and has no offline mode, so its Steamworks stub signs in as an offline user: cloud saves off, local worlds and characters only. PlayFab Party (crossplay) fails to initialise, so online play stays off. Graphics settings come in per-platform configurations with none for iOS, so the game takes the Mac's. On an iPhone, GuiScaler's minimum width drops from 1920 to 1400 UI units: upright, the UI scale is min(w/1400, h/1080) instead of min(w/1920, h/1080), so the inventory and crafting panels (about 1310 wide) still fit and text is about 77% of its landscape size instead of 56%; landscape phones stay limited by height and do not change. Steamworks.NET's server-list and ping responders hand instance-method delegates to native code, which IL2CPP refuses; guarding their constructors lets ZSteamMatchmaking start (it is needed to start any world, local ones too)."
 }
