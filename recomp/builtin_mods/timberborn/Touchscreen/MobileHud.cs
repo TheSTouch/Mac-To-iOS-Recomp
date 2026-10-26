@@ -71,6 +71,8 @@ namespace Recomp.Touchscreen
         Rect _safe;
         float _rightInset;               // the HUD's right margin, in panel units (the View tab reaches past it)
         float _tabFont, _districtFont;   // the game's own font sizes, before they are scaled
+        readonly Dictionary<VisualElement, VisualElement> _holders = new Dictionary<VisualElement, VisualElement>();  // panel -> FitInHolder's holder
+        readonly HashSet<VisualElement> _held = new HashSet<VisualElement>();  // the holders
         string _loggedView;
         ScreenOrientation _orientation;
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
@@ -473,34 +475,43 @@ namespace Recomp.Touchscreen
             }
             if (_timeBlock.layout.height > 0f) _viewDrawer.style.top = _timeBlock.layout.yMax + Gap;
 
+            // The drawer's children, through the holders FitInHolder puts some of them in.
             VisualElement district = null, hours = null, levels = null;
             var order = new List<VisualElement>();
+            var others = new List<VisualElement>();
             foreach (var child in _viewDrawer.Children())
             {
-                if (child.name == "DistrictPanel" || child.Q("DistrictPanel") != null) district = child;
-                else if (child.Q("WorkingHours") != null) hours = child;
-                else if (child.name == "LevelVisibilityPanel" || child.Q("LevelVisibilityPanel") != null) levels = child;
-                else order.Add(child);
+                var panel = _held.Contains(child) && child.childCount > 0 ? child[0] : child;
+                if (panel.name == "DistrictPanel" || panel.Q("DistrictPanel") != null) district = panel;
+                else if (panel.Q("WorkingHours") != null) hours = panel;
+                else if (panel.name == "LevelVisibilityPanel" || panel.Q("LevelVisibilityPanel") != null) levels = panel;
+                else others.Add(panel);
             }
-            foreach (var other in order) ScaleCentred(other, OverlayButtonsScale);
-            foreach (var e in new[] { hours, levels, district })
-                if (e != null) order.Add(e);
+            var width = district?.Q("DistrictHeader")?.layout.width ?? 0f;
+            foreach (var other in others) FitInHolder(other, other, OverlayButtonsScale);
+            var hoursBar = hours?.Q("WorkingHours");
+            var hoursScale = hoursBar != null && hoursBar.layout.width > 0f && width > 0f ? width / hoursBar.layout.width : 1f;
+            if (hoursBar != null) FitInHolder(hours, hoursBar, hoursScale);
+            if (levels != null)
+            {
+                // Its reset button keeps its room while hidden (disabled) and put the bar off
+                // centre; ∞ via the arrows does the same.
+                var reset = levels.Q("Reset");
+                if (reset != null && reset.style.display != DisplayStyle.None) reset.style.display = DisplayStyle.None;
+                var levelsBar = levels.Q("Content") ?? levels;
+                if (levelsBar.layout.width > 0f && width > 0f) FitInHolder(levels, levelsBar, width / levelsBar.layout.width);
+            }
+            if (district != null)
+            {
+                district.style.alignSelf = Align.Center;
+                district.style.marginLeft = district.style.marginRight = 0f;
+            }
+            foreach (var panel in others) order.Add(Slot(panel));
+            foreach (var panel in new[] { hours, levels, district })
+                if (panel != null) order.Add(Slot(panel));
             for (int i = 0; i < order.Count; i++)
                 if (_viewDrawer.IndexOf(order[i]) != i) _viewDrawer.Insert(i, order[i]);
-            foreach (var e in order) e.style.marginLeft = e.style.marginRight = 0f;
-            // The game pads working hours and the levels on the right (25 and 8 units, room for
-            // the clock and a reset button): without it the box is the bar seen, so the bars
-            // scale to Global view's box and centre on it.
-            foreach (var e in new[] { hours, levels })
-                if (e != null && e.style.paddingRight != 0f)
-                {
-                    e.style.paddingLeft = e.style.paddingRight = 0f;
-                    e.style.minWidth = 0f;
-                }
-            var width = district?.Q("DistrictHeader")?.layout.width ?? district?.layout.width ?? 0f;
-            if (hours != null) FitWidth(hours, width);
-            if (levels != null) FitWidth(levels, width);
-            if (district != null) ArrangeDistrict(district, hours, width);
+            if (district != null) ArrangeDistrict(district, hoursBar, hoursScale);
             ArrangeViewTab();
             LogView();
         }
@@ -541,10 +552,9 @@ namespace Recomp.Touchscreen
         // as working hours' -/+ once that bar is scaled to this width, its name and icon larger.
         // Its district list (an absolute panel under it in the game) joins the layout, so the
         // drawer grows when the list opens.
-        void ArrangeDistrict(VisualElement district, VisualElement hours, float width)
+        void ArrangeDistrict(VisualElement district, VisualElement hours, float k)
         {
             var minus = hours?.Q("Minus");
-            var k = hours != null && hours.layout.width > 0f ? width / hours.layout.width : 1f;
             var arrow = minus != null && minus.layout.width > 0f ? minus.layout.width * k : 24f;
             foreach (var name in new[] { "PreviousDistrict", "NextDistrict" })
             {
@@ -616,6 +626,41 @@ namespace Recomp.Touchscreen
             if (line == _loggedView) return;
             _loggedView = line;
             Debug.Log("[Touchscreen] view layout: " + line);
+        }
+
+        // What takes a panel's place among the drawer's children: its holder, or itself.
+        VisualElement Slot(VisualElement panel) => _holders.TryGetValue(panel, out var holder) ? holder : panel;
+
+        // A game panel drawn k times larger inside a holder of ours that is exactly the size of its
+        // visible part once scaled, in the panel's place: the drawer lays out and centres the
+        // holder, so the game's margins, paddings and alignments (some bars are padded on one side
+        // and aligned to the end) and the scale cannot throw it off.
+        void FitInHolder(VisualElement panel, VisualElement visible, float k)
+        {
+            if (!_holders.TryGetValue(panel, out var holder))
+            {
+                holder = new VisualElement { pickingMode = PickingMode.Ignore };
+                holder.style.flexShrink = 0f;
+                holder.style.alignSelf = Align.Center;
+                holder.style.marginBottom = 4f;
+                var parent = panel.parent;
+                parent.Insert(parent.IndexOf(panel), holder);
+                holder.Add(panel);
+                var p = panel.style;
+                p.position = Position.Absolute;
+                p.marginLeft = p.marginRight = p.marginTop = p.marginBottom = 0f;
+                _holders[panel] = holder;
+                _held.Add(holder);
+            }
+            float w = visible.layout.width, h = visible.layout.height;
+            if (!(w > 0f) || !(h > 0f) || !(k > 0f)) return;
+            var offset = Vector2.zero;
+            for (var e = visible; e != null && e != panel; e = e.parent) offset += e.layout.position;
+            if (panel.style.scale.value.value.x != k) Scale(panel, k, 0f, 0f);
+            if (panel.style.left != -offset.x * k) panel.style.left = -offset.x * k;
+            if (panel.style.top != -offset.y * k) panel.style.top = -offset.y * k;
+            if (holder.style.width != w * k) holder.style.width = w * k;
+            if (holder.style.height != h * k) holder.style.height = h * k;
         }
 
         // Scaled about its top centre to a width (its parent centres it), leaving room under it for
