@@ -81,6 +81,11 @@ struct BuildEnvironment: Decodable {
     let home: String
 
     var missingTools: [String] { tools.filter { !$0.value }.map(\.key).sorted() }
+
+    /// The devices a port can be installed on: every port is a universal build.
+    var portDevices: [Device] { devices.filter { $0.type == "iPhone" || $0.type == "iPad" } }
+    /// The first iPad, else the first iPhone.
+    var defaultDevice: Device? { portDevices.first { $0.type == "iPad" } ?? portDevices.first }
 }
 
 /// `recomp.py saves <app> --status|--enable|--disable --json` (recomp/saves.py).

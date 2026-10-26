@@ -110,7 +110,8 @@ struct EnvironmentFooter: View {
                 }
                 Label(env.teams.isEmpty ? "No Apple Development certificate" : "\(env.teams.count) signing team(s)",
                       systemImage: "signature")
-                Label("\(env.devices.filter { $0.type == "iPad" }.count) iPad(s) paired", systemImage: "ipad")
+                Label("\(env.devices.filter { $0.type == "iPhone" }.count) iPhone(s) and \(env.devices.filter { $0.type == "iPad" }.count) iPad(s) paired",
+                      systemImage: "ipad.and.iphone")
             }
         }
         .font(.caption)
@@ -391,14 +392,14 @@ struct PortSetup: View {
     @State private var device = ""
     @State private var bundleId = ""
 
-    var ipads: [BuildEnvironment.Device] { state.environment?.devices.filter { $0.type == "iPad" } ?? [] }
+    var devices: [BuildEnvironment.Device] { state.environment?.portDevices ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Port \(game.name) to iOS").font(.title2.bold())
             Form {
-                Picker("iPad", selection: $device) {
-                    ForEach(ipads) { Text($0.label).tag($0.id) }
+                Picker("Device", selection: $device) {
+                    ForEach(devices) { Text($0.label).tag($0.id) }
                 }
                 Picker("Signing team", selection: $team) {
                     ForEach(state.environment?.teams ?? []) { Text($0.identity).tag($0.id) }
@@ -424,8 +425,8 @@ struct PortSetup: View {
                     }
                 }
             }
-            if ipads.isEmpty {
-                Label("No iPad paired. Connect it with a cable once and trust this Mac, then refresh.",
+            if devices.isEmpty {
+                Label("No iPhone or iPad paired. Connect it with a cable once and trust this Mac, then refresh.",
                       systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
             if state.environment?.teams.isEmpty ?? true {
@@ -439,7 +440,7 @@ struct PortSetup: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Start") {
-                    let picked = ipads.first { $0.id == device }
+                    let picked = devices.first { $0.id == device }
                     let job = PortJob(game: game, settings: .init(team: team, bundleId: bundleId, device: device,
                                                                   deviceName: picked?.shortName ?? device,
                                                                   deviceKind: picked?.kind ?? "device",
@@ -454,9 +455,12 @@ struct PortSetup: View {
         }
         .padding(24)
         .frame(width: 560)
+        .onChange(of: devices) {
+            if !devices.contains(where: { $0.id == device }) { device = state.environment?.defaultDevice?.id ?? "" }
+        }
         .onAppear {
             team = state.environment?.teams.first?.id ?? ""
-            device = ipads.first?.id ?? ""
+            device = state.environment?.defaultDevice?.id ?? ""
             bundleId = "recomp.\(team.lowercased()).\(game.slug.lowercased())"
         }
     }
