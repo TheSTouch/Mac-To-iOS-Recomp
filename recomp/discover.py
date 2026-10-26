@@ -98,7 +98,7 @@ def status_of(report):
     if engine == "Unity":
         return "planned", "Unity (IL2CPP): needs the planned binary retarget route.", []
     if "x86_64" in report["archs"] and "arm64" not in report["archs"]:
-        return "unsupported", "Intel-only: iPadOS forbids the JIT a translator would need.", []
+        return "unsupported", "Intel-only: iOS forbids the JIT a translator would need.", []
     if engine in ("Godot", "RenPy", "LOVE", "Defold") or engine.startswith(("RPGMaker", "Electron")):
         return "planned", f"{engine}: planned engine-runtime route.", []
     if engine in ("Java", "Adobe AIR", "Wine wrapper (not native)", "GameMaker"):

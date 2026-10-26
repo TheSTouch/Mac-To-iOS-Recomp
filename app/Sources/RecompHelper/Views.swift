@@ -138,7 +138,7 @@ struct GameDetail: View {
                     }
                     Spacer()
                     if game.route == "unity" || game.route == "unreal" {
-                        Button("Port to iPad…") { setup = true }
+                        Button("Port to iOS…") { setup = true }
                             .buttonStyle(.borderedProminent).controlSize(.large)
                     }
                 }
@@ -204,7 +204,7 @@ struct SaveSyncBox: View {
                         .disabled(busy || status == nil || status?.icloud == false)
                     if busy { ProgressView().controlSize(.small) }
                 }
-                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPad and iPhone ports sync with: right after the game quits, when saves arrive from iOS, and hourly. Only changed files are copied.")
+                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPhone and iPad ports sync with: right after the game quits, when saves arrive from iOS, and hourly. Only changed files are copied.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let s = status {
                     if !s.icloud {
@@ -258,8 +258,8 @@ struct SaveSyncBox: View {
 }
 
 /// Chooses which of the Mac's mods go into the port (`recomp.py mods`). iOS cannot run code
-/// that was not compiled into the app, so a mod's code only works on the iPad when the mod was
-/// installed and selected here before porting; its data files are copied to the iPad after.
+/// that was not compiled into the app, so a mod's code only works on the iPhone or iPad when the mod
+/// was installed and selected here before porting; its data files are copied to the device after.
 struct ModsBox: View {
     @EnvironmentObject var state: AppState
     let game: Game
@@ -293,7 +293,7 @@ struct ModsBox: View {
                 if let d = mod.description, !d.isEmpty {
                     Text(d).font(.callout)
                 }
-                Text("Part of the iPad and iPhone port, not a mod from this Mac. It can also be turned off on the device in the game's mod list, without porting again; turning it off here leaves it out of the next port.")
+                Text("Part of the iOS port, not a mod from this Mac. It can also be turned off on the device in the game's mod list, without porting again; turning it off here leaves it out of the next port.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let last = mod.lastPort, (last == "compiled") != mod.selected {
                     Label(mod.selected ? "Not in the installed port yet: port again to add it." : "The installed port still has it: port again to leave it out.",
@@ -310,7 +310,7 @@ struct ModsBox: View {
         GroupBox("Mods") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Mods installed for \(game.name) on this Mac. The ticked ones are compiled into the next port and copied to the iPad after it. Adding, updating or removing a mod with code needs a new port; mods made only of data files can also be dropped into Files > \(game.name) > Mods on the iPad.")
+                    Text("Mods installed for \(game.name) on this Mac. The ticked ones are compiled into the next port and copied to the iPhone or iPad after it. Adding, updating or removing a mod with code needs a new port; mods made only of data files can also be dropped into Files > \(game.name) > Mods on the device.")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
@@ -395,7 +395,7 @@ struct PortSetup: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Port \(game.name) to iPad").font(.title2.bold())
+            Text("Port \(game.name) to iOS").font(.title2.bold())
             Form {
                 Picker("iPad", selection: $device) {
                     ForEach(ipads) { Text($0.label).tag($0.id) }
@@ -432,14 +432,17 @@ struct PortSetup: View {
                 Label("No Apple Development certificate. Sign in to your developer account in Xcode → Settings → Accounts.",
                       systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
-            Text("The app is signed with your developer account and installed on your iPad only. Do not share it: it contains the game.")
+            Text("The app is signed with your developer account and installed on your own devices only. Do not share it: it contains the game.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Refresh devices") { Task { await state.refreshEnvironment() } }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Start") {
+                    let picked = ipads.first { $0.id == device }
                     let job = PortJob(game: game, settings: .init(team: team, bundleId: bundleId, device: device,
+                                                                  deviceName: picked?.shortName ?? device,
+                                                                  deviceKind: picked?.kind ?? "device",
                                                                   workspace: state.workspace))
                     dismiss()
                     state.job = job

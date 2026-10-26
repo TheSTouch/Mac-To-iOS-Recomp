@@ -7,6 +7,9 @@ final class PortJob: ObservableObject, Identifiable {
         var team: String
         var bundleId: String
         var device: String
+        /// The device's name and kind ("iPhone" or "iPad"), for the stage titles and the finish text.
+        var deviceName: String
+        var deviceKind: String
         var workspace: String
     }
 
@@ -46,14 +49,12 @@ final class PortJob: ObservableObject, Identifiable {
         ("prepare", "Prepare game code"),
         ("player", "Recompile with IL2CPP"),
         ("inject", "Add game data"),
-        ("xcode", "Build and sign iPad app"),
-        ("install", "Install on iPad"),
+        ("xcode", "Build and sign iOS app"),
     ]
 
     static let unrealStages: [(String, String)] = [
         ("prepare", "Retarget game code to iOS"),
-        ("xcode", "Build and sign iPad app"),
-        ("install", "Install on iPad"),
+        ("xcode", "Build and sign iOS app"),
     ]
 
     /// The engine command for the game's route: "unity" or "unreal".
@@ -64,6 +65,7 @@ final class PortJob: ObservableObject, Identifiable {
         self.settings = settings
         route = game.route ?? "unity"
         stages = (route == "unreal" ? Self.unrealStages : Self.unityStages).map { Stage(id: $0.0, title: $0.1) }
+            + [Stage(id: "install", title: "Install on \(settings.deviceName)")]
     }
 
     var workFolder: URL {
@@ -106,7 +108,7 @@ final class PortJob: ObservableObject, Identifiable {
         for i in stages.indices where stages[i].state == .running { stages[i].state = .failed }
     }
 
-    /// Run only the install stage again (e.g. after unlocking the iPad).
+    /// Run only the install stage again (e.g. after unlocking the device).
     func retryInstall() {
         Task {
             phase = .running
@@ -128,7 +130,7 @@ final class PortJob: ObservableObject, Identifiable {
         guard await run([route, game.app] + portOptions) else { return }
         phase = .finished
         fraction = 1
-        detail = "Installed. Open it from your iPad's home screen."
+        detail = "Installed. Open it from your \(settings.deviceKind)'s home screen."
     }
 
     /// Returns true on success.

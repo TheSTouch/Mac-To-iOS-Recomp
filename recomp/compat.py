@@ -129,9 +129,9 @@ def unity(report):
     used = called_from_game(managed, plugins) if plugins and os.path.isdir(managed) else set()
     if used:
         blockers.append("Native plugins with no iOS version: " + ", ".join(sorted(plugins[m] for m in used)) +
-                        ". Calls into them fail on the iPad unless they get a stub (stubs/).")
+                        ". Calls into them fail on iOS unless they get a stub (stubs/).")
     if set(plugins) - used:
-        notes.append("Ships native libraries no game assembly calls (harmless on the iPad): " +
+        notes.append("Ships native libraries no game assembly calls (harmless on iOS): " +
                      ", ".join(sorted(plugins[m] for m in set(plugins) - used)) + ".")
 
     for dll, why in sorted(RUNTIME_CODEGEN.items()):
@@ -143,7 +143,7 @@ def unity(report):
         notes.append("Uses Unity's legacy input: taps act as left clicks (Unity's own touch-to-mouse); "
                      "the touch gestures for right click, scroll and drags need the Input System package.")
     if "arm64" not in report["archs"]:
-        notes.append("Intel-only on the Mac does not matter here: the game's .NET code is recompiled for the iPad.")
+        notes.append("Intel-only on the Mac does not matter here: the game's .NET code is recompiled for iOS.")
 
     label = f"Unity {version or '?'} (Mono)"
     if blockers:

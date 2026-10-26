@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""macToiOSRecomp - port macOS games to iPadOS.
+"""macToiOSRecomp - port macOS games to iOS (iPhone and iPad).
 
   recomp.py inspect <Game.app>... [--json]           triage: engine, archs, porting route
   recomp.py scan [--extra DIR]... [--json]           find installed games and their support status
@@ -13,7 +13,7 @@
                                                      the Mac's mods and what the next port does with each;
                                                      --include/--exclude choose which ones it compiles in
   recomp.py mods <Game.app> --device NAME|UDID [--bundle-id ID] [--all]
-                                                     copy the last port's mods to the iPad's mod folder
+                                                     copy the last port's mods to the device's mod folder
                                                      (the unity route's install stage does this too)
 
 Unity stages, in order (default: all): prepare player inject xcode install

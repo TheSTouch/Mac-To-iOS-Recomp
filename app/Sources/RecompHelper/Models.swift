@@ -70,6 +70,9 @@ struct BuildEnvironment: Decodable {
         let state: String?
 
         var label: String { [name, model].compactMap { $0 }.joined(separator: " — ") }
+        /// "iPhone" or "iPad" (devicectl's deviceType).
+        var kind: String { type ?? "device" }
+        var shortName: String { name ?? model ?? kind }
     }
 
     let tools: [String: Bool]
