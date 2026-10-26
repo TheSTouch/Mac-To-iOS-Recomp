@@ -71,6 +71,7 @@ namespace Recomp.Touchscreen
         Rect _safe;
         float _rightInset;               // the HUD's right margin, in panel units (the View tab reaches past it)
         float _tabFont, _districtFont;   // the game's own font sizes, before they are scaled
+        float _levelsWidth, _levelBox, _levelFont;  // the levels bar's own width, level box height and font size
         readonly Dictionary<VisualElement, VisualElement> _holders = new Dictionary<VisualElement, VisualElement>();  // panel -> FitInHolder's holder
         readonly HashSet<VisualElement> _held = new HashSet<VisualElement>();  // the holders
         string _loggedView;
@@ -499,7 +500,13 @@ namespace Recomp.Touchscreen
                 var reset = levels.Q("Reset");
                 if (reset != null && reset.style.display != DisplayStyle.None) reset.style.display = DisplayStyle.None;
                 var levelsBar = levels.Q("Content") ?? levels;
-                if (levelsBar.layout.width > 0f && width > 0f) FitInHolder(levels, levelsBar, width / levelsBar.layout.width);
+                if (levelsBar.layout.width > 0f && width > 0f)
+                {
+                    var levelsScale = width / levelsBar.layout.width;
+                    var minus = hoursBar?.Q("Minus");
+                    if (minus != null && minus.layout.width > 0f) ArrangeLevels(levelsBar, levelsScale, minus.layout.width * hoursScale);
+                    FitInHolder(levels, levelsBar, levelsScale);
+                }
             }
             if (district != null)
             {
@@ -626,6 +633,53 @@ namespace Recomp.Touchscreen
             if (line == _loggedView) return;
             _loggedView = line;
             Debug.Log("[Touchscreen] view layout: " + line);
+        }
+
+        // The levels bar: its up/down arrows as big on screen as Global view's (arrow, in the
+        // drawer's units; k is the bar's scale), the bar as tall as they need, its icon and the
+        // level box (∞ or a number) grown to that height, the box narrower so the bar keeps the
+        // width it is scaled by.
+        void ArrangeLevels(VisualElement bar, float k, float arrow)
+        {
+            var wrapper = bar.Q("LevelButtonWrapper");
+            var label = bar.Q<Label>("Level");
+            if (_levelsWidth <= 0f)
+            {
+                if (!(bar.layout.width > 0f) || wrapper == null || !(wrapper.layout.height > 0f)) return;
+                _levelsWidth = bar.layout.width;
+                _levelBox = wrapper.layout.height;
+                _levelFont = label?.resolvedStyle.fontSize ?? 0f;
+                bar.style.width = _levelsWidth;
+                bar.style.flexGrow = 0f;
+            }
+            var size = arrow / k;
+            if (bar.style.height == size + 4f) return;
+            bar.style.height = size + 4f;
+            foreach (var name in new[] { "Up", "Down" })
+            {
+                var b = bar.Q(name);
+                if (b != null) b.style.width = b.style.height = b.style.minWidth = b.style.minHeight = b.style.maxWidth = b.style.maxHeight = size;
+            }
+            var arrows = bar.Q("ButtonsWrapper");
+            if (arrows != null)
+            {
+                arrows.style.width = arrows.style.minWidth = StyleKeyword.Auto;
+                arrows.style.flexShrink = 0f;
+            }
+            var icon = bar.Q("LevelIcon");
+            if (icon != null) icon.style.width = icon.style.height = icon.style.minWidth = icon.style.minHeight = icon.style.maxWidth = icon.style.maxHeight = size;
+            if (wrapper != null)
+            {
+                var w = wrapper.style;
+                w.height = size;
+                w.width = StyleKeyword.Auto;
+                w.minWidth = 0f;
+                w.flexGrow = w.flexShrink = 1f;
+                w.marginLeft = w.marginRight = 4f;
+            }
+            var button = bar.Q("LevelButton");
+            if (button != null) button.style.width = button.style.height = Length.Percent(100);
+            if (label != null && _levelFont > 0f && _levelBox > 0f) label.style.fontSize = _levelFont * size / _levelBox;
         }
 
         // What takes a panel's place among the drawer's children: its holder, or itself.
