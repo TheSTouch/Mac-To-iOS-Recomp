@@ -77,7 +77,7 @@ namespace Recomp.Touchscreen
                 Debug.Log("[Touchscreen] no " + RotateButton + " button: Place and Rows not added");
                 return;
             }
-            _place = Create(rotate, "Place", PlaceIcon, () => Placement.Place(), out _, out _);
+            _place = Create(rotate, "Place", PlaceIcon, () => { if (WorldInput.Active) WorldInput.Current.Place(); else Placement.Place(); }, out _, out _);
             _rows = Create(rotate, "Rows", RowsIcon, () => Placement.Rows = !Placement.Rows, out _rowsIcon, out _rowsCaption);
             rotate.parent.Add(_place);
             rotate.parent.Add(_rows);
