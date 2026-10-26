@@ -175,8 +175,12 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
             unsigned now = atomic_load(&gDrawables);
             static id<MTLDevice> gpu;
             if (!gpu) gpu = MTLCreateSystemDefaultDevice();
-            RLOG(@"heartbeat: %.1f frames/s, %zu MB memory left (app %llu MB, of which Metal %lu MB)", (now - last) / 10.0,
-                 os_proc_available_memory() >> 20, Footprint(), (unsigned long)(gpu.currentAllocatedSize >> 20));
+            // A phone that runs hot slows its CPU and GPU down: frames and sound stutter.
+            static const char *heat[] = {"nominal", "fair", "serious", "critical"};
+            NSProcessInfoThermalState hot = NSProcessInfo.processInfo.thermalState;
+            RLOG(@"heartbeat: %.1f frames/s, %zu MB memory left (app %llu MB, of which Metal %lu MB), thermal %s",
+                 (now - last) / 10.0, os_proc_available_memory() >> 20, Footprint(),
+                 (unsigned long)(gpu.currentAllocatedSize >> 20), hot <= 3 ? heat[hot] : "?");
             last = now;
         }];
     });
