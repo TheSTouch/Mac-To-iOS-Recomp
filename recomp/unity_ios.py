@@ -501,7 +501,8 @@ def write_shim_config(game, data):
     """StreamingAssets/recomp.json (Data/Raw on iOS): per-game switches the managed shims read,
     e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad",
     the extra on-screen keys of its "touch_keys" ([{"label", "keys": [Input System key names]}]),
-    the corner they go in ("touch_keys_corner": "left" or "right"), touches on the game's UI left
+    the corner they go in ("touch_keys_corner": "left", "right", or "island": beside a
+    phone's Dynamic Island when held sideways, bottom-right otherwise), touches on the game's UI left
     to it as real touches ("touch_ui"),
     and the iPhone settings of its "iphone" block (see PHONE_DEFAULTS)."""
     profile = game_profile(game) or {}

@@ -14,6 +14,9 @@
 // buttons as an overlay Canvas with Images and Texts, replaced by the UI Toolkit
 // ones if a theme turns up later.
 // On a phone the keys are sized in layout points and kept inside the safe area (see Layout).
+// With "touch_keys_corner" "island", a phone held sideways puts them in the strip the safe area
+// leaves beside the Dynamic Island, just under the island, on whichever side it is; elsewhere
+// (upright, iPad) they go in the bottom-right corner.
 // Held upright, in a game with the touch gamepad, the stack starts just above the gamepad's
 // control zone instead, at the left edge: clear of the move stick, and (in Valheim) far above
 // the health and food bars, which stay in the bottom-left corner.
@@ -65,6 +68,8 @@ namespace Recomp
         static KeyButton _pressed;
         static int _pressFrames;   // 2: press this update, 1: release this update
         static bool _right;        // in the bottom-right corner instead of the bottom-left
+        static bool _island;       // beside the Dynamic Island on a phone held sideways
+        static ScreenOrientation _laidOutOrientation;
 
         public static void Install()
         {
@@ -77,7 +82,8 @@ namespace Recomp
             {
                 var path = Path.Combine(Application.streamingAssetsPath, "recomp.json");
                 var config = File.Exists(path) ? JsonUtility.FromJson<Config>(File.ReadAllText(path)) : null;
-                _right = config?.touchKeysCorner == "right";
+                _island = config?.touchKeysCorner == "island";
+                _right = config?.touchKeysCorner == "right" || _island;
                 foreach (var k in config?.touchKeys ?? new TouchKey[0])
                 {
                     var keys = new List<Key>();
@@ -148,13 +154,35 @@ namespace Recomp
                 Attach();
             }
             // Every frame: after a rotation the buttons must move (and be hit-tested) at once.
-            if ((_canvas != null || _overlay != null) && Layout.Area != _laidOut) Relayout();
+            if ((_canvas != null || _overlay != null) && (Layout.Area != _laidOut || Screen.orientation != _laidOutOrientation)) Relayout();
         }
 
         static float Bottom(int index) => Margin + index * (Height + Gap);
 
         // Where the stack starts (screen pixels): the area's bottom, or the control zone's top.
         static float Base(Rect area) => Layout.Portrait && TouchPad.Enabled ? Layout.ZoneTop(area) : area.yMin;
+
+        // Beside the Dynamic Island: a phone held sideways, with a strip outside the safe area. The
+        // island is on the left in LandscapeLeft (the phone turned counter-clockwise), else the right.
+        static bool BesideIsland(Rect area, out bool left)
+        {
+            left = Screen.orientation == ScreenOrientation.LandscapeLeft;
+            return _island && Layout.Phone && !Layout.Portrait && (left ? area.xMin : Screen.width - area.xMax) > 0f;
+        }
+
+        // A key beside the island (screen pixels, origin bottom-left): centred in the strip, the
+        // stack hanging just under the island (which is centred on the edge, about a third of the
+        // short side long), Esc lowest.
+        static Rect IslandKey(Rect area, bool left, int index, float unit)
+        {
+            var strip = left ? area.xMin : Screen.width - area.xMax;
+            var w = Mathf.Min(Width * unit, strip * 0.9f);
+            var h = Height * unit;
+            var top = Screen.height * 0.5f - 0.17f * Screen.height - Gap * unit;
+            var y = top - (Buttons.Count - index) * h - (Buttons.Count - 1 - index) * Gap * unit;
+            var x = (left ? strip / 2f : area.xMax + strip / 2f) - w / 2f;
+            return new Rect(x, y, w, h);
+        }
 
         static void Attach()
         {
@@ -255,12 +283,24 @@ namespace Recomp
         {
             var area = Layout.Area;
             var unit = Layout.Unit;
+            _laidOutOrientation = Screen.orientation;
+            var island = BesideIsland(area, out var islandLeft);
             if (_canvas != null)
             {
                 for (int i = 0; i < Buttons.Count; i++)
                 {
                     var b = Buttons[i];
                     if (b.CanvasButton == null) continue;
+                    if (island)
+                    {
+                        var r = IslandKey(area, islandLeft, i, unit);
+                        b.CanvasButton.anchorMin = b.CanvasButton.anchorMax = b.CanvasButton.pivot = Vector2.zero;
+                        b.CanvasButton.anchoredPosition = r.position;
+                        b.CanvasButton.sizeDelta = r.size;
+                        b.CanvasText.fontSize = Mathf.RoundToInt(18 * unit);
+                        continue;
+                    }
+                    b.CanvasButton.anchorMin = b.CanvasButton.anchorMax = b.CanvasButton.pivot = _right ? Vector2.right : Vector2.zero;
                     b.CanvasButton.anchoredPosition = _right
                         ? new Vector2(area.xMax - Screen.width, Base(area)) + new Vector2(-Margin, Bottom(i)) * unit
                         : new Vector2(area.xMin, Base(area)) + new Vector2(Margin, Bottom(i)) * unit;
@@ -286,16 +326,30 @@ namespace Recomp
                 var b = Buttons[i].Button;
                 if (b == null) continue;
                 var s = b.style;
-                if (_right) s.right = right + Margin * k;
-                else s.left = left + Margin * k;
-                s.bottom = bottom + Bottom(i) * k;
-                s.width = Width * k;
-                s.height = Height * k;
+                if (island)
+                {
+                    // Screen pixels to the panel's units.
+                    var r = IslandKey(area, islandLeft, i, unit);
+                    s.left = r.x * root.width / Screen.width;
+                    s.right = StyleKeyword.Null;
+                    s.bottom = r.y * root.height / Screen.height;
+                    s.width = r.width * root.width / Screen.width;
+                    s.height = r.height * root.height / Screen.height;
+                }
+                else
+                {
+                    if (_right) { s.right = right + Margin * k; s.left = StyleKeyword.Null; }
+                    else { s.left = left + Margin * k; s.right = StyleKeyword.Null; }
+                    s.bottom = bottom + Bottom(i) * k;
+                    s.width = Width * k;
+                    s.height = Height * k;
+                }
                 s.fontSize = 18 * k;
                 s.borderTopLeftRadius = s.borderTopRightRadius = s.borderBottomLeftRadius = s.borderBottomRightRadius = 10 * k;
             }
             _laidOut = area;
-            Debug.Log($"[recomp] key buttons laid out for a phone: area {area}, panel {root.width}x{root.height}");
+            Debug.Log($"[recomp] key buttons laid out for a phone: area {area}, panel {root.width}x{root.height}"
+                      + (island ? ", beside the Dynamic Island on the " + (islandLeft ? "left" : "right") : ""));
         }
 
         static Button Create(string label, int index)

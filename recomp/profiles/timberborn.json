@@ -46,7 +46,7 @@
       ]
     }
   ],
-  "touch_keys_corner": "right",
+  "touch_keys_corner": "island",
   "touch_ui": true,
   "iphone": {
     "render_scale": 1.0,
