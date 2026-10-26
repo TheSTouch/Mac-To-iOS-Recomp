@@ -4,7 +4,11 @@
 // StreamingAssets/Modding/UI.zip): the same button type and classes, a 20 px icon and a
 // caption where the rotate button shows its key, with icons from the game's own UI.
 // Rows shows only for tools whose drag places several objects (the layout's end point
-// matters: paths, platforms, walls, fields), not for a building placed one at a time.
+// matters: paths, platforms, walls, fields), not for a building placed one at a time. It
+// starts on for what is always drawn as a line or an area (RowsByDefault): paths, power
+// shafts, fences, hedges, tubeways, dams, floodgates, barriers, platforms, levees, floors,
+// terrain blocks and dynamite. Buildings dragged into a row (SideLine: piles, warehouses,
+// flags, overhangs...) and the automation parts start off: those are usually placed one by one.
 using System;
 using Timberborn.BlockObjectTools;
 using Timberborn.BlockSystem;
@@ -44,8 +48,27 @@ namespace Recomp.Touchscreen
             var tool = toolEnteredEvent.Tool as BlockObjectTool;
             Placement.Active = tool != null;
             if (tool == null) return;
+            Placement.Rows = RowsByDefault(tool);
             if (_place == null || _place.panel == null) Attach();
             if (_rows != null) _rows.style.display = Drags(tool.Template.Layout) ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        // Rectangle tools that are areas of one block repeated (the other Rectangle tools are the
+        // automation parts and the map editor's ruins), by blueprint name without its faction.
+        static readonly string[] AreaTools =
+        {
+            "Platform", "DoublePlatform", "TriplePlatform", "Levee", "ImpermeableFloor", "TerrainBlock",
+            "Dynamite", "DoubleDynamite", "TripleDynamite", "ImpermeablePowerShaft",
+        };
+
+        static bool RowsByDefault(BlockObjectTool tool)
+        {
+            var layout = tool.Template.Layout;
+            if (layout == BlockObjectLayout.TwoSegmentLine || layout == BlockObjectLayout.Line) return true;
+            if (layout != BlockObjectLayout.Rectangle) return false;
+            var name = tool.Template.Blueprint?.Name ?? "";
+            var dot = name.IndexOf('.');
+            return Array.IndexOf(AreaTools, dot < 0 ? name : name.Substring(0, dot)) >= 0;
         }
 
         // The layouts AreaPicker stretches from the drag's start to its end; Single and Half place one.
