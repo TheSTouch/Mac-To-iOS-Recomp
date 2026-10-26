@@ -10,17 +10,19 @@
 //   margin is there for the island's side; the other side has just the rounded corners). The
 //   port's Esc and Dev keys sit in the island's strip (the profile's "touch_keys_corner": "island").
 // - Top strip, 80 units tall: a Colony tab, the goods counters drawn 1.45 times larger with
-//   their breakdowns closed, and a View tab at the right end. Left of the tab, a column of the
-//   speed buttons (scaled to the date's width), date and weather, with the day clock left of
-//   it, as tall as the column.
+//   their breakdowns closed, and a View tab at the right end, as tall as the column left of it
+//   and reaching the screen's edge. That column: the speed buttons (scaled to the date's
+//   width), date and weather, with the day clock left of it, as tall as the column.
 // - The bottom bar becomes a column on the left edge, drawn 1.6 times larger and scrolled by
 //   dragging: the general tools (Select ... Priority), the 15 building groups and Options. An
 //   open group's tools go into a second column beside it, both the full height under the strip.
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
 //   narrow columns.
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
-//   pinned levers. View drawer: the overlay buttons centred at the top, the district switcher,
-//   then working hours and the visible levels scaled to the switcher's width. Both drawn larger.
+//   pinned levers. View drawer: the overlay buttons centred at the top, working hours and the
+//   visible levels scaled to the district switcher's width, and the switcher last (its list
+//   opens under it and the drawer grows), a little taller, its arrows as big as working hours'
+//   -/+. Both drawers drawn larger.
 // - Rotate, flip, Rows and Place go into a rail on the right edge, as large square icon buttons
 //   of one size without their keyboard hints, and the building's cost (the green box) under
 //   them. The tool's description box is not shown; the rest of the tool panel (warnings) moves
@@ -67,6 +69,8 @@ namespace Recomp.Touchscreen
         Button _colonyTab, _viewTab;
         Type _nineSliceButton, _nineSlice;
         Rect _safe;
+        float _rightInset;               // the HUD's right margin, in panel units (the View tab reaches past it)
+        float _tabFont, _districtFont;   // the game's own font sizes, before they are scaled
         string _loggedView;
         ScreenOrientation _orientation;
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
@@ -176,7 +180,7 @@ namespace Recomp.Touchscreen
             if (_orientation == ScreenOrientation.LandscapeLeft) right *= AwayFromIsland;
             else if (_orientation == ScreenOrientation.LandscapeRight) left *= AwayFromIsland;
             s.left = left * kx;
-            s.right = right * kx;
+            s.right = _rightInset = right * kx;
             s.top = (Screen.height - safe.yMax) * ky;
             s.bottom = safe.yMin * ky;
             if (_column != null)
@@ -475,7 +479,7 @@ namespace Recomp.Touchscreen
                 else order.Add(child);
             }
             foreach (var other in order) ScaleCentred(other, OverlayButtonsScale);
-            foreach (var e in new[] { district, hours, levels })
+            foreach (var e in new[] { hours, levels, district })
                 if (e != null) order.Add(e);
             for (int i = 0; i < order.Count; i++)
                 if (_viewDrawer.IndexOf(order[i]) != i) _viewDrawer.Insert(i, order[i]);
@@ -483,7 +487,83 @@ namespace Recomp.Touchscreen
             var width = district?.layout.width ?? 0f;
             if (hours != null) FitWidth(hours, width);
             if (levels != null) FitWidth(levels, width);
+            if (district != null) ArrangeDistrict(district, hours, width);
+            ArrangeViewTab();
             LogView();
+        }
+
+        // The View tab as tall as the speed/date/weather column, level with it, reaching the
+        // screen's edge; its icon and label grow with it. The block moves left of it and the
+        // rail starts under it.
+        void ArrangeViewTab()
+        {
+            if (_timeColumn.childCount == 0) return;
+            var first = _timeColumn[0];
+            var last = _timeColumn[_timeColumn.childCount - 1];
+            var y = _timeBlock.layout.y + _timeColumn.layout.y;
+            var top = y + first.layout.y;
+            var height = y + last.layout.yMax - top;
+            if (!(height > 0f)) return;
+            var k = height / StripHeight;
+            var t = _viewTab.style;
+            if (t.top == top && t.height == height && t.right == -_rightInset) return;
+            t.top = top;
+            t.height = height;
+            t.right = -_rightInset;
+            t.width = ViewTabWidth * k + _rightInset;
+            _timeBlock.style.right = ViewTabWidth * k + Gap;
+            foreach (var child in _viewTab.Children())
+            {
+                if (child is Label label)
+                {
+                    if (_tabFont <= 0f) _tabFont = label.resolvedStyle.fontSize;
+                    if (_tabFont > 0f) label.style.fontSize = _tabFont * k;
+                }
+                else child.style.width = child.style.height = 36f * k;
+            }
+            if (_rail != null) _rail.style.top = top + height + Gap;
+        }
+
+        // Global view, at the drawer's bottom, keeps its width but grows a little: its arrows as big
+        // as working hours' -/+ once that bar is scaled to this width, its name and icon larger.
+        // Its district list (an absolute panel under it in the game) joins the layout, so the
+        // drawer grows when the list opens.
+        void ArrangeDistrict(VisualElement district, VisualElement hours, float width)
+        {
+            var minus = hours?.Q("Minus");
+            var k = hours != null && hours.layout.width > 0f ? width / hours.layout.width : 1f;
+            var arrow = minus != null && minus.layout.width > 0f ? minus.layout.width * k : 24f;
+            foreach (var name in new[] { "PreviousDistrict", "NextDistrict" })
+            {
+                var b = district.Q(name);
+                if (b == null || b.style.width == arrow) continue;
+                b.style.width = b.style.height = b.style.minWidth = b.style.minHeight = b.style.maxWidth = b.style.maxHeight = arrow;
+            }
+            var header = district.Q("DistrictHeader");
+            if (header != null && header.style.height != arrow + 10f) header.style.height = header.style.minHeight = arrow + 10f;
+            var title = district.Q("DistrictName");
+            if (title != null)
+            {
+                if (_districtFont <= 0f) _districtFont = title.resolvedStyle.fontSize;
+                var size = _districtFont * 1.2f;
+                if (_districtFont > 0f && title.style.fontSize != size)
+                {
+                    title.style.fontSize = size;
+                    title.style.width = StyleKeyword.Auto;
+                    title.style.maxWidth = StyleKeyword.None;
+                    title.style.flexGrow = title.style.flexShrink = 1f;
+                    title.style.height = arrow;
+                }
+            }
+            var icon = header?.Q(className: "district-panel__icon");
+            if (icon != null) icon.style.minWidth = icon.style.minHeight = icon.style.maxWidth = icon.style.maxHeight = 31f;
+            var list = district.Q("Background");
+            if (list != null && list.style.position != Position.Relative)
+            {
+                list.style.position = Position.Relative;
+                list.style.top = list.style.bottom = list.style.left = list.style.right = StyleKeyword.Auto;
+                list.style.alignSelf = Align.Stretch;
+            }
         }
 
         // Where each piece ended up, on screen (panel units, after scaling), when that changes: the
@@ -539,7 +619,7 @@ namespace Recomp.Touchscreen
             var s = _rail.style;
             s.position = Position.Absolute;
             s.right = 0f;
-            s.top = StripHeight + Gap;  // under the View tab, over the Esc and Dev keys
+            s.top = StripHeight + Gap;  // under the View tab (ArrangeViewTab moves it once that is sized)
             s.alignItems = Align.FlexEnd;
             _placementPanel.style.flexDirection = FlexDirection.Column;
             _placementPanel.style.alignItems = Align.FlexEnd;
