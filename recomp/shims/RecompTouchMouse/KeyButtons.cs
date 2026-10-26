@@ -15,8 +15,11 @@
 // ones if a theme turns up later.
 // On a phone the keys are sized in layout points and kept inside the safe area (see Layout).
 // With "touch_keys_corner" "island", a phone held sideways puts them in the strip the safe area
-// leaves beside the Dynamic Island, just under the island, on whichever side it is; elsewhere
-// (upright, iPad) they go in the bottom-right corner.
+// leaves beside the Dynamic Island, square, just under the island, on whichever side it is;
+// elsewhere (upright, iPad) they go in the bottom-right corner.
+// A game mod can add a key of its own (AddAction): drawn and hit-tested like the others, it
+// calls the mod instead of pressing keys, shows only while the mod says so, and beside the
+// island it goes above the island.
 // Held upright, in a game with the touch gamepad, the stack starts just above the gamepad's
 // control zone instead, at the left edge: clear of the move stick, and (in Valheim) far above
 // the health and food bars, which stay in the bottom-left corner.
@@ -35,7 +38,7 @@ using Text = UnityEngine.UI.Text;
 
 namespace Recomp
 {
-    static class KeyButtons
+    public static class KeyButtons
     {
         const float CheckSeconds = 0.5f;
 
@@ -57,7 +60,11 @@ namespace Recomp
             public Button Button;
             public RectTransform CanvasButton;
             public Text CanvasText;
+            public Action Action;      // a game mod's key (AddAction): called instead of pressing Keys
+            public Func<bool> Visible;  // shown while true (null: always)
         }
+
+        static bool Shown(KeyButton b) => b.Visible == null || b.Visible();
 
         static readonly List<KeyButton> Buttons = new List<KeyButton>();
         static Keyboard _keyboard;
@@ -101,9 +108,44 @@ namespace Recomp
             }
         }
 
+        /// A key of a game mod's (label also names it: "recomp-key-" + label), calling onPress when
+        /// tapped and shown while visible() is true. Beside the Dynamic Island it goes above the
+        /// island. Adding a label again replaces its action and visibility.
+        public static void AddAction(string label, Action onPress, Func<bool> visible)
+        {
+            foreach (var existing in Buttons)
+                if (existing.Label == label)
+                {
+                    existing.Action = onPress;
+                    existing.Visible = visible;
+                    return;
+                }
+            var b = new KeyButton { Label = label, Keys = new Key[0], Action = onPress, Visible = visible };
+            Buttons.Add(b);
+            if (_overlay != null)
+            {
+                b.Button = Create(label, Buttons.Count - 1);
+                _overlay.rootVisualElement.Add(b.Button);
+            }
+            else if (_canvas != null)
+            {
+                UnityEngine.Object.Destroy(_canvas);
+                _canvas = null;
+                CreateCanvas();
+            }
+            _laidOut = default;
+            Debug.Log("[recomp] key button added by a game mod: " + label);
+        }
+
         public static void Press(int index)
         {
             var b = Buttons[index];
+            if (b.Action != null)
+            {
+                Debug.Log("[recomp] " + b.Label + " pressed");
+                b.Action();
+                return;
+            }
             _keyboard = InputSystem.FindControl("/Keyboard/" + Keyboard.current?[b.Keys[b.Keys.Length - 1]].name)?.device as Keyboard ?? Keyboard.current;
             if (_keyboard == null) return;
             _pressed = b;
@@ -118,6 +160,7 @@ namespace Recomp
             for (int i = 0; i < Buttons.Count; i++)
             {
                 var b = Buttons[i];
+                if (!Shown(b)) continue;
                 if (b.CanvasButton != null)
                 {
                     var c = new Vector3[4];
@@ -155,6 +198,15 @@ namespace Recomp
             }
             // Every frame: after a rotation the buttons must move (and be hit-tested) at once.
             if ((_canvas != null || _overlay != null) && (Layout.Area != _laidOut || Screen.orientation != _laidOutOrientation)) Relayout();
+            foreach (var b in Buttons)
+            {
+                if (b.Visible == null) continue;
+                var shown = b.Visible();
+                if (b.Button != null && (b.Button.style.display == DisplayStyle.None) == shown)
+                    b.Button.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+                if (b.CanvasButton != null && b.CanvasButton.gameObject.activeSelf != shown)
+                    b.CanvasButton.gameObject.SetActive(shown);
+            }
         }
 
         static float Bottom(int index) => Margin + index * (Height + Gap);
@@ -173,13 +225,27 @@ namespace Recomp
         // A key beside the island (screen pixels, origin bottom-left): centred in the strip, the
         // stack hanging just under the island (which is centred on the edge, about a third of the
         // short side long), Esc lowest.
+        // Square; a game mod's keys (AddAction) stack upwards above the island, the others downwards.
         static Rect IslandKey(Rect area, bool left, int index, float unit)
         {
             var strip = left ? area.xMin : Screen.width - area.xMax;
             var w = Mathf.Min(Width * unit, strip * 0.78f);  // a clear margin to the screen's edge and the HUD
-            var h = w * Height / Width;
-            var top = Screen.height * 0.5f - 0.17f * Screen.height - Gap * unit;
-            var y = top - (Buttons.Count - index) * h - (Buttons.Count - 1 - index) * Gap * unit;
+            var h = w;
+            var above = Buttons[index].Action != null;
+            int count = 0, at = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                if ((Buttons[i].Action != null) != above) continue;
+                if (i < index) at++;
+                count++;
+            }
+            float y;
+            if (above) y = Screen.height * 0.5f + 0.17f * Screen.height + Gap * unit + at * (h + Gap * unit);
+            else
+            {
+                var top = Screen.height * 0.5f - 0.17f * Screen.height - Gap * unit;
+                y = top - (count - at) * h - (count - 1 - at) * Gap * unit;
+            }
             var x = (left ? strip / 2f : area.xMax + strip / 2f) - w / 2f;
             return new Rect(x, y, w, h);
         }
