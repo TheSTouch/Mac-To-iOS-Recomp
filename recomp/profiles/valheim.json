@@ -1,9 +1,13 @@
 {
   "name": "Valheim",
   "tested": "playable on iPad (1.0.20, Steam): local worlds, touch gamepad.",
+  "tested_iphone": "playable on iPhone 17 (1.0.20, Steam), touch gamepad.",
   "steam_app_id": 892970,
   "when_assembly": "assembly_valheim.dll",
   "touch_gamepad": true,
+  "iphone": {
+    "render_scale": 0.75
+  },
   "stub_overrides": {
     "steamworks": [
       "steamworks-offline.overrides.c"
