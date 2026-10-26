@@ -81,7 +81,8 @@ namespace Recomp.Touchscreen
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
         Vector2 _panelSize;
         float _nextCheck;
-        bool _placing, _keysStyled;
+        bool _placing;
+        readonly HashSet<VisualElement> _styledKeys = new HashSet<VisualElement>();
 
         public MobileHud(EventBus eventBus, UILayout uiLayout)
         {
@@ -354,7 +355,7 @@ namespace Recomp.Touchscreen
         // nine-sliced as its CommonStyle.uss slices it, and its yellow text.
         void StyleKeys()
         {
-            if (_keysStyled) return;
+            if (_styledKeys.Count >= 3) return;  // Esc, Dev and DevControls' bug key
             UIDocument overlay = null;
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
                 if (doc.name == "RecompOverlay") overlay = doc;
@@ -363,6 +364,7 @@ namespace Recomp.Touchscreen
             var image = PlacementButtons.Image("UI/Images/Backgrounds/bg-square-large-2");
             foreach (var b in keys)
             {
+                if (!_styledKeys.Add(b)) continue;
                 var s = b.style;
                 s.backgroundImage = image;
                 s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 16;
@@ -373,8 +375,7 @@ namespace Recomp.Touchscreen
                 s.color = new Color(0.95f, 0.87f, 0.6f);
                 s.unityFontStyleAndWeight = FontStyle.Bold;
             }
-            _keysStyled = true;
-            Debug.Log("[Touchscreen] key buttons drawn as the game's buttons: " + keys.Count);
+            Debug.Log("[Touchscreen] key buttons drawn as the game's buttons: " + _styledKeys.Count);
         }
 
         // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels

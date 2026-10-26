@@ -16,6 +16,7 @@ namespace Recomp.Touchscreen
             containerDefinition.Bind<PlacementButtons>().AsSingleton();
             containerDefinition.Bind<MobileHud>().AsSingleton();
             containerDefinition.Bind<WorldInput>().AsSingleton();
+            containerDefinition.Bind<DevControls>().AsSingleton();
         }
     }
 }
