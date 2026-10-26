@@ -1,5 +1,5 @@
 // The game's "Development controls" as a modal, with the Touch layout (TouchLayout: always on an
-// iPhone, a choice on an iPad; without it the game's own panel stays). The port's Dev key
+// iPhone, the Mobile UI setting on an iPad; without it the game's own panel stays). The port's Dev key
 // toggles developer mode as on a Mac (Alt+Shift+Z); while it is on, a key with a bug icon
 // appears (Recomp.KeyButtons.AddAction: above the Dynamic Island on a phone held sideways,
 // on top of the key stack elsewhere) and opens or closes
@@ -48,7 +48,7 @@ namespace Recomp.TheSTouchscreen
 
         public void PostLoad()
         {
-            if (!TouchLayout.On) return;
+            if (!TouchLayout.On || _root != null) return;  // a second call: TouchLayout turned it on in the game
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
                 if (doc.rootVisualElement?.Q("GameUI") != null) _root = doc.rootVisualElement;
             if (_root == null)
