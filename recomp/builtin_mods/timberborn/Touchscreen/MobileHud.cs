@@ -377,6 +377,10 @@ namespace Recomp.Touchscreen
             _uiLayout.AddAbsoluteItem(_timeBlock);
 
             _viewDrawer = Drawer("TouchscreenViewDrawer");
+            // Laid out while closed (hidden, not removed), so ArrangeView has its sizes before it
+            // first opens: closed by display, it showed its bars small and resized them on opening.
+            _viewDrawer.style.display = DisplayStyle.Flex;
+            _viewDrawer.visible = false;
             _viewDrawer.style.right = 0f;
             _viewDrawer.style.top = BelowStrip;
             _viewDrawer.style.alignItems = Align.Center;
@@ -801,10 +805,13 @@ namespace Recomp.Touchscreen
 
         void Toggle(VisualElement drawer, Button tab)
         {
-            var show = drawer.style.display == DisplayStyle.None;
+            var show = !IsOpen(drawer);
             CloseAll();
             Open(drawer, tab, show);
         }
+
+        // The View drawer opens by visibility (see LayOutView), the Colony drawer by display.
+        bool IsOpen(VisualElement drawer) => drawer == _viewDrawer ? drawer.visible : drawer.style.display != DisplayStyle.None;
 
         void CloseAll()
         {
@@ -812,10 +819,11 @@ namespace Recomp.Touchscreen
             Open(_viewDrawer, _viewTab, false);
         }
 
-        static void Open(VisualElement drawer, Button tab, bool show)
+        void Open(VisualElement drawer, Button tab, bool show)
         {
             if (drawer == null) return;
-            drawer.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            if (drawer == _viewDrawer) drawer.visible = show;
+            else drawer.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             tab?.EnableInClassList("button--active", show);
         }
     }
