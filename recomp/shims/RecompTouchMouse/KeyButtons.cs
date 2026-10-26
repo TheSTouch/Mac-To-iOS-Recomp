@@ -143,8 +143,9 @@ namespace Recomp
             {
                 _nextCheck = now + CheckSeconds;
                 Attach();
-                if (Layout.Area != _laidOut) Relayout();
             }
+            // Every frame: after a rotation the buttons must move (and be hit-tested) at once.
+            if ((_canvas != null || _overlay != null) && Layout.Area != _laidOut) Relayout();
         }
 
         static float Bottom(int index) => Margin + index * (Height + Gap);

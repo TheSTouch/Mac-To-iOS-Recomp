@@ -227,9 +227,16 @@ namespace Recomp
             Debug.Log(show ? "[recomp] touch gamepad shown" : "[recomp] touch gamepad hidden");
         }
 
-        static void Release()
+        // Lets go of every stick and button. After a rotation (keepTouches) the touches still down
+        // stay with the pad, doing nothing until they lift: their positions now come in the other
+        // orientation, and handed to TouchMouse they would hold the mouse's left button (an attack
+        // in Valheim). Lifting one is not a tap either.
+        static void Release(bool keepTouches = false)
         {
-            Owners.Clear();
+            if (keepTouches)
+                foreach (var o in Owners.Values) { o.Button = null; o.Stick = null; o.Moved = true; }
+            else
+                Owners.Clear();
             Left.Touch = Right.Touch = -1;
             Left.Value = Right.Value = Vector2.zero;
             foreach (var b in Buttons) b.Down = false;
@@ -288,7 +295,7 @@ namespace Recomp
         {
             _laidOut = Layout.Area;
             // Turned between upright and sideways: the buttons move, so let go of everything held.
-            if (Layout.Portrait != _portrait) Release();
+            if (Layout.Portrait != _portrait) Release(keepTouches: true);
             _portrait = Layout.Portrait;
             foreach (var b in Buttons)
             {
