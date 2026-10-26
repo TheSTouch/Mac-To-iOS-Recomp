@@ -6,8 +6,12 @@
 // menu) and no physical controller is connected; otherwise touches stay the
 // mouse (TouchMouse). Left half: floating move stick; right half: floating
 // camera stick; A/B/X/Y bottom right, shoulders and triggers along the top,
-// Menu and View top left. A quick tap that misses the buttons is a left click
-// at that spot, so mouse menus stay reachable from the pad.
+// Menu and View top left. A phone held upright has its own layout, in thumb
+// reach: the sticks and A/B/X/Y in the control zone (the lower 40% of the safe
+// area, see Layout.Zone), shoulders and triggers just above it, and a drag
+// anywhere above the zone moves the camera. A quick tap that misses the
+// buttons is a left click at that spot, so mouse menus stay reachable from
+// the pad.
 //
 // Opt-in per game: the port's profile sets "touch_gamepad", which inject
 // writes to StreamingAssets/recomp.json. Sizes and positions are in layout
@@ -38,6 +42,8 @@ namespace Recomp
         {
             public string Name;
             public Vector2 At;       // points: x from the left (>0) or right (<0) edge, y from the bottom (>0) or top (<0) edge
+            public Vector2 Tall;     // the same on a phone held upright, but y counts up from the top of the control zone if OverZone
+            public bool OverZone;
             public float Radius;
             public GamepadButton Input;
             public RectTransform Rect;
@@ -68,6 +74,7 @@ namespace Recomp
         static GameObject _canvas;
         static Sprite _circle;
         static Rect _laidOut;    // the Layout.Area the canvas was last laid out for
+        static bool _portrait;   // and whether that was the portrait layout
         static readonly Stick Left = new Stick { Curve = 1.3f }, Right = new Stick { Curve = 1.8f };
         static readonly List<PadButton> Buttons = new List<PadButton>();
         static readonly Dictionary<int, Owner> Owners = new Dictionary<int, Owner>();
@@ -86,36 +93,42 @@ namespace Recomp
                 Debug.Log("[recomp] touch gamepad: cannot read recomp.json: " + e.Message);
             }
             if (!_enabled) return;
+            // Landscape, then portrait (a phone's 500-point-wide safe area). Portrait: A/B/X/Y in the
+            // zone's bottom right; LT LB above the left half of the zone, right of the key buttons,
+            // RB RT above the right half; L3 and R3 at the bottom, in from their sticks' halves.
             const float k = 62f;  // face-button spacing
-            Add("A", new Vector2(-140, 90), 32, GamepadButton.South);
-            Add("B", new Vector2(-140 + k, 90 + k), 32, GamepadButton.East);
-            Add("X", new Vector2(-140 - k, 90 + k), 32, GamepadButton.West);
-            Add("Y", new Vector2(-140, 90 + 2 * k), 32, GamepadButton.North);
-            Add("LB", new Vector2(56, -170), 24, GamepadButton.LeftShoulder);
-            Add("LT", new Vector2(56, -110), 24, GamepadButton.LeftTrigger);
-            Add("RB", new Vector2(-56, -170), 24, GamepadButton.RightShoulder);
-            Add("RT", new Vector2(-56, -110), 24, GamepadButton.RightTrigger);
-            Add("Menu", new Vector2(48, -34), 22, GamepadButton.Start);
-            Add("View", new Vector2(108, -34), 22, GamepadButton.Select);
-            Add("L3", new Vector2(56, 120), 22, GamepadButton.LeftStick);  // above the Esc button
-            Add("R3", new Vector2(-260, 50), 22, GamepadButton.RightStick);
+            Add("A", new Vector2(-140, 90), new Vector2(-110, 70), 32, GamepadButton.South);
+            Add("B", new Vector2(-140 + k, 90 + k), new Vector2(-110 + k, 70 + k), 32, GamepadButton.East);
+            Add("X", new Vector2(-140 - k, 90 + k), new Vector2(-110 - k, 70 + k), 32, GamepadButton.West);
+            Add("Y", new Vector2(-140, 90 + 2 * k), new Vector2(-110, 70 + 2 * k), 32, GamepadButton.North);
+            Add("LB", new Vector2(56, -170), new Vector2(196, 38), 24, GamepadButton.LeftShoulder, true);
+            Add("LT", new Vector2(56, -110), new Vector2(136, 38), 24, GamepadButton.LeftTrigger, true);
+            Add("RB", new Vector2(-56, -170), new Vector2(-116, 38), 24, GamepadButton.RightShoulder, true);
+            Add("RT", new Vector2(-56, -110), new Vector2(-56, 38), 24, GamepadButton.RightTrigger, true);
+            Add("Menu", new Vector2(48, -34), new Vector2(48, -34), 22, GamepadButton.Start);
+            Add("View", new Vector2(108, -34), new Vector2(108, -34), 22, GamepadButton.Select);
+            Add("L3", new Vector2(56, 120), new Vector2(200, 40), 22, GamepadButton.LeftStick);  // landscape: above the Esc button
+            Add("R3", new Vector2(-260, 50), new Vector2(300, 40), 22, GamepadButton.RightStick);
             // Named like a pad so "<Gamepad>" bindings find it. It stays idle while hidden:
             // games pick their input mode from the device last used, not from what is connected.
             _pad = InputSystem.AddDevice<Gamepad>("RecompTouchGamepad");
             Debug.Log("[recomp] touch gamepad enabled");
         }
 
-        static void Add(string name, Vector2 at, float radius, GamepadButton input) =>
-            Buttons.Add(new PadButton { Name = name, At = at, Radius = radius, Input = input });
+        static void Add(string name, Vector2 at, Vector2 tall, float radius, GamepadButton input, bool overZone = false) =>
+            Buttons.Add(new PadButton { Name = name, At = at, Tall = tall, OverZone = overZone, Radius = radius, Input = input });
 
         public static bool Visible => _visible;
         public static bool Owns(int touch) => Owners.ContainsKey(touch);
 
-        static Vector2 Place(Vector2 at)
+        static Vector2 Place(PadButton b)
         {
             var a = Layout.Area;
+            var tall = Layout.Portrait;
+            var at = tall ? b.Tall : b.At;
             return new Vector2(at.x >= 0 ? a.xMin + at.x * Unit : a.xMax + at.x * Unit,
-                               at.y >= 0 ? a.yMin + at.y * Unit : a.yMax + at.y * Unit);
+                               tall && b.OverZone ? Layout.ZoneTop(a) + at.y * Unit
+                               : at.y >= 0 ? a.yMin + at.y * Unit : a.yMax + at.y * Unit);
         }
 
         /// A touch began while the pad is shown (screen pixels, origin bottom-left).
@@ -123,12 +136,14 @@ namespace Recomp
         {
             var owner = new Owner { Start = pos, Time = now };
             foreach (var b in Buttons)
-                if ((pos - Place(b.At)).magnitude <= (b.Radius + 12) * Unit) { owner.Button = b; break; }
+                if ((pos - Place(b)).magnitude <= (b.Radius + 12) * Unit) { owner.Button = b; break; }
             if (owner.Button != null)
                 owner.Button.Down = true;
             else
             {
-                var s = pos.x < Screen.width / 2f ? Left : Right;
+                // Held upright, the whole screen above the control zone is the camera's.
+                var s = Layout.Portrait && pos.y > Layout.ZoneTop(Layout.Area) ? Right
+                      : pos.x < Screen.width / 2f ? Left : Right;
                 if (s.Touch < 0)
                 {
                     s.Touch = touch;
@@ -180,6 +195,7 @@ namespace Recomp
             var show = Cursor.lockState == CursorLockMode.Locked && !PhysicalGamepad();
             if (show != _visible) SetVisible(show);
             if (!_visible) return;
+            if (Layout.Area != _laidOut) Relayout();  // before the state: a rotation lets go this frame
 
             var state = new GamepadState { leftStick = Left.Value, rightStick = Right.Value };
             foreach (var b in Buttons)
@@ -196,10 +212,7 @@ namespace Recomp
         static void SetVisible(bool show)
         {
             _visible = show;
-            Owners.Clear();
-            Left.Touch = Right.Touch = -1;
-            Left.Value = Right.Value = Vector2.zero;
-            foreach (var b in Buttons) b.Down = false;
+            Release();
             if (show)
             {
                 if (_canvas == null) CreateCanvas();
@@ -213,9 +226,16 @@ namespace Recomp
             Debug.Log(show ? "[recomp] touch gamepad shown" : "[recomp] touch gamepad hidden");
         }
 
+        static void Release()
+        {
+            Owners.Clear();
+            Left.Touch = Right.Touch = -1;
+            Left.Value = Right.Value = Vector2.zero;
+            foreach (var b in Buttons) b.Down = false;
+        }
+
         static void Draw()
         {
-            if (Layout.Area != _laidOut) Relayout();
             foreach (var b in Buttons)
                 b.Image.color = new Color(1f, 1f, 1f, b.Down ? 0.4f : 0.12f);
             foreach (var s in new[] { Left, Right })
@@ -266,9 +286,12 @@ namespace Recomp
         static void Relayout()
         {
             _laidOut = Layout.Area;
+            // Turned between upright and sideways: the buttons move, so let go of everything held.
+            if (Layout.Portrait != _portrait) Release();
+            _portrait = Layout.Portrait;
             foreach (var b in Buttons)
             {
-                b.Rect.anchoredPosition = Place(b.At);
+                b.Rect.anchoredPosition = Place(b);
                 b.Rect.sizeDelta = Vector2.one * 2 * b.Radius * Unit;
                 b.Text.fontSize = Mathf.RoundToInt((b.Radius > 26 ? 20 : 13) * Unit);
             }
@@ -277,7 +300,7 @@ namespace Recomp
                 s.Base.sizeDelta = Vector2.one * 2 * StickTravel * Unit;
                 s.Knob.sizeDelta = Vector2.one * 2 * 28 * Unit;
             }
-            Debug.Log($"[recomp] touch gamepad laid out for {Screen.width}x{Screen.height}, area {_laidOut}, {Unit:0.00} px per point");
+            Debug.Log($"[recomp] touch gamepad laid out ({(_portrait ? "portrait" : "landscape")}) for {Screen.width}x{Screen.height}, area {_laidOut}, {Unit:0.00} px per point");
         }
 
         static RectTransform Circle(string name, float alpha, out Image image)

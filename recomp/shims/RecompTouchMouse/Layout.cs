@@ -17,6 +17,13 @@ namespace Recomp
         /// A phone held upright: the controls get their portrait layout.
         public static bool Portrait => Phone && Screen.height > Screen.width;
 
+        /// Portrait: the share of the safe area, from its bottom, that holds the controls the
+        /// thumbs work (the control zone).
+        public const float Zone = 0.4f;
+
+        /// Portrait: the top of the control zone (screen pixels, origin bottom-left).
+        public static float ZoneTop(Rect area) => area.yMin + Zone * area.height;
+
         /// Pixels per layout point.
         public static float Unit => Phone ? Mathf.Min(Screen.width, Screen.height) / PhoneShort : Screen.height / PadHeight;
 
