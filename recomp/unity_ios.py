@@ -1,4 +1,4 @@
-"""Port a Unity (Mono) macOS game to iPadOS by recompiling its managed code with IL2CPP.
+"""Port a Unity (Mono) macOS game to iOS (iPhone and iPad) by recompiling its managed code with IL2CPP.
 
 Stages, each runnable on its own (see recomp.py):
   prepare   generate a shell Unity project holding the game's own assemblies as iOS plugins
@@ -428,7 +428,7 @@ def plan_mods(game, work, unity=None):
 
 
 def push_mods(game, work, device, bundle_id, everything=False):
-    """Copy the mods the last port handled (compiled in, or data only) to the iPad's mod folder.
+    """Copy the mods the last port handled (compiled in, or data only) to the iOS device's mod folder.
     everything: also mods whose code is not in the port (their data loads, their code is skipped)."""
     from recomp import mods
     cfg = mods_config(game, work)
@@ -445,7 +445,7 @@ def push_mods(game, work, device, bundle_id, everything=False):
         m.setdefault("status", "not ported (installed after the last port)")
     chosen = [m for m in found if everything or m["status"] in ("compiled", "data only")]
     if not chosen:
-        log("mods: none to copy to the iPad")
+        log("mods: none to copy to the iPhone or iPad")
         return
     mods.push(chosen, cfg, os.path.join(work, "mods-stage"), device, bundle_id, log)
     log(f"mods: {len(chosen)} copied to {cfg['ios']}; not copied: " + (", ".join(m["name"] for m in found if m not in chosen) or "none"))
