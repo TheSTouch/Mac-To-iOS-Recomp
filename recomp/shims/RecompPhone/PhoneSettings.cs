@@ -39,7 +39,7 @@ namespace Recomp
 
         const float StatsSeconds = 30f;
 
-        static bool _installed;
+        static bool _installed, _checkOrientation;
         static int _width, _height, _nativeWidth, _nativeHeight, _setFrame;
         static ProfilerRecorder _memory;
         static int _frames;
@@ -81,6 +81,7 @@ namespace Recomp
                 _height = Mathf.RoundToInt(_nativeHeight * phone.renderScale);
                 Screen.SetResolution(_width, _height, Screen.fullScreenMode);
                 _setFrame = Time.frameCount;
+                _checkOrientation = true;
                 SceneManager.sceneLoaded += OnSceneLoaded;
                 applied.Add($"render scale {phone.renderScale.ToString(CultureInfo.InvariantCulture)} " +
                             $"({_nativeWidth}x{_nativeHeight} -> {_width}x{_height})");
@@ -139,8 +140,22 @@ namespace Recomp
                       $"(scene {scene.name}); render size {_width}x{_height} again");
         }
 
+        // iOS takes SetResolution's size in the display's portrait orientation (an iPhone 17 asked
+        // for 1966x904 in landscape got a 904x1966 screen): once the size has applied, ask again
+        // the other way round if it came out turned, and keep that order for later requests.
+        static void CheckOrientation()
+        {
+            _checkOrientation = false;
+            if (Screen.width > Screen.height || Screen.width == _nativeWidth) return;
+            (_width, _height) = (_height, _width);
+            Screen.SetResolution(_width, _height, Screen.fullScreenMode);
+            Debug.Log($"[recomp] phone settings: the screen came out {Screen.width}x{Screen.height}; " +
+                      $"asking for {_width}x{_height} instead");
+        }
+
         static void CountFrame()
         {
+            if (_checkOrientation && Time.frameCount >= _setFrame + 3) CheckOrientation();
             _frames++;
             var now = Time.realtimeSinceStartup;
             if (now - _statsSince < StatsSeconds) return;
