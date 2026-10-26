@@ -18,7 +18,7 @@
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
 //   pinned levers. View drawer: working hours, layers, districts, the overlay buttons and
 //   the day clock. Both drawn larger.
-// - The tool panel moves under the top strip, its description folded to the title (a tap on
+// - The tool panel moves to the bottom edge, centred, its description folded to the title (a tap on
 //   it unfolds it); rotate, flip, Rows and Place go into a rail on the right edge, as large
 //   square icon buttons without their keyboard hints.
 // A moved panel takes the style sheets of its old ancestors with it (the game attaches some
@@ -427,7 +427,7 @@ namespace Recomp.Touchscreen
             if (place != null && place.parent.IndexOf(place) != place.parent.childCount - 1) place.BringToFront();
         }
 
-        // The tool panel (the tool's description, warnings) under the top strip, centred, folded to
+        // The tool panel (the tool's description, warnings) at the bottom edge, centred, folded to
         // its title until tapped.
         void LayOutToolPanel()
         {
@@ -437,7 +437,7 @@ namespace Recomp.Touchscreen
             var s = holder.style;
             s.position = Position.Absolute;
             s.left = s.right = 0f;
-            s.top = StripHeight + 10f;
+            s.bottom = Gap;  // between the tool column and the Esc and Dev keys; unfolds upwards
             s.alignItems = Align.Center;
             CarryStyles(toolPanel, holder);
             holder.Add(toolPanel);
