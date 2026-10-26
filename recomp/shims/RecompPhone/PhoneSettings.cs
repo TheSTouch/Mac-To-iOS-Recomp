@@ -8,6 +8,10 @@
 // so for them player_prefs is the lever; the render resolution is put back once if the game
 // resets the screen to its native size while loading a scene.
 //
+// The render size follows the orientation: on a game that opts into portrait it is asked
+// again in the new order each time the phone turns (unless the engine carried it over), and
+// each request is checked once it has applied, since iOS may read the size in the other order.
+//
 // Every 30 seconds a phone also logs its frame rate and memory ("[recomp] phone stats"),
 // the numbers a profile's "iphone" block is tuned from.
 using System;
@@ -40,8 +44,16 @@ namespace Recomp
 
         const float StatsSeconds = 30f;
 
-        static bool _installed, _checkOrientation;
-        static int _width, _height, _nativeWidth, _nativeHeight, _setFrame;
+        static bool _installed;
+        // The render size: _scale of the native _long x _short, in the order of the orientation
+        // it was asked for (_upright). _turned[upright ? 1 : 0]: in that orientation the request
+        // must go in the other order (an iPhone 17 asked for 1966x904 in landscape got 904x1966).
+        static float _scale;
+        static int _long, _short, _width, _height, _setFrame, _attempts;
+        static bool _portrait, _upright, _check, _rotated;
+        static readonly bool[] _turned = new bool[2];
+        static int _rotatedFrame;
+        static float _rotatedTime;
         static ProfilerRecorder _memory;
         static int _frames;
         static float _statsSince;
@@ -86,17 +98,16 @@ namespace Recomp
 
             if (phone.renderScale > 0f && phone.renderScale < 1f)
             {
-                // The game runs in landscape, whatever the screen reports this early.
-                _nativeWidth = Mathf.Max(Screen.width, Screen.height);
-                _nativeHeight = Mathf.Min(Screen.width, Screen.height);
-                _width = Mathf.RoundToInt(_nativeWidth * phone.renderScale);
-                _height = Mathf.RoundToInt(_nativeHeight * phone.renderScale);
-                Screen.SetResolution(_width, _height, Screen.fullScreenMode);
-                _setFrame = Time.frameCount;
-                _checkOrientation = true;
+                _scale = phone.renderScale;
+                _long = Mathf.Max(Screen.width, Screen.height);
+                _short = Mathf.Min(Screen.width, Screen.height);
+                // A landscape-only game is landscape whatever the screen reports this early.
+                _portrait = phone.portrait;
+                _upright = _portrait && Upright();
+                Request(null);
                 SceneManager.sceneLoaded += OnSceneLoaded;
-                applied.Add($"render scale {phone.renderScale.ToString(CultureInfo.InvariantCulture)} " +
-                            $"({_nativeWidth}x{_nativeHeight} -> {_width}x{_height})");
+                applied.Add($"render scale {_scale.ToString(CultureInfo.InvariantCulture)} " +
+                            $"({_long}x{_short} -> {_width}x{_height}, {Orientation()})");
             }
             if (phone.targetFrameRate > 0)
             {
@@ -144,36 +155,117 @@ namespace Recomp
         static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (Time.frameCount < _setFrame + 3) return;
-            if (Mathf.Max(Screen.width, Screen.height) != _nativeWidth || Mathf.Min(Screen.width, Screen.height) != _nativeHeight)
+            if (Mathf.Max(Screen.width, Screen.height) != _long || Mathf.Min(Screen.width, Screen.height) != _short)
                 return;
             SceneManager.sceneLoaded -= OnSceneLoaded;
-            Screen.SetResolution(_width, _height, Screen.fullScreenMode);
-            Debug.Log($"[recomp] phone settings: the game reset the screen to {_nativeWidth}x{_nativeHeight} " +
-                      $"(scene {scene.name}); render size {_width}x{_height} again");
+            Request($"the game reset the screen to {Screen.width}x{Screen.height} (scene {scene.name})");
         }
 
-        // iOS takes SetResolution's size in the display's portrait orientation (an iPhone 17 asked
-        // for 1966x904 in landscape got a 904x1966 screen): once the size has applied, ask again
-        // the other way round if it came out turned, and keep that order for later requests.
-        static void CheckOrientation()
+        // Whether the view stands upright: the display's own size turns with it (layer bounds,
+        // not the render size); the content orientation is the fallback.
+        static bool Upright()
         {
-            _checkOrientation = false;
-            if (Screen.width > Screen.height || Screen.width == _nativeWidth) return;
-            (_width, _height) = (_height, _width);
-            Screen.SetResolution(_width, _height, Screen.fullScreenMode);
-            Debug.Log($"[recomp] phone settings: the screen came out {Screen.width}x{Screen.height}; " +
-                      $"asking for {_width}x{_height} instead");
+            var display = Display.main;
+            if (display.systemWidth > 0 && display.systemHeight > 0 && display.systemWidth != display.systemHeight)
+                return display.systemHeight > display.systemWidth;
+            return Screen.orientation == ScreenOrientation.Portrait || Screen.orientation == ScreenOrientation.PortraitUpsideDown;
+        }
+
+        // The render size in an orientation's order.
+        static (int, int) Wanted(bool upright)
+        {
+            var wide = Mathf.RoundToInt(_long * _scale);
+            var narrow = Mathf.RoundToInt(_short * _scale);
+            return upright ? (narrow, wide) : (wide, narrow);
+        }
+
+        static string Orientation() => (_upright ? "upright, " : "landscape, ") + Screen.orientation;
+
+        // Asks for the render size in the current orientation's order, turned if that orientation
+        // was seen to read it the other way round, and checks it once it has applied.
+        static void Request(string why)
+        {
+            (_width, _height) = Wanted(_upright);
+            var turned = _turned[_upright ? 1 : 0];
+            var w = turned ? _height : _width;
+            var h = turned ? _width : _height;
+            Screen.SetResolution(w, h, Screen.fullScreenMode);
+            _setFrame = Time.frameCount;
+            _check = true;
+            if (why != null)
+                Debug.Log($"[recomp] phone settings: {why}; render size {_width}x{_height} ({Orientation()})" +
+                          (turned ? $", asked as {w}x{h}" : ""));
+        }
+
+        // Once the size has applied: if it came out turned, this orientation reads the request the
+        // other way round, so ask again turned and keep that for later requests in it.
+        static void Check()
+        {
+            _check = false;
+            if (Screen.width == _width && Screen.height == _height)
+            {
+                if (_attempts > 0)
+                    Debug.Log($"[recomp] phone settings: the screen is {Screen.width}x{Screen.height} as asked ({Orientation()})");
+                _attempts = 0;
+                return;
+            }
+            if (++_attempts > 3)
+            {
+                Debug.Log($"[recomp] phone settings: the screen stays {Screen.width}x{Screen.height} instead of " +
+                          $"{_width}x{_height} ({Orientation()}); not asking again");
+                _attempts = 0;
+                return;
+            }
+            var came = $"the screen came out {Screen.width}x{Screen.height}";
+            if (Screen.width == _height && Screen.height == _width)
+            {
+                var i = _upright ? 1 : 0;
+                _turned[i] = !_turned[i];
+                came += _turned[i] ? ", turned: asking the other way round" : ", turned: asking in the screen's order again";
+            }
+            Request(came);
+        }
+
+        // The phone turned: once the rotation has settled, ask for the render size in the new order,
+        // unless the engine carried it over.
+        static void FollowOrientation()
+        {
+            var upright = _portrait && Upright();
+            if (upright != _upright)
+            {
+                _upright = upright;
+                _rotated = true;
+                _rotatedFrame = Time.frameCount;
+                _rotatedTime = Time.realtimeSinceStartup;
+                _check = false;
+                _attempts = 0;
+                return;
+            }
+            if (_rotated)
+            {
+                if (Time.frameCount < _rotatedFrame + 3 || Time.realtimeSinceStartup < _rotatedTime + 0.5f) return;
+                _rotated = false;
+                if ((Screen.width, Screen.height) == Wanted(_upright))
+                {
+                    (_width, _height) = (Screen.width, Screen.height);
+                    Debug.Log($"[recomp] phone settings: rotated, the render size followed: {_width}x{_height} ({Orientation()})");
+                    return;
+                }
+                Request($"rotated, the screen is {Screen.width}x{Screen.height}");
+                return;
+            }
+            if (_check && Time.frameCount >= _setFrame + 3) Check();
         }
 
         static void CountFrame()
         {
-            if (_checkOrientation && Time.frameCount >= _setFrame + 3) CheckOrientation();
+            if (_scale > 0f) FollowOrientation();
             _frames++;
             var now = Time.realtimeSinceStartup;
             if (now - _statsSince < StatsSeconds) return;
             var memory = _memory.Valid ? (_memory.LastValue >> 20) + " MB" : "unknown";
             Debug.Log($"[recomp] phone stats: {_frames / (now - _statsSince):0.0} fps over the last {now - _statsSince:0} s, " +
-                      $"system used memory {memory}, screen {Screen.width}x{Screen.height}, " +
+                      $"system used memory {memory}, screen {Screen.width}x{Screen.height} ({Screen.orientation}), " +
                       $"target frame rate {Application.targetFrameRate}, quality level {QualitySettings.GetQualityLevel()}");
             _frames = 0;
             _statsSince = now;
