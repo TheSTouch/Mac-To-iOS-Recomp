@@ -33,8 +33,11 @@ PROFILES = os.path.join(ROOT, "recomp", "profiles")
 NATIVE_SKIP = {"steam_api_stub.c"}
 
 # Managed shims added to the game, each enabled when the game ships the
-# assembly it builds on, and started through RuntimeInitializeOnLoads.json.
+# assembly it builds on (every game when "requires" is None), and started
+# through RuntimeInitializeOnLoads.json.
 SHIM_SPECS = [
+    {"project": "RecompPhone", "assembly": "Recomp.Phone", "requires": None,
+     "init": {"nameSpace": "Recomp", "className": "PhoneSettings", "methodName": "Install", "loadTypes": 1}},
     {"project": "RecompTouchMouse", "assembly": "Recomp.TouchMouse", "requires": "Unity.InputSystem.dll",
      "init": {"nameSpace": "Recomp", "className": "TouchMouse", "methodName": "Install", "loadTypes": 1}},
 ]
@@ -66,6 +69,14 @@ STUB_PROFILES = {
 # metadata must describe the code we compiled, and the default resources hold
 # iOS-compiled built-in shaders.
 KEEP_FROM_SHELL = {"Managed", "unity default resources", "Resources/unity default resources"}
+
+# What every Unity port does on an iPhone, under a profile's "iphone" block (Recomp.Phone
+# applies it at startup, only on iPhones):
+#   render_scale       0-1, the render resolution as a fraction of native (Screen.SetResolution)
+#   target_frame_rate  Application.targetFrameRate
+#   quality_level      an index into the game's QualitySettings (each game has its own: per game only)
+#   player_prefs       {key: value}, each written only when the player has none yet
+PHONE_DEFAULTS = {"render_scale": 0.75}
 
 # Serialized-file target platform ids (BuildTarget).
 TARGET_OSX, TARGET_IOS = 2, 9
@@ -459,15 +470,33 @@ def game_profile(game):
     return None
 
 
+def phone_settings(profile):
+    """recomp.json "phone": the profile's "iphone" block over PHONE_DEFAULTS, shaped for
+    JsonUtility (PlayerPrefs as a list, each value as a string with its type)."""
+    phone = dict(PHONE_DEFAULTS, **(profile.get("iphone") or {}))
+    prefs = []
+    for key, value in (phone.get("player_prefs") or {}).items():
+        kind = "int" if isinstance(value, (bool, int)) else "float" if isinstance(value, float) else "string"
+        prefs.append({"key": key, "type": kind, "value": str(int(value) if isinstance(value, bool) else value)})
+    return {"renderScale": float(phone.get("render_scale") or 0),
+            "targetFrameRate": int(phone.get("target_frame_rate") or 0),
+            "qualityLevel": int(phone["quality_level"]) if phone.get("quality_level") is not None else -1,
+            "playerPrefs": prefs}
+
+
 def write_shim_config(game, data):
     """StreamingAssets/recomp.json (Data/Raw on iOS): per-game switches the managed shims read,
     e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad",
-    and the extra on-screen keys of its "touch_keys" ([{"label", "keys": [Input System key names]}])."""
+    the extra on-screen keys of its "touch_keys" ([{"label", "keys": [Input System key names]}]),
+    and the iPhone settings of its "iphone" block (see PHONE_DEFAULTS)."""
     profile = game_profile(game) or {}
     os.makedirs(os.path.join(data, "Raw"), exist_ok=True)
+    phone = phone_settings(profile)
     with open(os.path.join(data, "Raw", "recomp.json"), "w") as f:
         json.dump({"touchGamepad": bool(profile.get("touch_gamepad")),
-                   "touchKeys": profile.get("touch_keys", [])}, f)
+                   "touchKeys": profile.get("touch_keys", []),
+                   "phone": phone}, f)
+    log(f"recomp.json phone settings: {phone}")
 
 
 def write_save_info(game, xcode_dir):
@@ -513,7 +542,8 @@ def apply_profiles(game, game_dlls, plugins):
 
 
 def active_shims(game):
-    return [spec for spec in SHIM_SPECS if os.path.exists(os.path.join(game.managed, spec["requires"]))]
+    return [spec for spec in SHIM_SPECS
+            if spec["requires"] is None or os.path.exists(os.path.join(game.managed, spec["requires"]))]
 
 
 def build_shims(game, out):

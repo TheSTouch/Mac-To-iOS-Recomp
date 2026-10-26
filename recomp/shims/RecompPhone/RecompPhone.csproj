@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Built against the game's own Unity assemblies: dotnet build -p:GameManaged=<Data/Managed> -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Recomp.Phone</AssemblyName>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Every engine assembly the game ships: which module holds a type moves between Unity versions. -->
+    <GameEngineAssembly Include="$(GameManaged)/UnityEngine*.dll;$(GameManaged)/Unity.Scripting*.dll" />
+    <Reference Include="@(GameEngineAssembly)" Private="false" />
+  </ItemGroup>
+</Project>
