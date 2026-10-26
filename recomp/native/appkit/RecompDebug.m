@@ -45,7 +45,9 @@ void abort(void) {
 // --- heartbeat and screenshots -----------------------------------------------------
 // Every 10 s: drawables the game took (frames) and memory left before iOS ends
 // the app. A file named recomp-screenshot in Documents (put there with
-// `devicectl device copy to`) makes the next tick save Documents/recomp-screen.png.
+// `devicectl device copy to`) makes the next tick save Documents/recomp-screen.png;
+// one named recomp-press, holding gamepad steps ("down down A"), presses them
+// on the on-screen gamepad's controller (RecompPadScript).
 
 #import <objc/runtime.h>
 #import <os/proc.h>
@@ -57,6 +59,19 @@ static IMP oNextDrawable;
 static id CountNextDrawable(id self, SEL s) {
     atomic_fetch_add(&gDrawables, 1);
     return ((id (*)(id, SEL))oNextDrawable)(self, s);
+}
+
+void RecompPadScript(NSArray<NSString *> *steps);
+
+static void Press(void) {
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *trigger = [docs stringByAppendingPathComponent:@"recomp-press"];
+    NSString *text = [NSString stringWithContentsOfFile:trigger encoding:NSUTF8StringEncoding error:nil];
+    if (!text) return;
+    [NSFileManager.defaultManager removeItemAtPath:trigger error:nil];
+    NSPredicate *some = [NSPredicate predicateWithFormat:@"length > 0"];
+    RecompPadScript([[text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+                     filteredArrayUsingPredicate:some]);
 }
 
 static void Screenshot(void) {
@@ -82,6 +97,7 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
         __block int ticks = 0;
         [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *t) {
             Screenshot();
+            Press();
             if (++ticks % 5) return;
             unsigned now = atomic_load(&gDrawables);
             RLOG(@"heartbeat: %.1f frames/s, %zu MB memory left", (now - last) / 10.0, os_proc_available_memory() >> 20);
