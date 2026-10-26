@@ -49,7 +49,7 @@ namespace Recomp
             PlayerSettings.SetGraphicsAPIs(BuildTarget.iOS, new[] { UnityEngine.Rendering.GraphicsDeviceType.Metal });
             PlayerSettings.colorSpace = ColorSpace.Linear;
 
-            PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPadOnly;
+            PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
             PlayerSettings.iOS.targetOSVersionString = "17.0";
             PlayerSettings.iOS.requiresFullScreen = true;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
