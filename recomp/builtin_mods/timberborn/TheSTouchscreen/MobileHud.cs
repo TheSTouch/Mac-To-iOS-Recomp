@@ -21,8 +21,8 @@
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
 //   narrow columns.
 // - Colony drawer, just under the Colony tab and over any open goods breakdown: the well-being
-//   line, population, notifications (log height capped) and
-//   pinned levers. View drawer: the overlay buttons centred at the top, working hours and the
+//   line, population, notifications (log height capped) and pinned levers. View drawer: the
+//   overlay buttons centred at the top, working hours and the
 //   visible levels scaled to the district switcher's width, and the switcher last (its list
 //   opens under it and the drawer grows), a little taller, its arrows as big as working hours'
 //   -/+. Both drawers drawn larger.
@@ -285,7 +285,7 @@ namespace Recomp.TheSTouchscreen
         }
 
         // The game shows them on hover (BottomBar/ToolGroupButton.uxml, GrouplessToolButton.uxml).
-        static void RemoveTooltips(VisualElement root)
+        internal static void RemoveTooltips(VisualElement root)
         {
             foreach (var tooltip in root.Query(className: "tool-group__tooltip-wrapper").ToList())
                 tooltip.RemoveFromHierarchy();

@@ -21,6 +21,7 @@ namespace Recomp.TheSTouchscreen
             containerDefinition.Bind<WorldInput>().AsSingleton();
             containerDefinition.Bind<DevControls>().AsSingleton();
             containerDefinition.Bind<KeyRow>().AsSingleton();
+            containerDefinition.Bind<BarTooltips>().AsSingleton();
         }
     }
 }
