@@ -13,6 +13,9 @@
 // buttons as an overlay Canvas with Images and Texts, replaced by the UI Toolkit
 // ones if a theme turns up later.
 // On a phone the keys are sized in layout points and kept inside the safe area (see Layout).
+// Held upright, in a game with the touch gamepad, the stack starts just above the gamepad's
+// control zone instead, at the left edge: clear of the move stick, and (in Valheim) far above
+// the health and food bars, which stay in the bottom-left corner.
 // The panel only draws: TouchMouse hit-tests touches against the buttons and
 // calls Press, so the keys do not depend on the game routing UI events to a
 // panel it does not know, and a tap on a button never becomes a mouse click.
@@ -146,6 +149,9 @@ namespace Recomp
 
         static float Bottom(int index) => Margin + index * (Height + Gap);
 
+        // Where the stack starts (screen pixels): the area's bottom, or the control zone's top.
+        static float Base(Rect area) => Layout.Portrait && TouchPad.Enabled ? Layout.ZoneTop(area) : area.yMin;
+
         static void Attach()
         {
             if (_overlay != null && Buttons[0].Button != null && Buttons[0].Button.panel != null)
@@ -251,7 +257,7 @@ namespace Recomp
                 {
                     var b = Buttons[i];
                     if (b.CanvasButton == null) continue;
-                    b.CanvasButton.anchoredPosition = area.min + new Vector2(Margin, Bottom(i)) * unit;
+                    b.CanvasButton.anchoredPosition = new Vector2(area.xMin, Base(area)) + new Vector2(Margin, Bottom(i)) * unit;
                     b.CanvasButton.sizeDelta = new Vector2(Width, Height) * unit;
                     b.CanvasText.fontSize = Mathf.RoundToInt(18 * unit);
                 }
@@ -267,7 +273,7 @@ namespace Recomp
             if (root.height <= 0f || root.width <= 0f) return;  // not laid out yet: next check
             var k = unit * root.height / Screen.height;          // panel units per layout point
             var left = area.xMin * root.width / Screen.width;
-            var bottom = area.yMin * root.height / Screen.height;
+            var bottom = Base(area) * root.height / Screen.height;
             for (int i = 0; i < Buttons.Count; i++)
             {
                 var b = Buttons[i].Button;

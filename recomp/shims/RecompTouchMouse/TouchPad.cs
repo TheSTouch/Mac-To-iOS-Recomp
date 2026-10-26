@@ -118,6 +118,7 @@ namespace Recomp
         static void Add(string name, Vector2 at, Vector2 tall, float radius, GamepadButton input, bool overZone = false) =>
             Buttons.Add(new PadButton { Name = name, At = at, Tall = tall, OverZone = overZone, Radius = radius, Input = input });
 
+        public static bool Enabled => _enabled;
         public static bool Visible => _visible;
         public static bool Owns(int touch) => Owners.ContainsKey(touch);
 
