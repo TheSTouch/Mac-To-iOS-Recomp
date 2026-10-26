@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from recomp import events, paths
+from recomp import events, paths, storage
 
 ROOT = paths.CODE
 # Built helpers live under HOME: CODE may be a signed, read-only app bundle.
@@ -805,4 +805,6 @@ def install(work, device):
     def on_line(line):
         events.check_hints(line)
         print(line, flush=True)
-    stream(["xcrun", "devicectl", "device", "install", "app", "--device", device, os.path.join(products, apps[0])], on_line)
+    app = os.path.join(products, apps[0])
+    storage.check_install(device, app)
+    stream(["xcrun", "devicectl", "device", "install", "app", "--device", device, app], on_line)

@@ -34,7 +34,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, ROOT)
 
-from recomp import events, paths  # noqa: E402
+from recomp import events, paths, storage  # noqa: E402
 
 STAGES = ["prepare", "player", "inject", "xcode", "install"]
 UNREAL_STAGES = ["prepare", "xcode", "install"]
@@ -131,6 +131,8 @@ def cmd_unity(rest):
     stages = a.stages or STAGES
     if "install" in stages and not a.device:
         sys.exit("install needs --device (see: recomp.py env)")
+    if "install" in stages and stages != ["install"]:
+        storage.check_port(a.device, game.app)
     unity, ios = u.editor_paths(game.unity_version, a.unity)
     u.log(f"{game.name}: Unity {game.unity_version} -> {work}")
     for s in STAGES:
@@ -180,6 +182,8 @@ def cmd_unreal(rest):
         sys.exit("xcode needs --team (see: recomp.py env)")
     if "install" in stages and not a.device:
         sys.exit("install needs --device (see: recomp.py env)")
+    if "install" in stages and stages != ["install"]:
+        storage.check_port(a.device, game.app)
     u.log(f"{game.name}: Unreal ({', '.join(game.projects)}) -> {work}")
     for s in UNREAL_STAGES:
         if s not in stages:

@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import sys
 
-from recomp import events, iossdk, macho, paths, steam_license, xcodeproj
+from recomp import events, iossdk, macho, paths, steam_license, storage, xcodeproj
 
 ROOT = paths.CODE
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
@@ -498,4 +498,6 @@ def install(work, device):
     def on_line(line):
         events.check_hints(line)
         print(line, flush=True)
-    stream(["xcrun", "devicectl", "device", "install", "app", "--device", device, built_app(work)], on_line)
+    app = built_app(work)
+    storage.check_install(device, app)
+    stream(["xcrun", "devicectl", "device", "install", "app", "--device", device, app], on_line)
