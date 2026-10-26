@@ -34,8 +34,12 @@ HINTS = [
      "Unity has no license on this Mac: open Unity Hub once, sign in and add a free Personal license, then retry."),
     (r"No Account for Team|No signing certificate|requires a development team|No profiles for",
      "Xcode could not sign the app: sign in to your developer account in Xcode > Settings > Accounts, then retry."),
-    (r"increased-memory-limit|entitlement.*not supported",
+    (r"doesn't include the .*entitlement|entitlement.*(not supported|could not be included)",
      "Your App ID is missing a capability: let Xcode's automatic signing update it by retrying with your account signed in."),
+    (r"(\d+) bytes needed, (\d+) bytes available|Insufficient storage",
+     lambda m: ("The iPad does not have enough free storage for this game" if not m[1] else
+                f"The iPad needs {_gb(m[1])} free to install this game and has {_gb(m[2])}")
+     + ": delete apps or files (Settings > General > iPad Storage), then use Retry Install."),
     (r"device is locked|device was not, or could not be, unlocked|kAMDMobileImageMounterDeviceLocked",
      "Unlock your iPad and keep it awake, then use Retry Install."),
     (r"Developer Mode (is )?(disabled|not enabled|must be enabled)",
@@ -49,8 +53,14 @@ _HINTS = [(re.compile(p, re.IGNORECASE), t) for p, t in HINTS]
 _sent = set()
 
 
+def _gb(n):
+    return f"{int(n) / 1e9:.1f} GB"
+
+
 def check_hints(line):
-    for pat, text in _HINTS:
-        if text not in _sent and pat.search(line):
-            _sent.add(text)
-            emit("hint", text=text)
+    # A hint is a fixed text, or a function of the match for one that quotes the output.
+    for i, (pat, text) in enumerate(_HINTS):
+        m = pat.search(line)
+        if m and i not in _sent:
+            _sent.add(i)
+            emit("hint", text=text(m) if callable(text) else text)
