@@ -32,7 +32,10 @@ enum {
 static const AudioObjectID kDevice = 2;
 static const OSStatus kUnknownProperty = 'who?';
 
+static void SessionOnce(void);
+
 static Float64 SampleRate(void) {
+    SessionOnce(); // the rate is the hardware's only once the session is active
     Float64 r = AVAudioSession.sharedInstance.sampleRate;
     return r > 0 ? r : 48000;
 }
@@ -74,7 +77,7 @@ static UInt32 DeviceProperty(AudioObjectID obj, const AudioObjectPropertyAddress
         case kAudioStreamPropertyPhysicalFormat: PUT(AudioStreamBasicDescription, StreamFormat());
         case kAudioObjectPropertyName:
         case kAudioDevicePropertyDeviceUID:
-        case kAudioDevicePropertyModelUID: PUT(CFStringRef, (CFStringRef)CFRetain(CFSTR("iPad Speakers")));
+        case kAudioDevicePropertyModelUID: PUT(CFStringRef, (CFStringRef)CFBridgingRetain([UIDevice.currentDevice.model stringByAppendingString:@" Speakers"]));
         case kAudioDevicePropertyStreamConfiguration: {
             AudioBufferList l = {1, {{2, 0, NULL}}};
             PUT(AudioBufferList, l);
@@ -146,14 +149,23 @@ static AudioComponentDescription Remap(const AudioComponentDescription *in) {
     return d;
 }
 
+// Playback, not Ambient: an iPhone's silent mode (the Ring/Silent switch or the
+// Action button) mutes Ambient audio, which left games silent on a phone. Mixing
+// with others keeps the player's own music playing, as Ambient did.
 static void SessionOnce(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSError *e = nil;
         AVAudioSession *s = AVAudioSession.sharedInstance;
-        [s setCategory:AVAudioSessionCategoryAmbient error:&e];
-        [s setActive:YES error:&e];
-        if (e) RLOG(@"audio session: %@", e);
+        if (![s setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&e])
+            RLOG(@"audio session: category: %@", e);
+        if (![s setActive:YES error:&e]) RLOG(@"audio session: activate: %@", e);
+        NSMutableArray *outs = [NSMutableArray new];
+        for (AVAudioSessionPortDescription *p in s.currentRoute.outputs)
+            [outs addObject:[NSString stringWithFormat:@"%@ (%lu channels)", p.portType, (unsigned long)p.channels.count]];
+        RLOG(@"audio session: %@, %.0f Hz, %ld output channels to %@, volume %.2f; the engine is told %.0f Hz stereo",
+             s.category, s.sampleRate, (long)s.outputNumberOfChannels, [outs componentsJoinedByString:@", "],
+             s.outputVolume, s.sampleRate > 0 ? s.sampleRate : 48000);
     });
 }
 
