@@ -16,7 +16,15 @@
 //
 // The value "auto" for r.Streaming.PoolSize sizes the texture pool from the
 // device's RAM: Mac builds size it for a GPU with its own memory, while an
-// iPad's GPU shares RAM with the game and the system.
+// iOS device's GPU shares RAM with the game and the system.
+//
+// "auto" for ApplicationScale ([/Script/Engine.UserInterfaceSettings]) keeps
+// UMG's layout whole on a short screen. UE4's default DPI curve scales the UI
+// by the viewport's short side over 1080, so every layout has 1080 units of
+// height, but the curve stops at 480: below it (a phone's 375-430 points) the
+// UI keeps the 480 scale, has fewer than 1080 units, and menus laid out for
+// 1080 pile up (Stray's title menu became one line). Short side / 480 makes up
+// the difference.
 #import "RecompAppKit.h"
 
 static NSString *Resolve(NSString *key, NSString *value) {
@@ -24,6 +32,10 @@ static NSString *Resolve(NSString *key, NSString *value) {
     if ([key isEqualToString:@"r.Streaming.PoolSize"]) {
         unsigned long long mb = NSProcessInfo.processInfo.physicalMemory >> 20;
         return [NSString stringWithFormat:@"%llu", MIN(MAX(mb * 15 / 100, 600ULL), 3000ULL)];
+    }
+    if ([key isEqualToString:@"ApplicationScale"]) {
+        CGSize s = UIScreen.mainScreen.bounds.size;
+        return [NSString stringWithFormat:@"%.4f", MIN(MIN(s.width, s.height) / 480.0, 1.0)];
     }
     return value;
 }

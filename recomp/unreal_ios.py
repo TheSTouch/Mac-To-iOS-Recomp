@@ -68,9 +68,12 @@ INTERCEPT = {
 # Settings every Unreal game gets on an iPhone, under the profile's "iphone"
 # block (same shape as its engine_ini / game_user_settings_ini): a phone has a
 # smaller power and heat budget than an M-series iPad, and on its small screen
-# medium quality (1; 0 is low, 3 epic) looks close to epic.
+# medium quality (1; 0 is low, 3 epic) looks close to epic. ApplicationScale
+# "auto" keeps menus whole on a short screen (see RecompConfig.m).
 PHONE_DEFAULTS = {
-    "engine_ini": {},
+    "engine_ini": {
+        "/Script/Engine.UserInterfaceSettings": {"ApplicationScale": "auto"},
+    },
     "game_user_settings_ini": {
         "ScalabilityGroups": {
             "sg.ResolutionQuality": "70", "sg.ViewDistanceQuality": "1", "sg.EffectsQuality": "1",
