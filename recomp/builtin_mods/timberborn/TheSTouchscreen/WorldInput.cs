@@ -18,7 +18,7 @@ using Timberborn.SingletonSystem;
 using Timberborn.ToolSystem;
 using UnityEngine;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     public class WorldInput : ILoadableSingleton, IUnloadableSingleton, IUpdatableSingleton
     {
@@ -63,14 +63,14 @@ namespace Recomp.Touchscreen
             // A drag starts past about 1.5 mm, whatever the screen's density.
             _moveThreshold = Mathf.Max(12f, (Screen.dpi > 0f ? Screen.dpi : 326f) * 0.06f);
             TouchMouse.Claimed = true;
-            Debug.Log($"[Touchscreen] world input from touches (drag past {_moveThreshold:0} px); the game's UI gets real touches");
+            Debug.Log($"[TheSTouchscreen] world input from touches (drag past {_moveThreshold:0} px); the game's UI gets real touches");
         }
 
         public void Unload()
         {
             if (Current == this) Current = null;
             TouchMouse.Claimed = false;
-            Debug.Log("[Touchscreen] world input released: the mouse again");
+            Debug.Log("[TheSTouchscreen] world input released: the mouse again");
         }
 
         internal static bool Active => Current != null && TouchMouse.Claimed;
@@ -122,7 +122,7 @@ namespace Recomp.Touchscreen
         {
             if (_placeIn > 0 || _tapFrames > 0) return false;
             _placeIn = 1;
-            Debug.Log($"[Touchscreen] place at {_pointer}");
+            Debug.Log($"[TheSTouchscreen] place at {_pointer}");
             return true;
         }
 
@@ -170,7 +170,7 @@ namespace Recomp.Touchscreen
                             _dragged = true;
                             _pointer = Clamp(_start);
                             _mainDown = _mainHeld = true;
-                            Debug.Log("[Touchscreen] drag with the tool " + _toolService.ActiveTool?.GetType().Name);
+                            Debug.Log("[TheSTouchscreen] drag with the tool " + _toolService.ActiveTool?.GetType().Name);
                         }
                         else _mode = Mode.Pan;
                     }
@@ -202,7 +202,7 @@ namespace Recomp.Touchscreen
                         {
                             _cancelDown = true;
                             _cancelFrames = 1;
-                            Debug.Log("[Touchscreen] cancel (two-finger tap)");
+                            Debug.Log("[TheSTouchscreen] cancel (two-finger tap)");
                         }
                         _mode = Mode.None;
                         break;
@@ -240,7 +240,7 @@ namespace Recomp.Touchscreen
         {
             _mainDown = _mainHeld = true;
             _tapFrames = 1;
-            Debug.Log($"[Touchscreen] {what} at {_pointer}");
+            Debug.Log($"[TheSTouchscreen] {what} at {_pointer}");
         }
 
         // The map point under `from` moves to `to`: the camera's target shifts by the difference

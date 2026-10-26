@@ -6,7 +6,7 @@
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     class DragScroll
     {

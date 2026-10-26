@@ -287,7 +287,7 @@ struct ModsBox: View {
         .task { await run([]) }
     }
 
-    /// A mod of the port itself, e.g. Timberborn's Touchscreen (each gets its own box, so a later
+    /// A mod of the port itself, e.g. Timberborn's TheSTouchscreen (each gets its own box, so a later
     /// one such as small-screen UI for iPhone sits beside it): explained on its own instead of
     /// listed with the Mac's mods, and on unless turned off here (or in the game's mod list).
     private func builtIn(_ mod: ModList.Mod) -> some View {

@@ -3,7 +3,7 @@
        dotnet build -p:GameManaged=<Data/Managed> -p:RecompShims=<work>/shims -p:RecompHarmony=<work>/harmony -->
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>Recomp.Touchscreen</AssemblyName>
+    <AssemblyName>Recomp.TheSTouchscreen</AssemblyName>
     <LangVersion>9.0</LangVersion>
     <Nullable>disable</Nullable>
     <DebugType>none</DebugType>

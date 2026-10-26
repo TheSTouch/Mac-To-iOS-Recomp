@@ -9,7 +9,7 @@
 // a row (paths, walls) and places it when the finger lifts.
 //
 // The game side lives in a mod built into the port (Timberborn: recomp/builtin_mods/
-// timberborn/Touchscreen), which knows when its placement tools are active and adds the
+// timberborn/TheSTouchscreen), which knows when its placement tools are active and adds the
 // buttons to the game's own placement panel.
 using UnityEngine;
 using UnityEngine.UIElements;

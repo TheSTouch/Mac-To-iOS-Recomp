@@ -1,9 +1,0 @@
-{
-  "Name": "Touchscreen",
-  "Version": "1.0.0",
-  "Id": "Recomp.Touchscreen",
-  "MinimumGameVersion": "1.0.0.0",
-  "Description": "Touch and Apple Pencil support for the iPad and iPhone port, built into it. While placing a building, a finger or the pencil on the map moves its ghost instead of placing it: rotate or flip it with the game's buttons, then press Place. Rows turns direct placement back on, so a drag draws a row of paths or walls. Turn the mod off to place on touch as before.",
-  "RequiredMods": [],
-  "OptionalMods": []
-}

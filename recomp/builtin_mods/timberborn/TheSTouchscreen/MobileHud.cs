@@ -40,7 +40,7 @@ using Timberborn.UILayoutSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     public class MobileHud : IPostLoadableSingleton, IUpdatableSingleton
     {
@@ -97,7 +97,7 @@ namespace Recomp.Touchscreen
                 if ((_gameUI = doc.rootVisualElement?.Q("GameUI")) != null) break;
             if (_gameUI == null)
             {
-                Debug.Log("[Touchscreen] no GameUI: phone layout not applied");
+                Debug.Log("[TheSTouchscreen] no GameUI: phone layout not applied");
                 return;
             }
             _absolute = _gameUI.Q("Absolute-items");
@@ -110,7 +110,7 @@ namespace Recomp.Touchscreen
             _nineSliceButton = Type.GetType("Timberborn.CoreUI.NineSliceButton, Timberborn.CoreUI") ?? _gameUI.Q("BatchControl")?.GetType();
             _nineSlice = Type.GetType("Timberborn.CoreUI.NineSliceVisualElement, Timberborn.CoreUI") ?? _gameUI.Q("SpeedControlPanel")?.GetType();
             _commonStyle = Resources.Load<StyleSheet>("UI/Views/Common/CommonStyle");
-            Debug.Log($"[Touchscreen] phone layout: frames from {_nineSlice?.Name ?? "none"}, {_nineSliceButton?.Name ?? "none"}, " +
+            Debug.Log($"[TheSTouchscreen] phone layout: frames from {_nineSlice?.Name ?? "none"}, {_nineSliceButton?.Name ?? "none"}, " +
                       (_commonStyle != null ? "the game's common style" : "no common style"));
             var done = new List<string>();
             Try("safe area", done, () =>
@@ -128,7 +128,7 @@ namespace Recomp.Touchscreen
             Try("colony drawer", done, LayOutColony);
             Try("speed and view drawer", done, LayOutView);
             _eventBus.Register(this);
-            Debug.Log("[Touchscreen] phone layout: " + string.Join(", ", done));
+            Debug.Log("[TheSTouchscreen] phone layout: " + string.Join(", ", done));
         }
 
         static void Try(string what, List<string> done, Action action)
@@ -140,7 +140,7 @@ namespace Recomp.Touchscreen
             }
             catch (Exception e)
             {
-                Debug.Log("[Touchscreen] phone layout: " + what + " failed: " + e);
+                Debug.Log("[TheSTouchscreen] phone layout: " + what + " failed: " + e);
             }
         }
 
@@ -204,7 +204,7 @@ namespace Recomp.Touchscreen
                 var visible = Mathf.Max(ColumnWidth, height - (StripHeight + Gap) - Gap) / ColumnScale;
                 _column.style.height = _columnHeight = visible;
             }
-            Debug.Log($"[Touchscreen] phone layout: safe area {safe} on a {Screen.width}x{Screen.height} screen, panel {root.width}x{root.height}");
+            Debug.Log($"[TheSTouchscreen] phone layout: safe area {safe} on a {Screen.width}x{Screen.height} screen, panel {root.width}x{root.height}");
         }
 
         // As Recomp.Layout.Area: iOS reports the safe area in the display's pixels, which after a
@@ -229,7 +229,7 @@ namespace Recomp.Touchscreen
         {
             var main = _bar.Q("MainSection");
             _subSection = _bar.Q("SubSection");
-            _column = Column("TouchscreenToolColumn", 0f);
+            _column = Column("TheSTouchscreenToolColumn", 0f);
             CarryStyles(main.Q("LeftSection"), _column);
             var bar = _column.style;
             bar.backgroundColor = new Color(68f / 255f, 58f / 255f, 34f / 255f, 0.8f);
@@ -254,7 +254,7 @@ namespace Recomp.Touchscreen
             RemoveTooltips(_subSection);
 
             // The open group's tools (the game shows one group's row at a time), stacked.
-            _toolsColumn = Column("TouchscreenToolsColumn", ColumnWidth * ColumnScale + ColumnGap);
+            _toolsColumn = Column("TheSTouchscreenToolsColumn", ColumnWidth * ColumnScale + ColumnGap);
             CarryStyles(_subSection, _toolsColumn);
             _subSection.style.flexDirection = FlexDirection.Column;
             foreach (var row in _subSection.Children())
@@ -338,11 +338,11 @@ namespace Recomp.Touchscreen
         // under it. Both live in the slot, which the batch control window hides.
         void LayOutColony()
         {
-            _colonyDrawer = Drawer("TouchscreenColonyDrawer");
+            _colonyDrawer = Drawer("TheSTouchscreenColonyDrawer");
             _colonyDrawer.style.left = 0f;
             _colonyDrawer.style.top = StripHeight + Gap;
             Scale(_colonyDrawer, ColonyScale, 0f, 0f);
-            _colonyTab = Tab("TouchscreenColony", "UI/Images/Game/ico-beavers", "Colony", ColonyTabWidth, () => Toggle(_colonyDrawer, _colonyTab));
+            _colonyTab = Tab("TheSTouchscreenColony", "UI/Images/Game/ico-beavers", "Colony", ColonyTabWidth, () => Toggle(_colonyDrawer, _colonyTab));
             _topLeft.style.flexDirection = FlexDirection.Row;
             _topLeft.style.alignItems = Align.FlexStart;
             _uiLayout.AddTopLeft(_colonyTab, int.MinValue);
@@ -375,7 +375,7 @@ namespace Recomp.Touchscreen
                 s.color = new Color(0.95f, 0.87f, 0.6f);
                 s.unityFontStyleAndWeight = FontStyle.Bold;
             }
-            Debug.Log("[Touchscreen] key buttons drawn as the game's buttons: " + _styledKeys.Count);
+            Debug.Log("[TheSTouchscreen] key buttons drawn as the game's buttons: " + _styledKeys.Count);
         }
 
         // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels
@@ -415,7 +415,7 @@ namespace Recomp.Touchscreen
         // working hours and the visible levels scaled to the switcher's width.
         void LayOutView()
         {
-            _timeBlock = new VisualElement { name = "TouchscreenTimeBlock", pickingMode = PickingMode.Ignore };
+            _timeBlock = new VisualElement { name = "TheSTouchscreenTimeBlock", pickingMode = PickingMode.Ignore };
             // The game's panels arrive later (SweepView): the style sheets of the block and its ancestors.
             CarryStyles(_topRight, _timeBlock);
             for (int i = 0; i < _topRight.styleSheets.count; i++) _timeBlock.styleSheets.Add(_topRight.styleSheets[i]);
@@ -425,7 +425,7 @@ namespace Recomp.Touchscreen
             s.top = 0f;
             s.flexDirection = FlexDirection.Row;
             s.alignItems = Align.FlexStart;
-            _clockHolder = new VisualElement { name = "TouchscreenClock", pickingMode = PickingMode.Ignore };
+            _clockHolder = new VisualElement { name = "TheSTouchscreenClock", pickingMode = PickingMode.Ignore };
             _clockHolder.style.marginRight = Gap / 2f;
             _clockHolder.style.marginTop = 4f;
             _timeColumn = new VisualElement { pickingMode = PickingMode.Ignore };
@@ -434,7 +434,7 @@ namespace Recomp.Touchscreen
             _timeBlock.Add(_timeColumn);
             _uiLayout.AddAbsoluteItem(_timeBlock);
 
-            _viewDrawer = Drawer("TouchscreenViewDrawer");
+            _viewDrawer = Drawer("TheSTouchscreenViewDrawer");
             // Laid out while closed (hidden, not removed), so ArrangeView has its sizes before it
             // first opens: closed by display, it showed its bars small and resized them on opening.
             _viewDrawer.style.display = DisplayStyle.Flex;
@@ -443,7 +443,7 @@ namespace Recomp.Touchscreen
             _viewDrawer.style.top = BelowStrip;
             _viewDrawer.style.alignItems = Align.Center;
             Scale(_viewDrawer, ViewScale, 100f, 0f);
-            _viewTab = Tab("TouchscreenView", "UI/Images/Game/ico-eye", "View", ViewTabWidth, () => Toggle(_viewDrawer, _viewTab));
+            _viewTab = Tab("TheSTouchscreenView", "UI/Images/Game/ico-eye", "View", ViewTabWidth, () => Toggle(_viewDrawer, _viewTab));
             _viewTab.style.position = Position.Absolute;
             _viewTab.style.right = 0f;
             _viewTab.style.top = 0f;
@@ -485,7 +485,7 @@ namespace Recomp.Touchscreen
             }
             var date = e.name == "DatePanel" ? e : e.Q("DatePanel");
             if (date != null) _date = date;
-            Debug.Log("[Touchscreen] phone layout: " + TopRightKept[index] + " into the time column");
+            Debug.Log("[TheSTouchscreen] phone layout: " + TopRightKept[index] + " into the time column");
         }
 
         // What the game adds to the top-right block: speed, date and weather into the column, the
@@ -687,7 +687,7 @@ namespace Recomp.Touchscreen
             var line = string.Join("; ", parts);
             if (line == _loggedView) return;
             _loggedView = line;
-            Debug.Log("[Touchscreen] view layout: " + line);
+            Debug.Log("[TheSTouchscreen] view layout: " + line);
         }
 
         // The levels bar: its up/down arrows as big on screen as Global view's (arrow, in the
@@ -787,13 +787,13 @@ namespace Recomp.Touchscreen
             e.style.marginBottom = Mathf.Max(0f, e.layout.height * (k - 1f)) + 4f;
         }
 
-        // The placement panel (rotate, flip and the Touchscreen's Place and Rows) on the right edge:
+        // The placement panel (rotate, flip and the TheSTouchscreen's Place and Rows) on the right edge:
         // square icon buttons of one size, Place last. The game shows and hides the panel itself.
         void LayOutRail()
         {
             _placementPanel = _gameUI.Q("BlockObjectPlacementPanel");
             if (_placementPanel == null) return;
-            _rail = new VisualElement { name = "TouchscreenRail", pickingMode = PickingMode.Ignore };
+            _rail = new VisualElement { name = "TheSTouchscreenRail", pickingMode = PickingMode.Ignore };
             CarryStyles(_placementPanel, _rail);
             var s = _rail.style;
             s.position = Position.Absolute;
@@ -803,14 +803,14 @@ namespace Recomp.Touchscreen
             _placementPanel.style.flexDirection = FlexDirection.Column;
             _placementPanel.style.alignItems = Align.FlexEnd;
             _rail.Add(_placementPanel);
-            _costHolder = new VisualElement { name = "TouchscreenCost", pickingMode = PickingMode.Ignore };
+            _costHolder = new VisualElement { name = "TheSTouchscreenCost", pickingMode = PickingMode.Ignore };
             _costHolder.style.alignItems = Align.FlexEnd;
             _rail.Add(_costHolder);
             _uiLayout.AddAbsoluteItem(_rail);
             KeepPlaceLast();
         }
 
-        // Also styles the Touchscreen's own buttons, which PlacementButtons adds on the first placement.
+        // Also styles the TheSTouchscreen's own buttons, which PlacementButtons adds on the first placement.
         void KeepPlaceLast()
         {
             if (_placementPanel == null) return;
@@ -832,7 +832,7 @@ namespace Recomp.Touchscreen
                         c.marginLeft = c.marginRight = 0f;
                     }
             }
-            var place = _placementPanel.Q("TouchscreenPlace");
+            var place = _placementPanel.Q("TheSTouchscreenPlace");
             if (place != null && place.parent.IndexOf(place) != place.parent.childCount - 1) place.BringToFront();
         }
 
@@ -842,7 +842,7 @@ namespace Recomp.Touchscreen
         {
             var toolPanel = _bottomSlot.Q("ToolPanel");
             if (toolPanel == null) return;
-            var holder = new VisualElement { name = "TouchscreenToolPanel", pickingMode = PickingMode.Ignore };
+            var holder = new VisualElement { name = "TheSTouchscreenToolPanel", pickingMode = PickingMode.Ignore };
             var s = holder.style;
             s.position = Position.Absolute;
             s.left = s.right = 0f;
@@ -947,7 +947,7 @@ namespace Recomp.Touchscreen
             if (type != null && typeof(T).IsAssignableFrom(type))
             {
                 try { e = (T)Activator.CreateInstance(type); }
-                catch (Exception ex) { Debug.Log("[Touchscreen] " + type.Name + ": " + ex.Message); }
+                catch (Exception ex) { Debug.Log("[TheSTouchscreen] " + type.Name + ": " + ex.Message); }
             }
             if (e == null)
             {

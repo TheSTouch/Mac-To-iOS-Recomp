@@ -1,6 +1,7 @@
-// The game's "Development controls" as a modal on an iPhone (iPhone only, like MobileHud). The
-// port's Dev key toggles developer mode as on a Mac (Alt+Shift+Z); while it is on, a key with a
-// bug icon appears above the Dynamic Island (Recomp.KeyButtons.AddAction) and opens or closes
+// The game's "Development controls" as a modal, on iPhones and iPads. The port's Dev key
+// toggles developer mode as on a Mac (Alt+Shift+Z); while it is on, a key with a bug icon
+// appears (Recomp.KeyButtons.AddAction: above the Dynamic Island on a phone held sideways,
+// on top of the key stack elsewhere) and opens or closes
 // the modal: a dimmed backdrop over everything, a green frame with gold borders and rounded
 // corners (the game's square-large--green), the title, a close button, and the game's own
 // panel (Common/DevPanel/DevPanel.uxml, DebuggingUI.DevPanel) moved inside it, so its filter,
@@ -15,14 +16,13 @@ using Timberborn.SingletonSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     public class DevControls : IPostLoadableSingleton, IUnloadableSingleton, IUpdatableSingleton
     {
         const string KeyLabel = "Debug";
         const float RowHeight = 80f, FontSize = 28f, HeadingSize = 34f, TitleSize = 38f, Gap = 12f;  // panel units (~0.54 pt each)
         static readonly Color Yellow = new Color(0.95f, 0.87f, 0.6f);
-        static readonly bool Phone = SystemInfo.deviceModel.StartsWith("iPhone", StringComparison.Ordinal);
 
         static bool _devMode;  // read by the key's visibility, which outlives this scene
 
@@ -40,19 +40,18 @@ namespace Recomp.Touchscreen
 
         public void PostLoad()
         {
-            if (!Phone) return;
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
                 if (doc.rootVisualElement?.Q("GameUI") != null) _root = doc.rootVisualElement;
             if (_root == null)
             {
-                Debug.Log("[Touchscreen] dev controls: no GameUI");
+                Debug.Log("[TheSTouchscreen] dev controls: no GameUI");
                 return;
             }
             _devMode = _devModeManager.Enabled;
             _eventBus.Register(this);
             KeyButtons.AddAction(KeyLabel, Toggle, () => _devMode);
             BuildModal();
-            Debug.Log("[Touchscreen] dev controls: bug key above the island while developer mode is on");
+            Debug.Log("[TheSTouchscreen] dev controls: bug key above the island while developer mode is on");
         }
 
         public void Unload() => _devMode = false;
@@ -77,7 +76,7 @@ namespace Recomp.Touchscreen
         void BuildModal()
         {
             var common = Resources.Load<StyleSheet>("UI/Views/Common/CommonStyle");
-            _modal = new VisualElement { name = "TouchscreenDevModal" };
+            _modal = new VisualElement { name = "TheSTouchscreenDevModal" };
             var m = _modal.style;
             m.position = Position.Absolute;
             m.left = m.right = m.top = m.bottom = 0f;
@@ -125,7 +124,7 @@ namespace Recomp.Touchscreen
             _panel = _root.Q("DevPanel");
             if (_panel == null)
             {
-                Debug.Log("[Touchscreen] dev controls: the game's DevPanel is not there yet");
+                Debug.Log("[TheSTouchscreen] dev controls: the game's DevPanel is not there yet");
                 return;
             }
             CarryStyles(_panel, _frame);
@@ -169,7 +168,7 @@ namespace Recomp.Touchscreen
                     label.style.marginTop = label.style.marginBottom = Gap / 2f;
                 }
             }
-            Debug.Log("[Touchscreen] dev controls: the game's panel moved into the modal");
+            Debug.Log("[TheSTouchscreen] dev controls: the game's panel moved into the modal");
         }
 
         public void UpdateSingleton()
@@ -277,7 +276,7 @@ namespace Recomp.Touchscreen
             if (type != null && typeof(T).IsAssignableFrom(type))
             {
                 try { e = (T)Activator.CreateInstance(type); }
-                catch (Exception ex) { Debug.Log("[Touchscreen] " + type.Name + ": " + ex.Message); }
+                catch (Exception ex) { Debug.Log("[TheSTouchscreen] " + type.Name + ": " + ex.Message); }
             }
             if (e == null)
             {

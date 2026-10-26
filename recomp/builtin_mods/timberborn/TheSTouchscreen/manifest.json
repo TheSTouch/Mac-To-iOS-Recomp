@@ -1,0 +1,9 @@
+{
+  "Name": "TheSTouchscreen",
+  "Version": "1.0.0",
+  "Id": "TheSTouch.TheSTouchscreen",
+  "MinimumGameVersion": "1.0.0.0",
+  "Description": "TheSTouch's mod for its iPad and iPhone port, built into it: the game played by touch and Apple Pencil (taps, drags and two-finger camera instead of an emulated mouse; while placing, a finger aims the ghost and Place places it, Rows drags rows of paths and walls), the HUD redesigned for an iPhone's screen, and Development controls as a touch-sized window.",
+  "RequiredMods": [],
+  "OptionalMods": []
+}

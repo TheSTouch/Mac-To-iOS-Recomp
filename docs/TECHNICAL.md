@@ -207,7 +207,7 @@ The key buttons (Unity ports) stay on screen with or without a controller.
 | key buttons (bottom left) | Esc, and above it the profile's `touch_keys` (Timberborn: Dev) |
 | tap a text field | the iOS keyboard opens (TextMeshPro fields) |
 
-**Placement mode** (Timberborn, through its built-in Touchscreen mod). Desktop building games show
+**Placement mode** (Timberborn, through its built-in TheSTouchscreen mod). Desktop building games show
 a ghost of the building under the mouse, let you rotate it, and place it on the click; a tap is a
 click the moment it lifts, so there would be no time to rotate. While a building, path or platform
 tool is active:
@@ -260,13 +260,13 @@ To add mods with code:
 4. On the iPad, the game shows its mod manager at start; tap Start. Mods can be turned off there
    like on the Mac.
 
-Every Timberborn port also carries **Touchscreen**, a mod of the port itself
-(`recomp/builtin_mods/timberborn/Touchscreen`, listed by the profile's `mods.builtin`): it is built
+Every Timberborn port also carries **TheSTouchscreen**, a mod of the port itself
+(`recomp/builtin_mods/timberborn/TheSTouchscreen`, listed by the profile's `mods.builtin`): it is built
 against the game and the port's shims when the game is ported, and goes through the same checks
 and install as the Mac's mods (source *Built in*). It is the place for touch tweaks of the game's
-own UI. Recomp Helper shows it in its own box (*Built into the port: Touchscreen*) rather than with the Mac's
+own UI. Recomp Helper shows it in its own box (*Built into the port: TheSTouchscreen*) rather than with the Mac's
 mods, on by default; turning it off there leaves it out of the next port (`recomp.py mods
---exclude Recomp.Touchscreen`). On the iPad it can also be turned off in the game's mod list,
+--exclude TheSTouch.TheSTouchscreen`). On the iPad it can also be turned off in the game's mod list,
 without porting again. Other built-in mods (say, a small-screen UI for iPhone) would sit next to
 it in `mods.builtin`, each with its own box.
 

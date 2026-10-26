@@ -9,7 +9,7 @@ port time. A game profile's "mods" block says where the game keeps its mods:
     "manifest": "manifest.json",             # a folder holding one is a mod
     "version_dirs": "version-",              # optional: per-game-version subfolders
     "exclude": [".git", "src", "*.zip"],     # not copied to the iPad by `recomp.py mods`
-    "builtin": ["timberborn/Touchscreen"]    # optional: mods of the port itself (recomp/builtin_mods)
+    "builtin": ["timberborn/TheSTouchscreen"]    # optional: mods of the port itself (recomp/builtin_mods)
   }
 
 Built-in mods are part of every port of the game: built at port time against the game and

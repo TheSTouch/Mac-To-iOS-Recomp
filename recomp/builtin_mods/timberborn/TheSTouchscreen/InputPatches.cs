@@ -9,7 +9,7 @@ using Timberborn.InputSystem;
 using Timberborn.KeyBindingSystem;
 using UnityEngine;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     [HarmonyPatch(typeof(MouseController), nameof(MouseController.Position), MethodType.Getter)]
     static class MousePositionPatch
@@ -21,7 +21,7 @@ namespace Recomp.Touchscreen
             if (!_logged)
             {
                 _logged = true;
-                Debug.Log("[Touchscreen] input patch live");
+                Debug.Log("[TheSTouchscreen] input patch live");
             }
             if (WorldInput.Active) __result = WorldInput.Current.Pointer;
         }
@@ -90,7 +90,7 @@ namespace Recomp.Touchscreen
             if (!_logged)
             {
                 _logged = true;
-                Debug.Log("[Touchscreen] the game's mouse keys come from touches (first asked: " + id + " " + query + ")");
+                Debug.Log("[TheSTouchscreen] the game's mouse keys come from touches (first asked: " + id + " " + query + ")");
             }
             result = state.Value;
             return false;

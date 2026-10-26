@@ -4,7 +4,7 @@
 // except in games that opt into touch UI (the profile's "touch_ui"): there a touch
 // that starts on the game's UI is left to it, as a real touch (taps, drag-scrolling,
 // no hover), and the mouse stays where the last touch on the world left it.
-// A game mod can also claim the input (Claimed; Timberborn's Touchscreen mod in its game
+// A game mod can also claim the input (Claimed; Timberborn's TheSTouchscreen mod in its game
 // scene): the mouse is then parked off screen and left alone, touches that begin on the
 // game's UI go to it as touches, and the others are the mod's (WorldTouches) to turn into
 // the game's world input itself.

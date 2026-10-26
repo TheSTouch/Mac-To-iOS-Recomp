@@ -17,7 +17,7 @@ using Timberborn.ToolSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Recomp.Touchscreen
+namespace Recomp.TheSTouchscreen
 {
     public class PlacementButtons : ILoadableSingleton, IUpdatableSingleton
     {
@@ -97,7 +97,7 @@ namespace Recomp.Touchscreen
                 if ((rotate = doc.rootVisualElement?.Q<Button>(RotateButton)) != null) break;
             if (rotate == null)
             {
-                Debug.Log("[Touchscreen] no " + RotateButton + " button: Place and Rows not added");
+                Debug.Log("[TheSTouchscreen] no " + RotateButton + " button: Place and Rows not added");
                 return;
             }
             _place = Create(rotate, "Place", PlaceIcon, () => { if (WorldInput.Active) WorldInput.Current.Place(); else Placement.Place(); }, out _, out _);
@@ -105,7 +105,7 @@ namespace Recomp.Touchscreen
             rotate.parent.Add(_place);
             rotate.parent.Add(_rows);
             _rowsShown = false;
-            Debug.Log("[Touchscreen] Place and Rows added to the placement panel");
+            Debug.Log("[TheSTouchscreen] Place and Rows added to the placement panel");
         }
 
         static Button Create(Button like, string caption, string icon, Action clicked, out VisualElement image, out Label label)
@@ -115,10 +115,10 @@ namespace Recomp.Touchscreen
             try { b = (Button)Activator.CreateInstance(like.GetType()); }
             catch (Exception e)
             {
-                Debug.Log("[Touchscreen] " + like.GetType().Name + ": " + e.Message + "; using a plain button");
+                Debug.Log("[TheSTouchscreen] " + like.GetType().Name + ": " + e.Message + "; using a plain button");
                 b = new Button();
             }
-            b.name = "Touchscreen" + caption;
+            b.name = "TheSTouchscreen" + caption;
             b.clicked += clicked;
             foreach (var c in like.GetClasses()) b.AddToClassList(c);
             image = new VisualElement();
@@ -142,7 +142,7 @@ namespace Recomp.Touchscreen
             if (texture != null) return new StyleBackground(texture);
             var sprite = Resources.Load<Sprite>(path);
             if (sprite != null) return new StyleBackground(sprite);
-            Debug.Log("[Touchscreen] no image " + path);
+            Debug.Log("[TheSTouchscreen] no image " + path);
             return new StyleBackground(StyleKeyword.None);
         }
     }
