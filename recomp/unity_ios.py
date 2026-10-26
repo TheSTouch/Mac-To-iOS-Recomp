@@ -352,9 +352,10 @@ def mods_config(game, work):
     return cfg
 
 
-def stage_builtin_mods(game, cfg, shims=None):
+def stage_builtin_mods(game, cfg, shims=None, harmony=None):
     """Lay out the profile's built-in mods (recomp/builtin_mods/<path>) as mod folders in
-    work/builtin-mods: the manifest and, given the port's shim build folder, the mod's DLL."""
+    work/builtin-mods: the manifest and, given the port's shim build folder and the Harmony
+    stand-in's, the mod's DLL."""
     out = (cfg or {}).get("builtin_dir")
     if not out:
         return
@@ -364,7 +365,8 @@ def stage_builtin_mods(game, cfg, shims=None):
         os.makedirs(dst, exist_ok=True)
         shutil.copy2(os.path.join(src, cfg.get("manifest", "manifest.json")), dst)
         if shims:
-            dotnet_build(src, dst, f"-p:GameManaged={game.managed}", f"-p:RecompShims={shims}")
+            dotnet_build(src, dst, f"-p:GameManaged={game.managed}", f"-p:RecompShims={shims}",
+                         f"-p:RecompHarmony={harmony}")
 
 
 def prepare_mods(game, work, unity, plugins, game_dlls, engine_names):
@@ -382,7 +384,7 @@ def prepare_mods(game, work, unity, plugins, game_dlls, engine_names):
     harmony = os.path.join(work, "harmony")
     dotnet_build(os.path.join(SHIMS, "RecompHarmony"), harmony)
     shims = os.path.join(work, "shims")
-    stage_builtin_mods(game, cfg, shims)
+    stage_builtin_mods(game, cfg, shims, harmony)
     search = aot_profile(unity) + [game.managed, shims]
     found, assemblies = mods.prepare(cfg, version, ASMTOOL, search, existing,
                                      {"0Harmony": os.path.join(harmony, "0Harmony.dll")}, mods.excluded(work))
