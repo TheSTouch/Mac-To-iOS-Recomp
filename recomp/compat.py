@@ -1,6 +1,7 @@
 """How likely a scanned game is to port without changes, for the library list.
 
-  tested      a profile records the game as played on an iPad ("tested")
+  tested      a profile records the game as played on an iPad ("tested"); what it records for
+              the iPhone ("tested_iphone") is reported beside the status, see tested_on()
   untested    nothing found that its route is known to trip over: may work out of the box
   needs_work  the route applies, but something here is known to stop it or to need a profile
 
@@ -48,12 +49,10 @@ def profiles():
     return out
 
 
-def tested(report):
-    """(status, detail, checks) from the profile that records this game as tested, or None."""
+def profile_of(report):
+    """The recomp/profiles entry written for this game, or None."""
     contents = os.path.join(report["app"], "Contents")
     for p in profiles():
-        if not p.get("tested"):
-            continue
         if report["engine"] == "Unity" and p.get("when_assembly"):
             hit = os.path.exists(os.path.join(contents, "Resources", "Data", "Managed", p["when_assembly"]))
         elif report["engine"] == "Unreal" and p.get("unreal_project"):
@@ -61,8 +60,23 @@ def tested(report):
         else:
             hit = False
         if hit:
-            return "tested", f"Tested: {p['tested']}", []
+            return p
     return None
+
+
+def tested(report):
+    """(status, detail, checks) from the profile that records this game as tested on an iPad, or None."""
+    p = profile_of(report)
+    if p and p.get("tested"):
+        return "tested", f"Tested on iPad: {p['tested']}", []
+    return None
+
+
+def tested_on(report):
+    """What the game's profile records for each kind of device: {"tested_ipad", "tested_iphone"},
+    None where it has not been played on one yet."""
+    p = profile_of(report) or {}
+    return {"tested_ipad": p.get("tested") or None, "tested_iphone": p.get("tested_iphone") or None}
 
 
 # --- Unity (Mono) ------------------------------------------------------------------

@@ -82,8 +82,13 @@ struct GameRow: View {
             VStack(alignment: .leading) {
                 Text(game.name)
                 Text("\(game.engineLabel) · \(game.source)").font(.caption).foregroundStyle(.secondary)
+                if game.route != nil, game.support != .missing {
+                    Text(game.devicesSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
         }
+        .help(game.route == nil ? "" : [game.testedIpad.map { "Tested on iPad: \($0)" }, game.iphoneStatus]
+            .compactMap { $0 }.joined(separator: "\n"))
     }
 }
 
@@ -136,6 +141,10 @@ struct GameDetail: View {
                         Text(game.name).font(.title.bold())
                         Label(game.support.title, systemImage: game.support.symbol).foregroundStyle(color(game.support))
                         Text(game.statusDetail).foregroundStyle(.secondary)
+                        if game.route != nil, game.support != .missing {
+                            Label(game.iphoneStatus, systemImage: "iphone")
+                                .foregroundStyle(game.testedIphone == nil ? Color.secondary : Color.green)
+                        }
                     }
                     Spacer()
                     if game.route == "unity" || game.route == "unreal" {

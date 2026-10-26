@@ -22,11 +22,22 @@ struct Game: Decodable, Identifiable, Hashable {
     let saves: Bool?
     /// The game's profile says where its mods live: the port can compile them in (recomp/mods.py).
     let mods: Bool?
+    /// What the game's profile records for each kind of device, nil where it was not played on one
+    /// yet ("tested" and "tested_iphone"); only for games a route handles.
+    let testedIpad: String?
+    let testedIphone: String?
 
     var id: String { app }
     var support: Support { Support(rawValue: status) ?? .planned }
     var engineLabel: String { engineBackend.map { "\(engine) (\($0))" } ?? engine }
     var slug: String { name.filter { $0.isLetter || $0.isNumber } }
+
+    var iphoneStatus: String { testedIphone.map { "Tested on iPhone: \($0)" } ?? "Not tried on iPhone yet" }
+    /// The list's one-line summary per device, e.g. "Tested on iPad · not tried on iPhone yet".
+    var devicesSummary: String {
+        [testedIpad == nil ? nil : "Tested on iPad",
+         testedIphone == nil ? "not tried on iPhone yet" : "Tested on iPhone"].compactMap { $0 }.joined(separator: " · ")
+    }
 }
 
 enum Support: String, CaseIterable {

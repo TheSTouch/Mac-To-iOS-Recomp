@@ -122,6 +122,8 @@ def scan(extra_dirs=(), quick=True):
             report["source"] = source
             report["route"] = route_of(report)
             report["status"], report["status_detail"], report["checks"] = status_of(report)
+            if report["route"] and report["status"] != "missing":
+                report.update(compat.tested_on(report))
             games.append(report)
     windows = [("CrossOver", lib) for lib in windows_games.crossover_steam_libraries()]
     windows += [("Custom", d) for d in extra_dirs]
