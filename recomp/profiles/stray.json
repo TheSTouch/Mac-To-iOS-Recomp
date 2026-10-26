@@ -10,12 +10,13 @@
     ]
   },
   "unreal_project": "Hk_project",
-  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory; turn off capsule shadows, whose tiled pass blacks out the fog in every 16-pixel tile the cat touches on iOS (hard-edged black blocks around the cat on the title screen); render at 75% and let MetalFX's temporal upscaler fill in the rest: about 58 frames/s on the title screen of an M1 iPad Pro instead of 45, with no visible difference (50% reaches the 60 frames/s cap but only gains 2 more)",
+  "why": "cap texture streaming memory to the device's RAM: the Mac build sizes it for a GPU with its own memory; turn off capsule shadows, whose tiled pass blacks out the fog in every 16-pixel tile the cat touches on iOS (hard-edged black blocks around the cat on the title screen); render at 75% and let MetalFX's temporal upscaler fill in the rest: about 58 frames/s on the title screen of an M1 iPad Pro instead of 45, with no visible difference (50% reaches the 60 frames/s cap but only gains 2 more); decode sounds as they play instead of unpacking them on load: the Audio Mixer's CoreAudio platform does not override IAudioMixerPlatformInterface::SupportsRealtimeDecompression, whose base answer is false, so every sound in a level was unpacked to PCM (1.5 GB in chapter 4, The Slums, more than an iPhone can spare); the patch makes it answer true (mov w0, #0 -> #1) and au.ForceRealtimeDecompression applies it to every sound. Measured on the Mac build with the iPhone settings: 5.95 GB -> 4.8 GB in The Slums, sound unchanged",
   "engine_ini": {
     "SystemSettings": {
       "r.Streaming.PoolSize": "auto",
       "r.Streaming.LimitPoolSizeToVRAM": "1",
-      "r.CapsuleShadows": "0"
+      "r.CapsuleShadows": "0",
+      "au.ForceRealtimeDecompression": "1"
     }
   },
   "game_user_settings_ini": {
@@ -31,5 +32,11 @@
         "ScreenPercentage": "50"
       }
     }
-  }
+  },
+  "patches": [
+    {
+      "find": "e00301aac0035fd600008052c0035fd6",
+      "replace": "e00301aac0035fd620008052c0035fd6"
+    }
+  ]
 }
