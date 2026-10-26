@@ -1,6 +1,9 @@
 // Drives a virtual Input System mouse from touchscreen gestures, for desktop
 // games that read Mouse.current and Keyboard.current on a device that has
-// neither. Touch events are consumed so the game's UI only sees the mouse.
+// neither. Touch events are consumed so the game's UI only sees the mouse,
+// except in games that opt into touch UI (the profile's "touch_ui"): there a touch
+// that starts on the game's UI is left to it, as a real touch (taps, drag-scrolling,
+// no hover), and the mouse stays where the last touch on the world left it.
 //
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
@@ -13,7 +16,9 @@
 //   In play, with no controller: an on-screen gamepad instead (opt-in), see TouchPad
 //
 // A real mouse or keyboard, when connected, keeps working alongside.
+using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
@@ -33,6 +38,11 @@ namespace Recomp
 
         static Mouse _mouse;
         static readonly Dictionary<int, Vector2> Touches = new Dictionary<int, Vector2>();
+        static readonly HashSet<int> UiTouches = new HashSet<int>();  // touch UI: touches left to the game's UI
+        static bool _touchUi;
+
+        [Serializable]
+        class Config { public bool touchUi; }
         static Mode _mode;
         static float _modeStart;
         static Vector2 _start, _last, _lastPos;
@@ -65,9 +75,18 @@ namespace Recomp
             Debug.Log("[recomp] driving mouse " + _mouse.name + "; devices: " + string.Join(", ", InputSystem.devices));
             KeyButtons.Install();
             TouchPad.Install();
+            try
+            {
+                var path = Path.Combine(Application.streamingAssetsPath, "recomp.json");
+                _touchUi = File.Exists(path) && JsonUtility.FromJson<Config>(File.ReadAllText(path)).touchUi;
+            }
+            catch (Exception e)
+            {
+                Debug.Log("[recomp] touch UI: cannot read recomp.json: " + e.Message);
+            }
             InputSystem.onEvent += OnEvent;
             InputSystem.onBeforeUpdate += OnBeforeUpdate;
-            Debug.Log("[recomp] touch mouse installed");
+            Debug.Log("[recomp] touch mouse installed" + (_touchUi ? "; touches on the game's UI stay touches" : ""));
         }
 
         static unsafe void OnEvent(InputEventPtr eventPtr, InputDevice device)
@@ -99,8 +118,26 @@ namespace Recomp
                 _sawTouch = true;
                 Debug.Log("[recomp] first touch received");
             }
+            if (_touchUi && ToUi(touch->touchId, touch->phase, touch->position)) return;
             eventPtr.handled = true;
             OnPointer(touch->touchId, touch->phase, touch->position);
+        }
+
+        // Touch UI: whether this touch belongs to the game's UI (decided when it begins: on a
+        // panel, not on a key button or the gamepad), so the event goes on to it unconsumed.
+        static bool ToUi(int id, UnityEngine.InputSystem.TouchPhase phase, Vector2 position)
+        {
+            if (UiTouches.Contains(id))
+            {
+                if (phase == UnityEngine.InputSystem.TouchPhase.Ended || phase == UnityEngine.InputSystem.TouchPhase.Canceled)
+                    UiTouches.Remove(id);
+                return true;
+            }
+            if (phase != UnityEngine.InputSystem.TouchPhase.Began || KeyButtons.At(position) >= 0 || TouchPad.Visible
+                || Touches.Count > 0 || !Placement.UiAt(position))
+                return false;
+            UiTouches.Add(id);
+            return true;
         }
 
         static void OnPointer(int id, UnityEngine.InputSystem.TouchPhase phase, Vector2 position)
@@ -251,6 +288,10 @@ namespace Recomp
                 _restoreAim = false;
                 _lastPos = _aim;
             }
+            // Touch UI: a one-finger gesture on the world does not take the mouse over the game's UI
+            // (it would hover its buttons); the mouse waits at its last spot off the UI.
+            if (_touchUi && n == 1 && _mode != Mode.Probe && _mode != Mode.Multi && Placement.UiAt(center))
+                center = _lastPos;
             var pos = n > 0 ? center : _lastPos;
             // When the finger count changes the centroid jumps; do not turn that into motion.
             var delta = n > 0 && n == _lastCount ? pos - _last : Vector2.zero;

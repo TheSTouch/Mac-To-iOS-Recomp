@@ -60,5 +60,32 @@ namespace Recomp
             }
             return false;
         }
+
+        /// Whether the game's UI is at a screen position (Input System pixels, origin bottom-left),
+        /// wherever the mouse is: MouseOverUI asks the EventSystem, which answers for the mouse.
+        internal static bool UiAt(Vector2 screen)
+        {
+#if RECOMP_UGUI
+            var es = EventSystem.current;
+            if (es != null)
+            {
+                Hits.Clear();
+                es.RaycastAll(new PointerEventData(es) { position = screen }, Hits);
+                if (Hits.Count > 0) return true;
+            }
+#endif
+            foreach (var doc in Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
+            {
+                var panel = doc.rootVisualElement?.panel;
+                if (panel == null) continue;
+                var p = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(screen.x, Screen.height - screen.y));
+                if (panel.Pick(p) != null) return true;
+            }
+            return false;
+        }
+
+#if RECOMP_UGUI
+        static readonly System.Collections.Generic.List<RaycastResult> Hits = new System.Collections.Generic.List<RaycastResult>();
+#endif
     }
 }

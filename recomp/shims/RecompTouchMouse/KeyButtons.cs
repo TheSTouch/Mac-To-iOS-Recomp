@@ -1,4 +1,5 @@
-// On-screen keys, stacked in the bottom-left corner: Esc at the bottom (games skip videos,
+// On-screen keys, stacked in the bottom-left corner (bottom-right for a profile whose
+// "touch_keys_corner" is "right", recomp.json "touchKeysCorner"): Esc at the bottom (games skip videos,
 // close panels or open their menu with Escape), then the game profile's "touch_keys" above
 // it, each a label and the keys it holds down together (recomp.json "touchKeys"), e.g. a
 // "Dev" key for a game's developer mode shortcut. The keys are pressed on the keyboard
@@ -44,7 +45,7 @@ namespace Recomp
         class TouchKey { public string label; public string[] keys; }
 
         [Serializable]
-        class Config { public TouchKey[] touchKeys; }
+        class Config { public TouchKey[] touchKeys; public string touchKeysCorner; }
 
         class KeyButton
         {
@@ -63,6 +64,7 @@ namespace Recomp
         static Rect _laidOut;      // the Layout.Area the buttons were last laid out for (phones, and the uGUI overlay)
         static KeyButton _pressed;
         static int _pressFrames;   // 2: press this update, 1: release this update
+        static bool _right;        // in the bottom-right corner instead of the bottom-left
 
         public static void Install()
         {
@@ -75,6 +77,7 @@ namespace Recomp
             {
                 var path = Path.Combine(Application.streamingAssetsPath, "recomp.json");
                 var config = File.Exists(path) ? JsonUtility.FromJson<Config>(File.ReadAllText(path)) : null;
+                _right = config?.touchKeysCorner == "right";
                 foreach (var k in config?.touchKeys ?? new TouchKey[0])
                 {
                     var keys = new List<Key>();
@@ -223,7 +226,7 @@ namespace Recomp
                 var bg = new GameObject("recomp-key-" + Buttons[i].Label, typeof(RectTransform));
                 bg.transform.SetParent(_canvas.transform, false);
                 var rect = (RectTransform)bg.transform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.zero;
+                rect.anchorMin = rect.anchorMax = rect.pivot = _right ? Vector2.right : Vector2.zero;
                 Buttons[i].CanvasButton = rect;
                 var image = bg.AddComponent<Image>();
                 image.color = new Color(0f, 0f, 0f, 0.35f);
@@ -258,7 +261,9 @@ namespace Recomp
                 {
                     var b = Buttons[i];
                     if (b.CanvasButton == null) continue;
-                    b.CanvasButton.anchoredPosition = new Vector2(area.xMin, Base(area)) + new Vector2(Margin, Bottom(i)) * unit;
+                    b.CanvasButton.anchoredPosition = _right
+                        ? new Vector2(area.xMax - Screen.width, Base(area)) + new Vector2(-Margin, Bottom(i)) * unit
+                        : new Vector2(area.xMin, Base(area)) + new Vector2(Margin, Bottom(i)) * unit;
                     b.CanvasButton.sizeDelta = new Vector2(Width, Height) * unit;
                     b.CanvasText.fontSize = Mathf.RoundToInt(18 * unit);
                 }
@@ -271,16 +276,18 @@ namespace Recomp
                 return;
             }
             var root = _overlay != null ? _overlay.rootVisualElement.layout : default;
-            if (root.height <= 0f || root.width <= 0f) return;  // not laid out yet: next check
+            if (!(root.height > 0f) || !(root.width > 0f)) return;  // not laid out yet (0 or NaN): next check
             var k = unit * root.height / Screen.height;          // panel units per layout point
             var left = area.xMin * root.width / Screen.width;
+            var right = (Screen.width - area.xMax) * root.width / Screen.width;
             var bottom = Base(area) * root.height / Screen.height;
             for (int i = 0; i < Buttons.Count; i++)
             {
                 var b = Buttons[i].Button;
                 if (b == null) continue;
                 var s = b.style;
-                s.left = left + Margin * k;
+                if (_right) s.right = right + Margin * k;
+                else s.left = left + Margin * k;
                 s.bottom = bottom + Bottom(i) * k;
                 s.width = Width * k;
                 s.height = Height * k;
@@ -296,8 +303,9 @@ namespace Recomp
             var b = new Button { text = label, name = "recomp-key-" + label, pickingMode = PickingMode.Ignore };
             var s = b.style;
             s.position = Position.Absolute;
-            s.bottom = Bottom(index);  // bottom left: clear of the menus games put along the top
-            s.left = Margin;
+            s.bottom = Bottom(index);  // bottom corner: clear of the menus games put along the top
+            if (_right) s.right = Margin;
+            else s.left = Margin;
             s.width = Width;
             s.height = Height;
             s.fontSize = 18;

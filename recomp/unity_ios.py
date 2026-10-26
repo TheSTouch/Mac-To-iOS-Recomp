@@ -499,13 +499,17 @@ def write_shim_config(game, data):
     """StreamingAssets/recomp.json (Data/Raw on iOS): per-game switches the managed shims read,
     e.g. the on-screen gamepad that action games opt into with the profile's "touch_gamepad",
     the extra on-screen keys of its "touch_keys" ([{"label", "keys": [Input System key names]}]),
+    the corner they go in ("touch_keys_corner": "left" or "right"), touches on the game's UI left
+    to it as real touches ("touch_ui"),
     and the iPhone settings of its "iphone" block (see PHONE_DEFAULTS)."""
     profile = game_profile(game) or {}
     os.makedirs(os.path.join(data, "Raw"), exist_ok=True)
     phone = phone_settings(profile)
     with open(os.path.join(data, "Raw", "recomp.json"), "w") as f:
         json.dump({"touchGamepad": bool(profile.get("touch_gamepad")),
+                   "touchUi": bool(profile.get("touch_ui")),
                    "touchKeys": profile.get("touch_keys", []),
+                   "touchKeysCorner": profile.get("touch_keys_corner", "left"),
                    "phone": phone}, f)
     log(f"recomp.json phone settings: {phone}")
 

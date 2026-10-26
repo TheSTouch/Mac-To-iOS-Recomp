@@ -46,6 +46,8 @@
       ]
     }
   ],
+  "touch_keys_corner": "right",
+  "touch_ui": true,
   "iphone": {
     "render_scale": 1.0,
     "player_prefs": {
