@@ -57,6 +57,8 @@ INTERCEPT = {
     "_IORegistryEntryGetChildIterator", "_IORegistryEntryGetRegistryEntryID",
     # Log a backtrace when the game exits with an error (shipping builds keep no log).
     "_exit", "__Exit", "_abort",
+    # ... and who asked for a clean quit: FMacPlatformMisc::RequestExit calls it (RecompDebug.m).
+    "_notify_cancel",
     # Case-insensitive path lookups, as on a Mac's default volume (RecompFiles.c).
     "_open", "_fopen", "_stat", "_statfs", "_access", "_opendir", "_chdir", "_readlink", "_chmod", "_utime",
     "_unlink", "_rmdir", "_mkdir", "_rename", "_dlopen",

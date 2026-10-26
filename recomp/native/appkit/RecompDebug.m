@@ -34,6 +34,17 @@ void _Exit(int code) {
     __builtin_unreachable();
 }
 
+// UE4's clean quit asks the engine loop to end and exits with 0, so the hooks
+// above stay silent. FMacPlatformMisc::RequestExit (QuitGame, the exit command,
+// a closed game window), the fatal-error log device and the exit-time teardown
+// are the engine's only callers of notify_cancel: its backtrace names who quit.
+uint32_t notify_cancel(int token) {
+    static uint32_t (*real)(int);
+    if (!real) real = RecompRealSym("notify_cancel", (void *)notify_cancel);
+    Backtrace("notify_cancel", token);
+    return real(token);
+}
+
 void abort(void) {
     static void (*real)(void);
     if (!real) real = RecompRealSym("abort", (void *)abort);
