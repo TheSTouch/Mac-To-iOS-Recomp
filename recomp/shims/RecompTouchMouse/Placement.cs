@@ -63,7 +63,7 @@ namespace Recomp
 
         /// Whether the game's UI is at a screen position (Input System pixels, origin bottom-left),
         /// wherever the mouse is: MouseOverUI asks the EventSystem, which answers for the mouse.
-        internal static bool UiAt(Vector2 screen)
+        public static bool UiAt(Vector2 screen)
         {
 #if RECOMP_UGUI
             var es = EventSystem.current;

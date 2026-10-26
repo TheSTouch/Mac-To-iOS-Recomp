@@ -4,6 +4,10 @@
 // except in games that opt into touch UI (the profile's "touch_ui"): there a touch
 // that starts on the game's UI is left to it, as a real touch (taps, drag-scrolling,
 // no hover), and the mouse stays where the last touch on the world left it.
+// A game mod can also claim the input (Claimed; Timberborn's Touchscreen mod in its game
+// scene): the mouse is then parked off screen and left alone, touches that begin on the
+// game's UI go to it as touches, and the others are the mod's (WorldTouches) to turn into
+// the game's world input itself.
 //
 //   1 finger: tap = left click, drag = left drag
 //   2 fingers: drag = middle drag, pinch = scroll wheel, quick tap = right click
@@ -31,7 +35,6 @@ namespace Recomp
         const float MoveThreshold = 12f;      // pixels before a gesture counts as a drag
         const float TapSeconds = 0.3f;
         const float ScrollPerPixel = 0.5f;    // pinch spread change -> scroll units
-        const int PenId = -1;                 // the pencil's slot among the touches (touch ids are positive)
         const int ProbeFrames = 2;            // while placing: frames the mouse sits on a new touch before the game's UI is asked
 
         enum Mode { None, Pending, Left, Multi, Probe, Aim }
@@ -39,7 +42,7 @@ namespace Recomp
         static Mouse _mouse;
         static readonly Dictionary<int, Vector2> Touches = new Dictionary<int, Vector2>();
         static readonly HashSet<int> UiTouches = new HashSet<int>();  // touch UI: touches left to the game's UI
-        static bool _touchUi;
+        static bool _touchUi, _claimed, _park;
 
         [Serializable]
         class Config { public bool touchUi; }
@@ -64,6 +67,33 @@ namespace Recomp
         static Vector2 _aim;
         static bool _hasAim, _restoreAim;
         static int _restoreWait, _probeFrames, _placeIn;
+
+        /// A game mod drives the game's world input itself: no mouse (parked off screen, no
+        /// buttons), touches on the game's UI stay touches, the rest are WorldTouches. Key buttons
+        /// and the on-screen keyboard keep working. False (menus, other games): the mouse as usual.
+        public static bool Claimed
+        {
+            get => _claimed;
+            set
+            {
+                if (value == _claimed) return;
+                _claimed = value;
+                Touches.Clear();
+                UiTouches.Clear();
+                _mode = Mode.None;
+                _buttons = 0;
+                _tapPending = _releaseNextFrame = _restoreAim = false;
+                _placeIn = 0;
+                _park = value;
+                Debug.Log("[recomp] input " + (value ? "claimed by a game mod: no mouse, touches on the UI stay touches" : "released: touches drive the mouse"));
+            }
+        }
+
+        /// While Claimed: the touches on the world (not on the game's UI or a key button), by id,
+        /// at their latest position (Input System pixels, origin bottom-left). The pencil is PenId.
+        public static IReadOnlyDictionary<int, Vector2> WorldTouches => Touches;
+
+        public const int PenId = -1;          // the pencil's slot among the touches (touch ids are positive)
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         public static void Install()
@@ -103,12 +133,14 @@ namespace Recomp
                     _sawPen = true;
                     Debug.Log("[recomp] first pencil event");
                 }
-                eventPtr.handled = true;
                 var down = (pen->buttons & (1 << (int)PenButton.Tip)) != 0;
-                if (down || _penDown)
-                    OnPointer(PenId, !down ? UnityEngine.InputSystem.TouchPhase.Ended
-                        : _penDown ? UnityEngine.InputSystem.TouchPhase.Moved : UnityEngine.InputSystem.TouchPhase.Began, pen->position);
+                var penPhase = !down ? UnityEngine.InputSystem.TouchPhase.Ended
+                    : _penDown ? UnityEngine.InputSystem.TouchPhase.Moved : UnityEngine.InputSystem.TouchPhase.Began;
+                var wasDown = _penDown;
                 _penDown = down;
+                if ((down || wasDown) && _claimed && ToUi(PenId, penPhase, pen->position)) return;
+                eventPtr.handled = true;
+                if (down || wasDown) OnPointer(PenId, penPhase, pen->position);
                 return;
             }
             if (!(device is Touchscreen) || stateEvent->stateFormat != TouchState.Format) return;
@@ -118,7 +150,7 @@ namespace Recomp
                 _sawTouch = true;
                 Debug.Log("[recomp] first touch received");
             }
-            if (_touchUi && ToUi(touch->touchId, touch->phase, touch->position)) return;
+            if ((_touchUi || _claimed) && ToUi(touch->touchId, touch->phase, touch->position)) return;
             eventPtr.handled = true;
             OnPointer(touch->touchId, touch->phase, touch->position);
         }
@@ -193,6 +225,17 @@ namespace Recomp
             KeyButtons.Update(now);
             SoftKeyboard.Update(now);
             TouchPad.Update();
+            if (_claimed)
+            {
+                // The game mod reads WorldTouches; the mouse leaves the screen once, so nothing
+                // under its last spot stays hovered, and then gets no state at all.
+                if (_park)
+                {
+                    _park = false;
+                    InputSystem.QueueStateEvent(_mouse, new MouseState { position = new Vector2(-10000f, -10000f) });
+                }
+                return;
+            }
             var n = Touches.Count;
             var center = Vector2.zero;
             foreach (var p in Touches.Values) center += p;
