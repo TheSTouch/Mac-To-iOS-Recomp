@@ -229,4 +229,6 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
   detail, mods, save sync rules, the Steam license check, debugging on the device and building the app.
 - **Contributing:** this repository is public. Never commit game files or personal details; see
   [Contributing](docs/TECHNICAL.md#contributing) for the commit guard.
-- **License:** MIT, see [LICENSE](LICENSE). It covers this tool only, not the games you port.
+- **License:** [PolyForm Noncommercial 1.0.0](LICENSE): free for personal, hobby, research and other
+  noncommercial use; selling it or using it in a commercial product is not allowed. It covers this
+  tool only, not the games you port. Versions up to v0.3.0 were released under MIT.
