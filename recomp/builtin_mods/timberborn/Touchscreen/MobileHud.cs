@@ -41,10 +41,10 @@ namespace Recomp.Touchscreen
 {
     public class MobileHud : IPostLoadableSingleton, IUpdatableSingleton
     {
-        const float ColumnScale = 1.6f, TopBarScale = 1.45f, ColonyScale = 1.3f, ViewScale = 1.6f;
+        const float ColumnScale = 1.6f, TopBarScale = 1.45f, ColonyScale = 1.3f, ViewScale = 1.3f;
         const float ColumnWidth = 62f, ColumnGap = 6f;
         const float StripHeight = 80f, ColonyTabWidth = 130f, ViewTabWidth = 88f, Gap = 8f;
-        const float OverlayButtonsScale = 1.5f;
+        const float OverlayButtonsScale = 1.3f;
         const float BelowStrip = 150f;          // top of the View drawer until the block above it is laid out
         const float RailButton = 76f, RailIcon = 44f, RailGap = 6f;
         const float AwayFromIsland = 1f / 3f;  // the share of the safe area's side margin kept away from the island
@@ -65,6 +65,7 @@ namespace Recomp.Touchscreen
         Button _colonyTab, _viewTab;
         Type _nineSliceButton, _nineSlice;
         Rect _safe;
+        string _loggedView;
         ScreenOrientation _orientation;
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
         Vector2 _panelSize;
@@ -470,6 +471,33 @@ namespace Recomp.Touchscreen
             var width = district?.layout.width ?? 0f;
             if (hours != null) FitWidth(hours, width);
             if (levels != null) FitWidth(levels, width);
+            LogView();
+        }
+
+        // Where each piece ended up, on screen (panel units, after scaling), when that changes: the
+        // log shows the layout without a screenshot.
+        void LogView()
+        {
+            var parts = new List<string>();
+            void Add(string what, VisualElement e)
+            {
+                if (e == null) { parts.Add(what + " missing"); return; }
+                var r = e.worldBound;
+                parts.Add($"{what} [{r.xMin:0},{r.yMin:0} {r.width:0}x{r.height:0}" + (e.resolvedStyle.display == DisplayStyle.None ? " hidden" : "") + "]");
+            }
+            Add("time block", _timeBlock);
+            Add("clock", _clock);
+            Add("speed", _speedRow);
+            Add("date", _date);
+            Add("weather", _timeColumn.Q("WeatherPanel"));
+            Add("view tab", _viewTab);
+            Add("drawer", _viewDrawer);
+            foreach (var child in _viewDrawer.Children())
+                Add("drawer:" + (string.IsNullOrEmpty(child.name) ? child.GetType().Name + "." + string.Join(".", child.GetClasses()) : child.name), child);
+            var line = string.Join("; ", parts);
+            if (line == _loggedView) return;
+            _loggedView = line;
+            Debug.Log("[Touchscreen] view layout: " + line);
         }
 
         // Scaled about its top centre to a width (its parent centres it), leaving room under it for
