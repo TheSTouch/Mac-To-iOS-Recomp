@@ -23,5 +23,13 @@
       "ScalingSolution": "MetalFX",
       "ScreenPercentage": "75"
     }
+  },
+  "iphone": {
+    "game_user_settings_ini": {
+      "/Script/Hk_project.HKGameUserSettings": {
+        "ScalingSolution": "MetalFX",
+        "ScreenPercentage": "50"
+      }
+    }
   }
 }
