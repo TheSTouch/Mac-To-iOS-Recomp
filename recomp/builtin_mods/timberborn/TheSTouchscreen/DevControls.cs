@@ -37,6 +37,7 @@ namespace Recomp.TheSTouchscreen
         readonly DevModeManager _devModeManager;
         VisualElement _root, _modal, _frame, _panel, _keyButton;
         float _nextCheck;
+        bool _missingLogged;
 
         public DevControls(EventBus eventBus, DevModeManager devModeManager)
         {
@@ -58,6 +59,7 @@ namespace Recomp.TheSTouchscreen
             KeyButtons.AddAction(KeyLabel, Toggle, () => _devMode);
             BuildModal();
             _current = this;
+            Adopt();  // now, not on the first Show: the game shows its panel whenever developer mode turns on
             Debug.Log("[TheSTouchscreen] dev controls: bug key above the island while developer mode is on");
         }
 
@@ -135,14 +137,16 @@ namespace Recomp.TheSTouchscreen
             _root.Add(_modal);
         }
 
-        // The game's panel into the frame, once it exists (DevPanel adds it to the bottom-left slot).
+        // The game's panel into the frame (DevPanel.Load adds it to the bottom-left slot, before
+        // PostLoad; UpdateSingleton tries again if it was not there).
         void Adopt()
         {
             if (_panel != null && _panel.parent == _frame) return;
             _panel = _root.Q("DevPanel");
             if (_panel == null)
             {
-                Debug.Log("[TheSTouchscreen] dev controls: the game's DevPanel is not there yet");
+                if (!_missingLogged) Debug.Log("[TheSTouchscreen] dev controls: the game's DevPanel is not there yet");
+                _missingLogged = true;
                 return;
             }
             CarryStyles(_panel, _frame);
@@ -159,6 +163,7 @@ namespace Recomp.TheSTouchscreen
             var filter = _panel.Q("DevPanelFilter");
             if (content != null)
             {
+                content.style.display = DisplayStyle.Flex;
                 content.style.flexGrow = 1f;
                 content.style.width = StyleKeyword.Auto;
                 content.style.maxHeight = StyleKeyword.None;
@@ -186,6 +191,7 @@ namespace Recomp.TheSTouchscreen
                     label.style.marginTop = label.style.marginBottom = Gap / 2f;
                 }
             }
+            _panel.Query(className: "dev-panel-button").ForEach(StyleRow);
             Debug.Log("[TheSTouchscreen] dev controls: the game's panel moved into the modal");
         }
 
@@ -195,6 +201,7 @@ namespace Recomp.TheSTouchscreen
             _nextCheck = Time.unscaledTime + 0.5f;
             // The content stays shown (the game folds it from its hidden title button), and the
             // rows are styled (the ones there before the panel moved; CreateRowPatch does the others).
+            Adopt();
             if (_panel != null && _panel.parent == _frame)
             {
                 var content = _panel.Q("DevPanelContent");
