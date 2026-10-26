@@ -349,9 +349,9 @@ namespace Recomp.Touchscreen
             SweepColony();
         }
 
-        // The port's Esc and Dev keys (Recomp.KeyButtons, their own overlay panel) drawn as the game's
-        // buttons: its button-game image (green, gold border, rounded corners), nine-sliced as the
-        // game's CommonStyle.uss slices it, and its yellow text.
+        // The port's Esc and Dev keys (Recomp.KeyButtons, their own overlay panel) framed like the tabs
+        // and drawers: the game's square-large--green image (green, gold border, rounded corners),
+        // nine-sliced as its CommonStyle.uss slices it, and its yellow text.
         void StyleKeys()
         {
             if (_keysStyled) return;
@@ -360,12 +360,12 @@ namespace Recomp.Touchscreen
                 if (doc.name == "RecompOverlay") overlay = doc;
             var keys = overlay?.rootVisualElement?.Query<Button>().Where(b => b.name.StartsWith("recomp-key-", StringComparison.Ordinal)).ToList();
             if (keys == null || keys.Count == 0) return;
-            var image = PlacementButtons.Image("UI/Images/Buttons/button-game");
+            var image = PlacementButtons.Image("UI/Images/Backgrounds/bg-square-large-2");
             foreach (var b in keys)
             {
                 var s = b.style;
                 s.backgroundImage = image;
-                s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 24;
+                s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 16;
                 s.unitySliceScale = 0.5f;
                 s.backgroundColor = Color.clear;
                 s.borderTopWidth = s.borderBottomWidth = s.borderLeftWidth = s.borderRightWidth = 0f;
@@ -916,7 +916,8 @@ namespace Recomp.Touchscreen
 
         Button Tab(string name, string icon, string caption, float width, Action clicked)
         {
-            var tab = Create<Button>(_nineSliceButton, "button-game");
+            // The drawers' frame (green, gold border, rounded): button-game has no green fill.
+            var tab = Create<Button>(_nineSliceButton, "square-large--green");
             tab.name = name;
             tab.clicked += clicked;
             var s = tab.style;
