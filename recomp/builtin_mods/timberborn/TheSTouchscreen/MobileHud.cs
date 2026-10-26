@@ -335,8 +335,8 @@ namespace Recomp.TheSTouchscreen
             });
         }
 
-        // A Colony tab at the start of the strip; the whole top-left column goes into the drawer
-        // under it. Both live in the slot, which the batch control window hides.
+        // A Colony tab at the start of the strip, in the top-left slot (which the batch control window
+        // hides); the whole top-left column goes into the drawer under it (PlaceColonyDrawer).
         void LayOutColony()
         {
             _colonyDrawer = Drawer("TheSTouchscreenColonyDrawer");
@@ -346,10 +346,10 @@ namespace Recomp.TheSTouchscreen
             _colonyTab = Tab("TheSTouchscreenColony", "UI/Images/Game/ico-beavers", "Colony", ColonyTabWidth, () => Toggle(_colonyDrawer, _colonyTab));
             _topLeft.style.flexDirection = FlexDirection.Row;
             _topLeft.style.alignItems = Align.FlexStart;
-            // Drawn after the goods counters' slot, so the drawer covers a counter's open breakdown.
-            if (_topBar != null && _topLeft.parent == _topBar.parent) _topLeft.PlaceInFront(_topBar);
             _uiLayout.AddTopLeft(_colonyTab, int.MinValue);
-            _uiLayout.AddTopLeft(_colonyDrawer, int.MaxValue);
+            // Among the absolute items, drawn after the goods counters, so the open drawer covers
+            // an open breakdown (the slots are laid out in a row: reordering them moved the tab).
+            _uiLayout.AddAbsoluteItem(_colonyDrawer);
             SweepColony();
         }
 
@@ -386,8 +386,14 @@ namespace Recomp.TheSTouchscreen
         // down as an open breakdown grew during play.
         void PlaceColonyDrawer()
         {
-            if (_colonyDrawer == null || !(_colonyTab.layout.height > 0f)) return;
-            var top = _colonyTab.layout.yMax + Gap;
+            if (_colonyDrawer?.parent == null || !(_colonyTab.layout.height > 0f)) return;
+            // Shown with the tab's slot (the batch control window hides it).
+            if (_topLeft.resolvedStyle.display == DisplayStyle.None && IsOpen(_colonyDrawer)) Open(_colonyDrawer, _colonyTab, false);
+            var tab = _colonyTab.worldBound;
+            var origin = _colonyDrawer.parent.worldBound;
+            var left = tab.xMin - origin.xMin;
+            var top = tab.yMax - origin.yMin + Gap;
+            if (_colonyDrawer.style.left != left) _colonyDrawer.style.left = left;
             if (_colonyDrawer.style.top != top) _colonyDrawer.style.top = top;
         }
 
