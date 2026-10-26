@@ -100,7 +100,11 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
         NSString *dir = info[@"RecompConfigDir"];
         NSDictionary *files = info[@"RecompIniOverrides"];
-        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+        // RECOMP_IDIOM=phone in the environment applies the phone set elsewhere,
+        // e.g. on a Mac running the iOS build, to measure what an iPhone gets.
+        const char *idiom = getenv("RECOMP_IDIOM");
+        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ||
+                     (idiom && !strcmp(idiom, "phone"));
         NSDictionary *phoneFiles = phone ? info[@"RecompIniOverridesPhone"] : nil;
         if (!dir) return;
         dir = [NSHomeDirectory() stringByAppendingPathComponent:dir];
