@@ -20,7 +20,8 @@
 //   down to the screen's bottom edge (the home indicator is in the middle).
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
 //   narrow columns.
-// - Colony drawer: the well-being line, population, notifications (log height capped) and
+// - Colony drawer, just under the Colony tab and over any open goods breakdown: the well-being
+//   line, population, notifications (log height capped) and
 //   pinned levers. View drawer: the overlay buttons centred at the top, working hours and the
 //   visible levels scaled to the district switcher's width, and the switcher last (its list
 //   opens under it and the drawer grows), a little taller, its arrows as big as working hours'
@@ -345,6 +346,8 @@ namespace Recomp.TheSTouchscreen
             _colonyTab = Tab("TheSTouchscreenColony", "UI/Images/Game/ico-beavers", "Colony", ColonyTabWidth, () => Toggle(_colonyDrawer, _colonyTab));
             _topLeft.style.flexDirection = FlexDirection.Row;
             _topLeft.style.alignItems = Align.FlexStart;
+            // Drawn after the goods counters' slot, so the drawer covers a counter's open breakdown.
+            if (_topBar != null && _topLeft.parent == _topBar.parent) _topLeft.PlaceInFront(_topBar);
             _uiLayout.AddTopLeft(_colonyTab, int.MinValue);
             _uiLayout.AddTopLeft(_colonyDrawer, int.MaxValue);
             SweepColony();
@@ -378,20 +381,14 @@ namespace Recomp.TheSTouchscreen
             Debug.Log("[TheSTouchscreen] key buttons drawn as the game's buttons: " + _styledKeys.Count);
         }
 
-        // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels
-        // and arrows (drawn 1.45x), which it overlapped at the strip's height.
+        // The Colony drawer just under the Colony tab, whatever the goods counters show beside it: under
+        // the lowest of them, it overlapped the tab while their breakdowns were closed and was pushed
+        // down as an open breakdown grew during play.
         void PlaceColonyDrawer()
         {
-            if (_colonyDrawer == null || _topBar == null) return;
-            var bottom = _topBar.worldBound.yMax;
-            _topBar.Query<VisualElement>().ForEach(e =>
-            {
-                if (e.resolvedStyle.display == DisplayStyle.None || !e.visible) return;
-                var r = e.worldBound;
-                if (r.height > 0f && r.width > 0f && r.yMax > bottom) bottom = r.yMax;
-            });
-            var top = bottom - _topLeft.worldBound.yMin + Gap;
-            if (top > 0f && _colonyDrawer.style.top != top) _colonyDrawer.style.top = top;
+            if (_colonyDrawer == null || !(_colonyTab.layout.height > 0f)) return;
+            var top = _colonyTab.layout.yMax + Gap;
+            if (_colonyDrawer.style.top != top) _colonyDrawer.style.top = top;
         }
 
         void SweepColony()
