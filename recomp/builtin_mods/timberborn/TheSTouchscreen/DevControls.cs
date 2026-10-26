@@ -9,9 +9,12 @@
 // about 33 pt tall with their favourite +/- squares beside them, scrolling. The game's title button
 // (which folded the list) is hidden and the list always shown. A tap on the backdrop closes it
 // too, and so does turning developer mode off.
+// The game recreates every row when a favourite is added or removed: each is styled as it is
+// created (CreateRowPatch), so no frame shows the game's own small rows.
 using System;
-using System.Collections.Generic;
+using HarmonyLib;
 using Timberborn.Debugging;
+using Timberborn.DebuggingUI;
 using Timberborn.SingletonSystem;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -24,13 +27,14 @@ namespace Recomp.TheSTouchscreen
         // Panel units (~0.54 pt each on an iPhone 17). A row's whole width is its touch target, so
         // 60 units (33 pt) is enough there; the +/- squares are as tall as the row, the close button 44 pt.
         const float RowHeight = 60f, FontSize = 22f, HeadingSize = 26f, TitleSize = 32f, CloseSize = 80f, Gap = 10f;
+        const string StyledClass = "thestouchscreen-dev-row";
         static readonly Color Yellow = new Color(0.95f, 0.87f, 0.6f);
 
         static bool _devMode;  // read by the key's visibility, which outlives this scene
+        static DevControls _current;
 
         readonly EventBus _eventBus;
         readonly DevModeManager _devModeManager;
-        readonly HashSet<VisualElement> _styled = new HashSet<VisualElement>();
         VisualElement _root, _modal, _frame, _panel, _keyButton;
         float _nextCheck;
 
@@ -53,10 +57,22 @@ namespace Recomp.TheSTouchscreen
             _eventBus.Register(this);
             KeyButtons.AddAction(KeyLabel, Toggle, () => _devMode);
             BuildModal();
+            _current = this;
             Debug.Log("[TheSTouchscreen] dev controls: bug key above the island while developer mode is on");
         }
 
-        public void Unload() => _devMode = false;
+        public void Unload()
+        {
+            _devMode = false;
+            if (_current == this) _current = null;
+        }
+
+        // A row the game has just created, styled if its panel is in the modal.
+        internal static void Created(VisualElement row)
+        {
+            var c = _current;
+            if (c != null && c._panel != null && c._panel.parent == c._frame) StyleRow(row);
+        }
 
         [OnEvent]
         public void OnDevModeToggled(DevModeToggledEvent devModeToggledEvent)
@@ -178,7 +194,7 @@ namespace Recomp.TheSTouchscreen
             if (_root == null || Time.unscaledTime < _nextCheck) return;
             _nextCheck = Time.unscaledTime + 0.5f;
             // The content stays shown (the game folds it from its hidden title button), and the
-            // game rebuilds the command rows when favourites change: style the new ones.
+            // rows are styled (the ones there before the panel moved; CreateRowPatch does the others).
             if (_panel != null && _panel.parent == _frame)
             {
                 var content = _panel.Q("DevPanelContent");
@@ -188,9 +204,10 @@ namespace Recomp.TheSTouchscreen
             if (_keyButton == null) DecorateKey();
         }
 
-        void StyleRow(VisualElement row)
+        static void StyleRow(VisualElement row)
         {
-            if (!_styled.Add(row)) return;
+            if (row.ClassListContains(StyledClass)) return;
+            row.AddToClassList(StyledClass);
             row.style.flexDirection = FlexDirection.Row;
             row.style.alignItems = Align.Center;
             row.style.marginBottom = Gap / 2f;
@@ -296,5 +313,12 @@ namespace Recomp.TheSTouchscreen
                 for (int i = 0; i < e.styleSheets.count; i++)
                     if (!to.styleSheets.Contains(e.styleSheets[i])) to.styleSheets.Add(e.styleSheets[i]);
         }
+    }
+
+    // DevPanel.CreateDevMethodButton (private) loads a row, adds it to its list and returns it.
+    [HarmonyPatch(typeof(DevPanel), "CreateDevMethodButton")]
+    static class CreateRowPatch
+    {
+        static void Postfix(VisualElement __result) => DevControls.Created(__result);
     }
 }
