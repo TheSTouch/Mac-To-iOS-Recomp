@@ -10,7 +10,8 @@
 // at that spot, so mouse menus stay reachable from the pad.
 //
 // Opt-in per game: the port's profile sets "touch_gamepad", which inject
-// writes to StreamingAssets/recomp.json.
+// writes to StreamingAssets/recomp.json. Sizes and positions are in layout
+// points, bigger on a phone and kept inside its safe area (see Layout).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -39,7 +40,9 @@ namespace Recomp
             public Vector2 At;       // points: x from the left (>0) or right (<0) edge, y from the bottom (>0) or top (<0) edge
             public float Radius;
             public GamepadButton Input;
+            public RectTransform Rect;
             public Image Image;
+            public Text Text;
             public bool Down;
         }
 
@@ -64,11 +67,12 @@ namespace Recomp
         static Gamepad _pad;
         static GameObject _canvas;
         static Sprite _circle;
+        static Rect _laidOut;    // the Layout.Area the canvas was last laid out for
         static readonly Stick Left = new Stick { Curve = 1.3f }, Right = new Stick { Curve = 1.8f };
         static readonly List<PadButton> Buttons = new List<PadButton>();
         static readonly Dictionary<int, Owner> Owners = new Dictionary<int, Owner>();
 
-        static float Unit => Screen.height / 834f;  // iPad points to pixels, as KeyButtons
+        static float Unit => Layout.Unit;
 
         public static void Install()
         {
@@ -107,8 +111,12 @@ namespace Recomp
         public static bool Visible => _visible;
         public static bool Owns(int touch) => Owners.ContainsKey(touch);
 
-        static Vector2 Place(Vector2 at) =>
-            new Vector2(at.x >= 0 ? at.x * Unit : Screen.width + at.x * Unit, at.y >= 0 ? at.y * Unit : Screen.height + at.y * Unit);
+        static Vector2 Place(Vector2 at)
+        {
+            var a = Layout.Area;
+            return new Vector2(at.x >= 0 ? a.xMin + at.x * Unit : a.xMax + at.x * Unit,
+                               at.y >= 0 ? a.yMin + at.y * Unit : a.yMax + at.y * Unit);
+        }
 
         /// A touch began while the pad is shown (screen pixels, origin bottom-left).
         public static void Begin(int touch, Vector2 pos, float now)
@@ -207,6 +215,7 @@ namespace Recomp
 
         static void Draw()
         {
+            if (Layout.Area != _laidOut) Relayout();
             foreach (var b in Buttons)
                 b.Image.color = new Color(1f, 1f, 1f, b.Down ? 0.4f : 0.12f);
             foreach (var s in new[] { Left, Right })
@@ -231,37 +240,53 @@ namespace Recomp
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             foreach (var b in Buttons)
             {
-                var rt = Circle(b.Name, Place(b.At), b.Radius * Unit, 0.12f, out b.Image);
+                b.Rect = Circle(b.Name, 0.12f, out b.Image);
                 var label = new GameObject("label", typeof(RectTransform));
-                label.transform.SetParent(rt, false);
+                label.transform.SetParent(b.Rect, false);
                 var lr = (RectTransform)label.transform;
                 lr.anchorMin = Vector2.zero;
                 lr.anchorMax = Vector2.one;
                 lr.offsetMin = lr.offsetMax = Vector2.zero;
-                var text = label.AddComponent<Text>();
-                text.font = font;
-                text.text = b.Name;
-                text.fontSize = Mathf.RoundToInt((b.Radius > 26 ? 20 : 13) * Unit);
-                text.alignment = TextAnchor.MiddleCenter;
-                text.color = new Color(1f, 1f, 1f, 0.75f);
-                text.raycastTarget = false;
+                b.Text = label.AddComponent<Text>();
+                b.Text.font = font;
+                b.Text.text = b.Name;
+                b.Text.alignment = TextAnchor.MiddleCenter;
+                b.Text.color = new Color(1f, 1f, 1f, 0.75f);
+                b.Text.raycastTarget = false;
             }
             foreach (var s in new[] { Left, Right })
             {
-                s.Base = Circle("stick", Vector2.zero, StickTravel * Unit, 0.06f, out _);
-                s.Knob = Circle("knob", Vector2.zero, 28 * Unit, 0.35f, out _);
+                s.Base = Circle("stick", 0.06f, out _);
+                s.Knob = Circle("knob", 0.35f, out _);
             }
+            Relayout();
         }
 
-        static RectTransform Circle(string name, Vector2 center, float radius, float alpha, out Image image)
+        // Sizes and positions for the current screen: they change with the render size and the safe area.
+        static void Relayout()
+        {
+            _laidOut = Layout.Area;
+            foreach (var b in Buttons)
+            {
+                b.Rect.anchoredPosition = Place(b.At);
+                b.Rect.sizeDelta = Vector2.one * 2 * b.Radius * Unit;
+                b.Text.fontSize = Mathf.RoundToInt((b.Radius > 26 ? 20 : 13) * Unit);
+            }
+            foreach (var s in new[] { Left, Right })
+            {
+                s.Base.sizeDelta = Vector2.one * 2 * StickTravel * Unit;
+                s.Knob.sizeDelta = Vector2.one * 2 * 28 * Unit;
+            }
+            Debug.Log($"[recomp] touch gamepad laid out for {Screen.width}x{Screen.height}, area {_laidOut}, {Unit:0.00} px per point");
+        }
+
+        static RectTransform Circle(string name, float alpha, out Image image)
         {
             var go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(_canvas.transform, false);
             var rt = (RectTransform)go.transform;
             rt.anchorMin = rt.anchorMax = Vector2.zero;
             rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.anchoredPosition = center;
-            rt.sizeDelta = new Vector2(2 * radius, 2 * radius);
             image = go.AddComponent<Image>();
             image.sprite = _circle;
             image.color = new Color(1f, 1f, 1f, alpha);

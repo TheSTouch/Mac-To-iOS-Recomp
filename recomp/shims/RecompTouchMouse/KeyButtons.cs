@@ -12,6 +12,7 @@
 // Games built on uGUI alone (Valheim) have no theme to borrow: they get the same
 // buttons as an overlay Canvas with Images and Texts, replaced by the UI Toolkit
 // ones if a theme turns up later.
+// On a phone the keys are sized in layout points and kept inside the safe area (see Layout).
 // The panel only draws: TouchMouse hit-tests touches against the buttons and
 // calls Press, so the keys do not depend on the game routing UI events to a
 // panel it does not know, and a tap on a button never becomes a mouse click.
@@ -33,7 +34,7 @@ namespace Recomp
 
         const int SortingOrder = 30000;
 
-        // Points (an iPad's 834-point-high screen): size, margin from the corner, gap between keys.
+        // Layout points (an iPad's 834-point-high screen, see Layout): size, margin from the corner, gap between keys.
         const float Width = 72, Height = 44, Margin = 16, Gap = 8;
 
         [Serializable]
@@ -48,6 +49,7 @@ namespace Recomp
             public Key[] Keys;
             public Button Button;
             public RectTransform CanvasButton;
+            public Text CanvasText;
         }
 
         static readonly List<KeyButton> Buttons = new List<KeyButton>();
@@ -55,6 +57,7 @@ namespace Recomp
         static UIDocument _overlay;
         static GameObject _canvas;          // uGUI stand-in while there is no UI Toolkit theme
         static float _nextCheck;
+        static Rect _laidOut;      // the Layout.Area the buttons were last laid out for (phones, and the uGUI overlay)
         static KeyButton _pressed;
         static int _pressFrames;   // 2: press this update, 1: release this update
 
@@ -137,6 +140,7 @@ namespace Recomp
             {
                 _nextCheck = now + CheckSeconds;
                 Attach();
+                if (Layout.Area != _laidOut) Relayout();
             }
         }
 
@@ -188,6 +192,7 @@ namespace Recomp
                 if (Buttons[i].Button == null) Buttons[i].Button = Create(Buttons[i].Label, i);
                 _overlay.rootVisualElement.Add(Buttons[i].Button);
             }
+            _laidOut = default;  // a phone sizes them once the panel has a layout
             Debug.Log("[recomp] key buttons added (theme from " + theme.name + "): " + Labels());
         }
 
@@ -205,16 +210,13 @@ namespace Recomp
             var canvas = _canvas.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = SortingOrder;
-            // Sized like the UI Toolkit buttons on an iPad.
-            var unit = Screen.height / 834f;
+            // Sized like the UI Toolkit buttons on an iPad (see Relayout).
             for (int i = 0; i < Buttons.Count; i++)
             {
                 var bg = new GameObject("recomp-key-" + Buttons[i].Label, typeof(RectTransform));
                 bg.transform.SetParent(_canvas.transform, false);
                 var rect = (RectTransform)bg.transform;
                 rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.zero;
-                rect.anchoredPosition = new Vector2(Margin, Bottom(i)) * unit;
-                rect.sizeDelta = new Vector2(Width, Height) * unit;
                 Buttons[i].CanvasButton = rect;
                 var image = bg.AddComponent<Image>();
                 image.color = new Color(0f, 0f, 0f, 0.35f);
@@ -225,15 +227,61 @@ namespace Recomp
                 lr.anchorMin = Vector2.zero;
                 lr.anchorMax = Vector2.one;
                 lr.offsetMin = lr.offsetMax = Vector2.zero;
-                var text = label.AddComponent<Text>();
+                var text = Buttons[i].CanvasText = label.AddComponent<Text>();
                 text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 text.text = Buttons[i].Label;
-                text.fontSize = Mathf.RoundToInt(18 * unit);
                 text.alignment = TextAnchor.MiddleCenter;
                 text.color = new Color(1f, 1f, 1f, 0.75f);
                 text.raycastTarget = false;
             }
+            Relayout();
             Debug.Log("[recomp] key buttons added (uGUI overlay): " + Labels());
+        }
+
+        // Sizes and positions for the current screen. The uGUI overlay is in screen pixels. The UI
+        // Toolkit buttons keep the fixed sizes of Create in the game's panel on an iPad; on a phone
+        // they get the overlay's sizes, converted to the panel's units.
+        static void Relayout()
+        {
+            var area = Layout.Area;
+            var unit = Layout.Unit;
+            if (_canvas != null)
+            {
+                for (int i = 0; i < Buttons.Count; i++)
+                {
+                    var b = Buttons[i];
+                    if (b.CanvasButton == null) continue;
+                    b.CanvasButton.anchoredPosition = area.min + new Vector2(Margin, Bottom(i)) * unit;
+                    b.CanvasButton.sizeDelta = new Vector2(Width, Height) * unit;
+                    b.CanvasText.fontSize = Mathf.RoundToInt(18 * unit);
+                }
+                _laidOut = area;
+                return;
+            }
+            if (!Layout.Phone)
+            {
+                _laidOut = area;
+                return;
+            }
+            var root = _overlay != null ? _overlay.rootVisualElement.layout : default;
+            if (root.height <= 0f || root.width <= 0f) return;  // not laid out yet: next check
+            var k = unit * root.height / Screen.height;          // panel units per layout point
+            var left = area.xMin * root.width / Screen.width;
+            var bottom = area.yMin * root.height / Screen.height;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                var b = Buttons[i].Button;
+                if (b == null) continue;
+                var s = b.style;
+                s.left = left + Margin * k;
+                s.bottom = bottom + Bottom(i) * k;
+                s.width = Width * k;
+                s.height = Height * k;
+                s.fontSize = 18 * k;
+                s.borderTopLeftRadius = s.borderTopRightRadius = s.borderBottomLeftRadius = s.borderBottomRightRadius = 10 * k;
+            }
+            _laidOut = area;
+            Debug.Log($"[recomp] key buttons laid out for a phone: area {area}, panel {root.width}x{root.height}");
         }
 
         static Button Create(string label, int index)
