@@ -1,7 +1,7 @@
 {
   "name": "Valheim",
   "tested": "playable on iPad (1.0.20, Steam): local worlds, touch gamepad.",
-  "tested_iphone": "playable on iPhone 17 (1.0.20, Steam), touch gamepad.",
+  "tested_iphone": "playable on iPhone 17 (1.0.20, Steam), touch gamepad, landscape. Portrait is built but not yet tested on the device.",
   "steam_app_id": 892970,
   "when_assembly": "assembly_valheim.dll",
   "touch_gamepad": true,

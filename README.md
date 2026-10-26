@@ -205,6 +205,15 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `steam_app_id` | the game's Steam app id, for the [Steam license check](#steam-license-check) (found from the Steam library otherwise) |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
+  | `iphone` | settings applied only on an iPhone, over the generic phone defaults: `render_scale`, `target_frame_rate`, `quality_level`, `player_prefs`, `static_fields`, `portrait`, `portrait_horizontal_fov` (listed in `PHONE_DEFAULTS`, `recomp/unity_ios.py`) |
+
+  Ports play in landscape. A game can opt into portrait on the iPhone with
+  `"iphone": {"portrait": true}`: the phone then also plays upright (home indicator down, never
+  upside down) and rotates with it, mid-game included. The iPad always stays landscape, through
+  its own Info.plist key and again at runtime. Upright, the render size follows the orientation,
+  and each perspective camera that draws to the screen shows as many degrees across as the game
+  shows tall in landscape. `"portrait_horizontal_fov": <degrees>` picks another width. Valheim
+  opts in; its UI fits the narrow screen through `static_fields` (GuiScaler's minimum width).
 
 Debugging on the device: launch with
 `xcrun devicectl device process launch --console --terminate-existing --device <UDID> <bundle id>`
