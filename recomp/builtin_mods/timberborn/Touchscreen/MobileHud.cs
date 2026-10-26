@@ -15,7 +15,8 @@
 //   width), date and weather, with the day clock left of it, as tall as the column.
 // - The bottom bar becomes a column on the left edge, drawn 1.6 times larger and scrolled by
 //   dragging: the general tools (Select ... Priority), the 15 building groups and Options. An
-//   open group's tools go into a second column beside it, both the full height under the strip.
+//   open group's tools go into a second column beside it, both the full height under the strip,
+//   down to the screen's bottom edge (the home indicator is in the middle).
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
 //   narrow columns.
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
@@ -194,8 +195,10 @@ namespace Recomp.Touchscreen
             s.bottom = safe.yMin * ky;
             if (_column != null)
             {
-                // From under the strip to the bottom of the safe area, in the columns' own (unscaled) units.
-                var height = root.height - (Screen.height - safe.yMax) * ky - safe.yMin * ky;
+                // From under the strip to a gap above the screen's bottom edge, in the columns' own
+                // (unscaled) units: past the safe area's bottom margin, which is for the home
+                // indicator in the middle, not the left edge.
+                var height = root.height - (Screen.height - safe.yMax) * ky;
                 var visible = Mathf.Max(ColumnWidth, height - (StripHeight + Gap) - Gap) / ColumnScale;
                 _column.style.height = _columnHeight = visible;
             }
