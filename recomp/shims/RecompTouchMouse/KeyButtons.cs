@@ -4,7 +4,10 @@
 // it, each a label and the keys it holds down together (recomp.json "touchKeys"), e.g. a
 // "Dev" key for a game's developer mode shortcut. The keys are pressed on the keyboard
 // device the game's own bindings resolve to: games often look a control up once by path
-// (first match wins), so pressing them on an extra keyboard would go unnoticed.
+// (first match wins), so pressing them on an extra keyboard would go unnoticed. A key with
+// modifiers presses them a frame before its last key, as fingers do: games that check the
+// modifiers when the key's event arrives read the keyboard as it was before that event, and
+// Timberborn took Alt+Shift+Z pressed all at once for a bare Z (turn the camera 90°).
 //
 // They live in their own UI Toolkit panel sorted above everything the game draws,
 // styled with the game's own theme (needed for text to render). UIDocument is an
@@ -73,7 +76,7 @@ namespace Recomp
         static float _nextCheck;
         static Rect _laidOut;      // the Layout.Area the buttons were last laid out for (phones, and the uGUI overlay)
         static KeyButton _pressed;
-        static int _pressFrames;   // 2: press this update, 1: release this update
+        static int _pressFrames;   // 3: the modifiers down this update, 2: all the keys, 1: release
         static bool _right;        // in the bottom-right corner instead of the bottom-left
         static bool _island;       // beside the Dynamic Island on a phone held sideways
         static ScreenOrientation _laidOutOrientation;
@@ -149,7 +152,7 @@ namespace Recomp
             _keyboard = InputSystem.FindControl("/Keyboard/" + Keyboard.current?[b.Keys[b.Keys.Length - 1]].name)?.device as Keyboard ?? Keyboard.current;
             if (_keyboard == null) return;
             _pressed = b;
-            _pressFrames = 2;
+            _pressFrames = b.Keys.Length > 1 ? 3 : 2;
             Debug.Log("[recomp] " + b.Label + " pressed on " + _keyboard.name);
         }
 
@@ -187,7 +190,9 @@ namespace Recomp
         {
             if (_pressFrames > 0)
             {
-                var state = _pressFrames == 2 ? new KeyboardState(_pressed.Keys) : new KeyboardState();
+                var keys = _pressed.Keys;
+                var state = _pressFrames == 3 ? new KeyboardState(Array.FindAll(keys, k => k != keys[keys.Length - 1]))
+                    : _pressFrames == 2 ? new KeyboardState(keys) : new KeyboardState();
                 InputSystem.QueueStateEvent(_keyboard, state);
                 _pressFrames--;
             }
