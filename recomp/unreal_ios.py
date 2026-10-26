@@ -1,7 +1,7 @@
-"""Port a native arm64 Unreal Engine 4 Mac game to iPadOS by retargeting its binaries.
+"""Port a native arm64 Unreal Engine 4 Mac game to iOS (iPhone and iPad) by retargeting its binaries.
 
-The game's machine code already runs on an Apple Silicon iPad; what changes is
-around it:
+The game's machine code already runs on an Apple Silicon iPhone or iPad; what
+changes is around it:
 
   prepare   retarget every Mach-O in the bundle to iOS (macho.py), binding
             imports iOS lacks to shims built from recomp/native: AppKit on
@@ -395,7 +395,7 @@ def info_plist(game):
         "UILaunchScreen": {"UIColorName": "", "UIImageRespectsSafeAreaInsets": False},
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
         "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"],
-        "UIDeviceFamily": [2],
+        "UIDeviceFamily": [1, 2],
         "UIApplicationSupportsIndirectInputEvents": True,
         "UIFileSharingEnabled": True,
         "LSSupportsOpeningDocumentsInPlace": True,
@@ -458,7 +458,7 @@ def xcode(game, work, team, bundle_id):
     settings = {
         "INFOPLIST_FILE": "Info.plist", "CODE_SIGN_ENTITLEMENTS": "App.entitlements",
         "PRODUCT_BUNDLE_IDENTIFIER": bundle_id, "DEVELOPMENT_TEAM": team, "PRODUCT_NAME": game.slug,
-        "IPHONEOS_DEPLOYMENT_TARGET": MIN_IOS, "TARGETED_DEVICE_FAMILY": "2", "ENABLE_USER_SCRIPT_SANDBOXING": "NO",
+        "IPHONEOS_DEPLOYMENT_TARGET": MIN_IOS, "TARGETED_DEVICE_FAMILY": "1,2", "ENABLE_USER_SCRIPT_SANDBOXING": "NO",
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon" if icns else "", "ENABLE_BITCODE": "NO",
         "DEAD_CODE_STRIPPING": "NO", "STRIP_INSTALLED_PRODUCT": "NO", "COPY_PHASE_STRIP": "NO",
         # No dSYM: dsymutil would read the placeholder while the script replaces it.
