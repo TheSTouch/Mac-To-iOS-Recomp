@@ -1,6 +1,6 @@
 // macOS display services games call: Quartz Display Services (CGDisplay*,
 // cursor control), CVDisplayLink, and the IOKit/Kext queries iOS lacks.
-// There is one display: the iPad screen, sized in points like NSScreen.
+// There is one display: the device's screen, sized in points like NSScreen.
 #import "RecompAppKit.h"
 #import <mach/mach_time.h>
 
@@ -28,9 +28,10 @@ static NSArray *Modes(void) {
         // Native pixels first, then the point size and steps between: windows larger
         // than the screen in points are scaled down to fit, so each one is a render resolution.
         // Render targets at full native resolution take a lot of shared memory:
-        // devices with 8 GB or less stop at 1.5x the point size.
+        // devices with 8 GB or less stop at 1.5x the point size, which is itself
+        // a mode (a 3x phone would otherwise go from 3x and 2.25x straight to 1x).
         CGFloat cap = NSProcessInfo.processInfo.physicalMemory <= (8.5 * (1ULL << 30)) ? MIN(scale, 1.5) : scale;
-        for (NSNumber *f in @[@(scale), @(scale * 0.75), @1.0, @0.75]) {
+        for (NSNumber *f in @[@(scale), @(scale * 0.75), @(cap), @1.0, @0.75]) {
             CGFloat k = f.doubleValue;
             if (k > cap + 0.01) continue;
             RecompDisplayMode *m = [RecompDisplayMode new];
@@ -64,11 +65,13 @@ CGRect CGDisplayBounds(CGDirectDisplayID d) {
 size_t CGDisplayPixelsWide(CGDirectDisplayID d) { return (size_t)RecompScreenSize().width; }
 size_t CGDisplayPixelsHigh(CGDirectDisplayID d) { return (size_t)RecompScreenSize().height; }
 
-// Physical size in millimetres, from the screen's native pixels (264 ppi on iPad Pro).
+// Physical size in millimetres, from the screen's native pixels. iOS does not say
+// its pixel density: 264 ppi is an iPad Pro's, 460 most current iPhones'.
 CGSize CGDisplayScreenSize(CGDirectDisplayID d) {
     CGSize s = RecompScreenSize();
     CGFloat px = RecompScreenScale();
-    return CGSizeMake(s.width * px / 264.0 * 25.4, s.height * px / 264.0 * 25.4);
+    CGFloat ppi = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ? 460 : 264;
+    return CGSizeMake(s.width * px / ppi * 25.4, s.height * px / ppi * 25.4);
 }
 uint32_t CGDisplayModelNumber(CGDirectDisplayID d) { return 0; }
 uint32_t CGDisplayVendorNumber(CGDirectDisplayID d) { return 0x610; } // Apple

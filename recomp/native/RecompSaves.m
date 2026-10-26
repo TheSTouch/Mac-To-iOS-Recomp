@@ -257,7 +257,8 @@ static NSTimeInterval CloudTime(NSString *rel) {
     return t;
 }
 
-// "Saves/x/a.timber" -> "Saves/x/a.conflict-iPad-20261025-1300.timber", unused on both sides.
+// "Saves/x/a.timber" -> "Saves/x/a.conflict-iPhone-20261025-1300.timber", unused on both sides; the
+// device part is UIDevice.name, which since iOS 16 is only the kind of device (iPhone, iPad).
 static NSString *ConflictName(NSString *rel, NSTimeInterval mtime, NSDictionary *local, NSDictionary *cloud) {
     NSString *dir = rel.stringByDeletingLastPathComponent, *name = rel.lastPathComponent;
     NSString *ext = name.pathExtension.length ? [@"." stringByAppendingString:name.pathExtension] : @"";

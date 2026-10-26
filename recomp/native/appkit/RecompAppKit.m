@@ -478,7 +478,7 @@ RECOMP_FORWARDING
 static NSInteger gNextWindowNumber = 1;
 
 // Holds a window's content on screen: bounds in window points, scaled to
-// fit the iPad screen (aspect-fit, centred) when the window is a different size.
+// fit the device's screen (aspect-fit, centred) when the window is a different size.
 @interface RecompWindowView : UIView
 @property (assign) RNSWindow *owner;
 @end
@@ -681,7 +681,7 @@ static NSInteger gNextWindowNumber = 1;
 - (void)zoom:(id)s {}
 - (void)performZoom:(id)s {}
 - (void)toggleFullScreen:(id)s {
-    // Every window is already full screen on the iPad; report the transition.
+    // Every window is already full screen on iOS; report the transition.
     [self recompPost:@"NSWindowWillEnterFullScreenNotification" selector:@selector(windowWillEnterFullScreen:)];
     [self recompPost:@"NSWindowDidEnterFullScreenNotification" selector:@selector(windowDidEnterFullScreen:)];
 }

@@ -3,7 +3,7 @@
 //    it becomes Shared, which on unified memory needs no synchronisation, so
 //    -didModifyRange: and the blit encoder's -synchronize* calls become no-ops;
 //  - Mac GPU families and feature sets are reported as supported, since the
-//    game checks for them and an M-series iPad has the same GPU as the Mac;
+//    game checks for them and an Apple GPU on iOS is of the same families as the Mac's;
 //  - Mac-only device and layer properties get the values an Apple Silicon Mac reports;
 //  - metallibs from older tools (file format 2.3, e.g. Bink's) are refused while
 //    their header says macOS; with that flag cleared the same code loads and runs;

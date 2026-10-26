@@ -56,7 +56,7 @@ static NSDictionary *Props(io_object_t o) {
                   @"vendor-id": [NSData dataWithBytes:&vendor length:4], @"gpu-core-count": @8,
                   @"IORegistryEntryID": @(dev.registryID)};
         NSString *uuid = UIDevice.currentDevice.identifierForVendor.UUIDString ?: @"00000000-0000-0000-0000-000000000000";
-        platform = @{@"IOPlatformUUID": uuid, @"model": @"iPad", @"IOPlatformSerialNumber": @"0"};
+        platform = @{@"IOPlatformUUID": uuid, @"model": UIDevice.currentDevice.model, @"IOPlatformSerialNumber": @"0"};
     });
     return o == kSGX ? sgx : o == kAccel ? accel : o == kPlatform ? platform : nil;
 }

@@ -1,5 +1,5 @@
 // AppKit on UIKit: just enough of AppKit for a native Mac game binary to run
-// on iPadOS. The classes are named RNS* and exported under the AppKit names
+// on iOS. The classes are named RNS* and exported under the AppKit names
 // (_OBJC_CLASS_$_NSWindow -> RNSWindow, see build flags), so they never clash
 // with a class iOS already has under that name.
 //

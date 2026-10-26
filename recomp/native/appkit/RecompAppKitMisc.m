@@ -1,6 +1,6 @@
 // The rest of AppKit a game touches: cursors, images, colours, fonts, menus,
 // the pasteboard, alerts, the workspace, accessibility and AppKit's constants.
-// Most of it only needs to exist; what matters on an iPad is implemented.
+// Most of it only needs to exist; what matters on iOS is implemented.
 #import "RecompAppKit.h"
 #import <objc/runtime.h>
 
