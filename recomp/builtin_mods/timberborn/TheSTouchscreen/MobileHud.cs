@@ -1,5 +1,5 @@
-// The game's HUD laid out for an iPhone's short screen (iPhone only; an iPad keeps the
-// game's own layout). Every HUD panel sits in one of the named slots of the game's
+// The game's HUD laid out for an iPhone's short screen: on an iPhone, and on an iPad while the
+// Touch layout is on (TouchLayout; otherwise an iPad keeps the game's own HUD). Every HUD panel sits in one of the named slots of the game's
 // Views/Common/GameUI.uxml (Top-left, Top-right, Top-bar, Bottom-bar, ...); this moves
 // whole panels between containers and leaves the game's references to them intact, so the
 // game goes on updating and showing them as usual. Sizes are in the panel's units: on an
@@ -54,7 +54,6 @@ namespace Recomp.TheSTouchscreen
         const float NotificationLogHeight = 90f;
         const float CheckSeconds = 0.5f;
 
-        static readonly bool Phone = SystemInfo.deviceModel.StartsWith("iPhone", StringComparison.Ordinal);
         // Kept in the top-right block: the panels whose element names these are.
         static readonly string[] TopRightKept = { "SpeedControlPanel", "DatePanel", "WeatherPanel" };
 
@@ -92,7 +91,7 @@ namespace Recomp.TheSTouchscreen
 
         public void PostLoad()
         {
-            if (!Phone) return;
+            if (!TouchLayout.On) return;
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
                 if ((_gameUI = doc.rootVisualElement?.Q("GameUI")) != null) break;
             if (_gameUI == null)
@@ -351,31 +350,34 @@ namespace Recomp.TheSTouchscreen
         }
 
         // The port's Esc and Dev keys (Recomp.KeyButtons, their own overlay panel) framed like the tabs
-        // and drawers: the game's square-large--green image (green, gold border, rounded corners),
-        // nine-sliced as its CommonStyle.uss slices it, and its yellow text.
+        // and drawers. The Touch key shows the Touch layout's choice instead (TouchLayout).
         void StyleKeys()
         {
             if (_styledKeys.Count >= 3) return;  // Esc, Dev and DevControls' bug key
             UIDocument overlay = null;
             foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
                 if (doc.name == "RecompOverlay") overlay = doc;
-            var keys = overlay?.rootVisualElement?.Query<Button>().Where(b => b.name.StartsWith("recomp-key-", StringComparison.Ordinal)).ToList();
+            var keys = overlay?.rootVisualElement?.Query<Button>().Where(b => b.name.StartsWith("recomp-key-", StringComparison.Ordinal)
+                                                                              && b.name != "recomp-key-" + TouchLayout.KeyLabel).ToList();
             if (keys == null || keys.Count == 0) return;
-            var image = PlacementButtons.Image("UI/Images/Backgrounds/bg-square-large-2");
             foreach (var b in keys)
-            {
-                if (!_styledKeys.Add(b)) continue;
-                var s = b.style;
-                s.backgroundImage = image;
-                s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 16;
-                s.unitySliceScale = 0.5f;
-                s.backgroundColor = Color.clear;
-                s.borderTopWidth = s.borderBottomWidth = s.borderLeftWidth = s.borderRightWidth = 0f;
-                s.opacity = 1f;
-                s.color = new Color(0.95f, 0.87f, 0.6f);
-                s.unityFontStyleAndWeight = FontStyle.Bold;
-            }
+                if (_styledKeys.Add(b)) Frame(b);
             Debug.Log("[TheSTouchscreen] key buttons drawn as the game's buttons: " + _styledKeys.Count);
+        }
+
+        // A key of the shim's in the game's square-large--green image (green, gold border, rounded
+        // corners), nine-sliced as its CommonStyle.uss slices it, with its yellow text.
+        internal static void Frame(Button b)
+        {
+            var s = b.style;
+            s.backgroundImage = PlacementButtons.Image("UI/Images/Backgrounds/bg-square-large-2");
+            s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 16;
+            s.unitySliceScale = 0.5f;
+            s.backgroundColor = Color.clear;
+            s.borderTopWidth = s.borderBottomWidth = s.borderLeftWidth = s.borderRightWidth = 0f;
+            s.opacity = 1f;
+            s.color = new Color(0.95f, 0.87f, 0.6f);
+            s.unityFontStyleAndWeight = FontStyle.Bold;
         }
 
         // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels

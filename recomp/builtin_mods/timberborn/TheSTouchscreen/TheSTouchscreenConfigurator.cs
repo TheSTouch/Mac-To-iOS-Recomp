@@ -2,8 +2,9 @@
 // (Recomp.TouchMouse) turns touches into the mouse in every Unity game; in the game scene this
 // mod takes the world input over from it (WorldInput, InputPatches), tells it when a building
 // is being placed and adds Place and Rows to the game's placement panel (see
-// Recomp.Placement), on an iPhone lays the HUD out for a small screen (MobileHud), and shows
-// the game's Development controls as a touch-sized modal (DevControls). Further touch and
+// Recomp.Placement), and with its Touch layout (TouchLayout: always on an iPhone, a choice on
+// an iPad) lays the HUD out for a small screen (MobileHud) and shows the game's Development
+// controls as a touch-sized modal (DevControls). Further touch and
 // redesign work on the game's UI goes here.
 using Bindito.Core;
 
@@ -14,6 +15,7 @@ namespace Recomp.TheSTouchscreen
     {
         public void Configure(IContainerDefinition containerDefinition)
         {
+            containerDefinition.Bind<TouchLayout>().AsSingleton();
             containerDefinition.Bind<PlacementButtons>().AsSingleton();
             containerDefinition.Bind<MobileHud>().AsSingleton();
             containerDefinition.Bind<WorldInput>().AsSingleton();
