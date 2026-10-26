@@ -176,8 +176,8 @@ namespace Recomp
         static Rect IslandKey(Rect area, bool left, int index, float unit)
         {
             var strip = left ? area.xMin : Screen.width - area.xMax;
-            var w = Mathf.Min(Width * unit, strip * 0.9f);
-            var h = Height * unit;
+            var w = Mathf.Min(Width * unit, strip * 0.78f);  // a clear margin to the screen's edge and the HUD
+            var h = w * Height / Width;
             var top = Screen.height * 0.5f - 0.17f * Screen.height - Gap * unit;
             var y = top - (Buttons.Count - index) * h - (Buttons.Count - 1 - index) * Gap * unit;
             var x = (left ? strip / 2f : area.xMax + strip / 2f) - w / 2f;
