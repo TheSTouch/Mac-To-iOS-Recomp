@@ -21,10 +21,10 @@
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
 //   pinned levers. View drawer: the overlay buttons centred at the top, the district switcher,
 //   then working hours and the visible levels scaled to the switcher's width. Both drawn larger.
-// - The tool panel moves to the bottom edge, centred, its description folded to the title (a tap on
-//   it unfolds it) and the building's cost (the green box) to its right; rotate, flip, Rows and
-//   Place go into a rail on the right edge, as large square icon buttons of one size without
-//   their keyboard hints.
+// - Rotate, flip, Rows and Place go into a rail on the right edge, as large square icon buttons
+//   of one size without their keyboard hints, and the building's cost (the green box) under
+//   them. The tool's description box is not shown; the rest of the tool panel (warnings) moves
+//   to the bottom edge, centred.
 // A moved panel takes the style sheets of its old ancestors with it (the game attaches some
 // to containers, e.g. the tool panel's to ToolPanel). Elements of ours that go into the game's
 // ordered slots are added through UILayout, which looks up the order of every element in a
@@ -61,6 +61,8 @@ namespace Recomp.Touchscreen
         VisualElement _colonyDrawer, _viewDrawer, _rail, _placementPanel, _toolPanel;
         VisualElement _timeBlock, _timeColumn, _clockHolder, _clock, _speedRow, _date;
         readonly HashSet<VisualElement> _descriptions = new HashSet<VisualElement>();  // the game makes one per tool
+        readonly Dictionary<VisualElement, VisualElement> _costs = new Dictionary<VisualElement, VisualElement>();  // cost box -> its description's row
+        VisualElement _costHolder;
         ScrollView _column, _toolsColumn;
         Button _colonyTab, _viewTab;
         Type _nineSliceButton, _nineSlice;
@@ -70,7 +72,7 @@ namespace Recomp.Touchscreen
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
         Vector2 _panelSize;
         float _nextCheck;
-        bool _placing, _descriptionOpen;
+        bool _placing;
 
         public MobileHud(EventBus eventBus, UILayout uiLayout)
         {
@@ -293,9 +295,8 @@ namespace Recomp.Touchscreen
         [OnEvent]
         public void OnToolEntered(ToolEnteredEvent toolEnteredEvent)
         {
-            // A tool picked: the drawers have done their job, and its description starts folded.
+            // A tool picked: the drawers have done their job.
             CloseAll();
-            _descriptionOpen = false;
         }
 
         // The goods counters, larger, with their breakdowns closed (a tap on a counter opens its
@@ -543,6 +544,9 @@ namespace Recomp.Touchscreen
             _placementPanel.style.flexDirection = FlexDirection.Column;
             _placementPanel.style.alignItems = Align.FlexEnd;
             _rail.Add(_placementPanel);
+            _costHolder = new VisualElement { name = "TouchscreenCost", pickingMode = PickingMode.Ignore };
+            _costHolder.style.alignItems = Align.FlexEnd;
+            _rail.Add(_costHolder);
             _uiLayout.AddAbsoluteItem(_rail);
             KeepPlaceLast();
         }
@@ -573,8 +577,8 @@ namespace Recomp.Touchscreen
             if (place != null && place.parent.IndexOf(place) != place.parent.childCount - 1) place.BringToFront();
         }
 
-        // The tool panel (the tool's description, warnings) at the bottom edge, centred, folded to
-        // its title until tapped.
+        // The tool panel (the tool's description, warnings) at the bottom edge, centred; its
+        // description box hidden and the cost moved to the rail (ArrangeDescriptions).
         void LayOutToolPanel()
         {
             var toolPanel = _bottomSlot.Q("ToolPanel");
@@ -583,7 +587,7 @@ namespace Recomp.Touchscreen
             var s = holder.style;
             s.position = Position.Absolute;
             s.left = s.right = 0f;
-            s.bottom = Gap;  // between the tool column and the rail; unfolds upwards
+            s.bottom = Gap;  // between the tool column and the rail
             s.alignItems = Align.Center;
             CarryStyles(toolPanel, holder);
             holder.Add(toolPanel);
@@ -593,31 +597,38 @@ namespace Recomp.Touchscreen
         }
 
         // Every frame, as the game makes a description panel per tool (Common/ToolPanel/
-        // DescriptionPanel.uxml: the DescriptionPanel frame, then ExternalSections beside it): the
-        // two in a row, bottoms aligned, and the frame's sections folded unless tapped open. The game
-        // switches InternalSections' display every frame, so the fold uses its height instead.
+        // DescriptionPanel.uxml: the DescriptionPanel box, then ExternalSections beside it, which
+        // holds the building's cost): the box hidden, the cost moved under the rail's buttons and
+        // shown while its description is (the game adds and removes them with the tool).
         void ArrangeDescriptions()
         {
             if (_toolPanel == null) return;
             _toolPanel.Query("DescriptionPanel").ForEach(description =>
             {
-                if (_descriptions.Add(description))
-                {
-                    description.RegisterCallback<ClickEvent>(_ => _descriptionOpen = !_descriptionOpen);
-                    var row = description.parent;
-                    row.style.flexDirection = FlexDirection.Row;
-                    row.style.alignItems = Align.FlexEnd;
-                    var external = row.Q("ExternalSections");
-                    if (external != null) external.style.marginLeft = Gap;
-                }
-                var sections = description.Q("InternalSections");
-                if (sections == null) return;
-                var folded = !_descriptionOpen;
-                if (sections.visible == !folded) return;
-                sections.visible = !folded;
-                sections.style.maxHeight = folded ? new StyleLength(0f) : new StyleLength(StyleKeyword.Null);
-                sections.style.overflow = folded ? new StyleEnum<Overflow>(Overflow.Hidden) : new StyleEnum<Overflow>(StyleKeyword.Null);
+                if (description.style.display != DisplayStyle.None) description.style.display = DisplayStyle.None;
+                if (!_descriptions.Add(description) || _costHolder == null) return;
+                var row = description.parent;
+                var external = row?.Q("ExternalSections");
+                if (external == null) return;
+                CarryStyles(external, _costHolder);
+                _costs[external] = row;
+                external.style.marginTop = RailGap;
+                _costHolder.Add(external);
             });
+            foreach (var cost in _costs)
+            {
+                var display = Shown(cost.Value) ? DisplayStyle.Flex : DisplayStyle.None;
+                if (cost.Key.style.display != display) cost.Key.style.display = display;
+            }
+        }
+
+        // In the tool panel and not hidden there.
+        bool Shown(VisualElement e)
+        {
+            if (e.panel == null) return false;
+            for (; e != null && e != _toolPanel; e = e.parent)
+                if (e.resolvedStyle.display == DisplayStyle.None) return false;
+            return e == _toolPanel;
         }
 
         // The style sheets the element got from its ancestors, up to the game's HUD root.
@@ -625,7 +636,7 @@ namespace Recomp.Touchscreen
         {
             for (var e = element.parent; e != null && e != _gameUI; e = e.parent)
                 for (int i = 0; i < e.styleSheets.count; i++)
-                    to.styleSheets.Add(e.styleSheets[i]);
+                    if (!to.styleSheets.Contains(e.styleSheets[i])) to.styleSheets.Add(e.styleSheets[i]);
         }
 
         static void Scale(VisualElement e, float scale, float originX, float originY)
