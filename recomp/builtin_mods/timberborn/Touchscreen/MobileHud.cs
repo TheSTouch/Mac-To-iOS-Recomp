@@ -68,6 +68,7 @@ namespace Recomp.Touchscreen
         ScrollView _column, _toolsColumn;
         Button _colonyTab, _viewTab;
         Type _nineSliceButton, _nineSlice;
+        static StyleSheet _commonStyle;  // the game's Common/CommonStyle.uss: its frames (square-large--green, button-game)
         Rect _safe;
         float _rightInset;               // the HUD's right margin, in panel units (the View tab reaches past it)
         float _tabFont, _districtFont;   // the game's own font sizes, before they are scaled
@@ -103,8 +104,12 @@ namespace Recomp.Touchscreen
             _topBar = _gameUI.Q("Top-bar");
             _bottomSlot = _gameUI.Q("Bottom-bar");
             _bar = _bottomSlot?.Q("BottomBar");
-            _nineSliceButton = _gameUI.Q("BatchControl")?.GetType();
-            _nineSlice = _gameUI.Q("SpeedControlPanel")?.GetType();
+            // By name: the panels that show them (the speed buttons) arrive after this layout runs.
+            _nineSliceButton = Type.GetType("Timberborn.CoreUI.NineSliceButton, Timberborn.CoreUI") ?? _gameUI.Q("BatchControl")?.GetType();
+            _nineSlice = Type.GetType("Timberborn.CoreUI.NineSliceVisualElement, Timberborn.CoreUI") ?? _gameUI.Q("SpeedControlPanel")?.GetType();
+            _commonStyle = Resources.Load<StyleSheet>("UI/Views/Common/CommonStyle");
+            Debug.Log($"[Touchscreen] phone layout: frames from {_nineSlice?.Name ?? "none"}, {_nineSliceButton?.Name ?? "none"}, " +
+                      (_commonStyle != null ? "the game's common style" : "no common style"));
             var done = new List<string>();
             Try("safe area", done, () =>
             {
@@ -915,6 +920,9 @@ namespace Recomp.Touchscreen
                 e = new T();
                 e.style.backgroundColor = new Color(0.1f, 0.16f, 0.14f, 0.95f);
             }
+            // The class's frame (gold border, rounded corners) is defined there; our elements sit
+            // where no ancestor may carry it.
+            if (_commonStyle != null) e.styleSheets.Add(_commonStyle);
             e.AddToClassList(cls);
             return e;
         }
