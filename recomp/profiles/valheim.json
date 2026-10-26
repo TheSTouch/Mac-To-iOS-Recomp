@@ -6,7 +6,8 @@
   "when_assembly": "assembly_valheim.dll",
   "touch_gamepad": true,
   "iphone": {
-    "render_scale": 0.75
+    "render_scale": 0.75,
+    "portrait": true
   },
   "stub_overrides": {
     "steamworks": [

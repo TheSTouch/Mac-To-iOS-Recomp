@@ -55,7 +55,10 @@ namespace Recomp
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
             PlayerSettings.allowedAutorotateToLandscapeLeft = true;
             PlayerSettings.allowedAutorotateToLandscapeRight = true;
-            PlayerSettings.allowedAutorotateToPortrait = false;
+            // Portrait is per game, on iPhones only (the profile's "iphone": {"portrait": true}):
+            // PostProcess keeps the iPad to the two landscapes, and Recomp.Phone turns it off at
+            // runtime everywhere else. Never upside down.
+            PlayerSettings.allowedAutorotateToPortrait = Arg("-recompPortrait", "0") == "1";
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
 
             EditorUserBuildSettings.iOSXcodeBuildConfig = XcodeBuildConfig.Release;
@@ -105,6 +108,10 @@ namespace Recomp
             plist.ReadFromFile(plistPath);
             plist.root.SetBoolean("UIFileSharingEnabled", true);
             plist.root.SetBoolean("LSSupportsOpeningDocumentsInPlace", true);
+            // The iPad stays landscape whatever the player settings or the runtime ask.
+            var ipad = plist.root.CreateArray("UISupportedInterfaceOrientations~ipad");
+            ipad.AddString("UIInterfaceOrientationLandscapeLeft");
+            ipad.AddString("UIInterfaceOrientationLandscapeRight");
             plist.WriteToFile(plistPath);
 
             var projPath = PBXProject.GetPBXProjectPath(xcodeDir);

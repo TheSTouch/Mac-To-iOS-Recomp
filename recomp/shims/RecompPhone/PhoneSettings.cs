@@ -32,6 +32,7 @@ namespace Recomp
             public int targetFrameRate;        // 0: the game's own
             public int qualityLevel = -1;      // -1: the game's own
             public Pref[] playerPrefs;
+            public bool portrait;              // the iPhone also plays upright
         }
 
         [Serializable]
@@ -50,7 +51,14 @@ namespace Recomp
         {
             if (_installed) return;
             _installed = true;
-            if (!SystemInfo.deviceModel.StartsWith("iPhone", StringComparison.Ordinal)) return;
+            // Never upside down; portrait only on the iPhone of a game that opts in (the Info.plist
+            // already keeps the iPad to the landscapes: this is the belt).
+            Screen.autorotateToPortraitUpsideDown = false;
+            if (!SystemInfo.deviceModel.StartsWith("iPhone", StringComparison.Ordinal))
+            {
+                Screen.autorotateToPortrait = false;
+                return;
+            }
             _memory = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
             _statsSince = Time.realtimeSinceStartup;
             Application.onBeforeRender += CountFrame;
@@ -62,15 +70,19 @@ namespace Recomp
             }
             catch (Exception e)
             {
+                Screen.autorotateToPortrait = false;
                 Debug.Log("[recomp] phone settings: cannot read recomp.json: " + e.Message);
                 return;
             }
             if (phone == null)
             {
+                Screen.autorotateToPortrait = false;
                 Debug.Log("[recomp] phone settings: none in recomp.json");
                 return;
             }
             var applied = new List<string> { SystemInfo.deviceModel };
+            Screen.autorotateToPortrait = phone.portrait;
+            applied.Add(phone.portrait ? "portrait and landscape" : "landscape only");
 
             if (phone.renderScale > 0f && phone.renderScale < 1f)
             {

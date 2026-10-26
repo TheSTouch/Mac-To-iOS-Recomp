@@ -76,7 +76,9 @@ KEEP_FROM_SHELL = {"Managed", "unity default resources", "Resources/unity defaul
 #   target_frame_rate  Application.targetFrameRate
 #   quality_level      an index into the game's QualitySettings (each game has its own: per game only)
 #   player_prefs       {key: value}, each written only when the player has none yet
-PHONE_DEFAULTS = {"render_scale": 0.75}
+#   portrait           true: the iPhone also plays upright (home indicator down) and rotates with
+#                      the phone; the iPad stays landscape (Info.plist ~ipad key, and at runtime)
+PHONE_DEFAULTS = {"render_scale": 0.75, "portrait": False}
 
 # Serialized-file target platform ids (BuildTarget).
 TARGET_OSX, TARGET_IOS = 2, 9
@@ -481,7 +483,8 @@ def phone_settings(profile):
     return {"renderScale": float(phone.get("render_scale") or 0),
             "targetFrameRate": int(phone.get("target_frame_rate") or 0),
             "qualityLevel": int(phone["quality_level"]) if phone.get("quality_level") is not None else -1,
-            "playerPrefs": prefs}
+            "playerPrefs": prefs,
+            "portrait": bool(phone.get("portrait"))}
 
 
 def write_shim_config(game, data):
@@ -608,7 +611,8 @@ def player(game, work, unity, bundle_id, team):
            "-projectPath", shell, "-buildTarget", "iOS",
            "-executeMethod", "Recomp.Build.Run", "-logFile", logfile,
            "-recompOut", out, "-recompBundleId", bundle_id, "-recompTeam", team,
-           "-recompProduct", game.name, "-recompVersion", game.info.get("CFBundleShortVersionString", "1.0").split("-")[0]]
+           "-recompProduct", game.name, "-recompVersion", game.info.get("CFBundleShortVersionString", "1.0").split("-")[0],
+           "-recompPortrait", "1" if phone_settings(game_profile(game) or {})["portrait"] else "0"]
     log(f"Unity batchmode build (log: {logfile})")
     if os.path.exists(logfile):
         os.remove(logfile)
