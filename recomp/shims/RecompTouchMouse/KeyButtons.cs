@@ -23,6 +23,9 @@
 // A game mod can add a key of its own (AddAction): drawn and hit-tested like the others, it
 // calls the mod instead of pressing keys, shows only while the mod says so, and beside the
 // island it goes above the island.
+// A game mod can also say where the keys go (PlaceInRow): a row it measures from the game's UI,
+// e.g. above Timberborn's tool bar on an iPad. The shown keys line up in it, Esc first, from its
+// left or right edge, and move when the row or the shown keys change. UI Toolkit keys only.
 // Held upright, in a game with the touch gamepad, the stack starts just above the gamepad's
 // control zone instead, at the left edge: clear of the move stick, and (in Valheim) far above
 // the health and food bars, which stay in the bottom-left corner.
@@ -49,6 +52,14 @@ namespace Recomp
 
         // Layout points (an iPad's 834-point-high screen, see Layout): size, margin from the corner, gap between keys.
         const float Width = 72, Height = 44, Margin = 16, Gap = 8;
+
+        /// A row for the keys (PlaceInRow): a screen rect (pixels, origin bottom-left) as tall as the
+        /// keys, filled from its left edge, or from its right edge.
+        public struct Row
+        {
+            public Rect Area;
+            public bool FromRight;
+        }
 
         [Serializable]
         class TouchKey { public string label; public string[] keys; }
@@ -80,6 +91,9 @@ namespace Recomp
         static bool _right;        // in the bottom-right corner instead of the bottom-left
         static bool _island;       // beside the Dynamic Island on a phone held sideways
         static ScreenOrientation _laidOutOrientation;
+        static Func<Row?> _row;    // a game mod's row (PlaceInRow)
+        static Row? _laidRow;      // the row the buttons were last laid out in
+        static int _laidShown;     // and the keys shown then, a bit each
 
         public static void Install()
         {
@@ -139,6 +153,21 @@ namespace Recomp
             _laidOut = default;
             Debug.Log("[recomp] key button added by a game mod: " + label);
         }
+
+        /// A game mod's row for the keys, asked every update; null (or a null row) puts them back
+        /// in their usual place.
+        public static void PlaceInRow(Func<Row?> row)
+        {
+            _row = row;
+            if (row == null && _laidRow != null)
+            {
+                _laidRow = null;
+                _laidOut = default;
+            }
+        }
+
+        /// Pixels per layout point (see Layout): the size the keys are drawn at.
+        public static float Unit => Layout.Unit;
 
         public static void Press(int index)
         {
@@ -212,6 +241,50 @@ namespace Recomp
                 if (b.CanvasButton != null && b.CanvasButton.gameObject.activeSelf != shown)
                     b.CanvasButton.gameObject.SetActive(shown);
             }
+            if (_overlay != null && _row != null) LayOutRow();
+        }
+
+        // The keys in a game mod's row, when it or the shown keys change.
+        static void LayOutRow()
+        {
+            var row = _row();
+            var shown = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+                if (Shown(Buttons[i])) shown |= 1 << i;
+            if (shown == _laidShown && row.HasValue == _laidRow.HasValue
+                && (!row.HasValue || (row.Value.Area == _laidRow.Value.Area && row.Value.FromRight == _laidRow.Value.FromRight)))
+                return;
+            if (row == null)
+            {
+                if (_laidRow != null) _laidOut = default;  // the usual place, next update
+                _laidRow = null;
+                _laidShown = shown;
+                return;
+            }
+            var root = _overlay.rootVisualElement.layout;
+            if (!(root.width > 0f) || !(root.height > 0f)) return;
+            _laidRow = row;
+            _laidShown = shown;
+            float kx = root.width / Screen.width, ky = root.height / Screen.height;
+            var a = row.Value.Area;
+            var gap = Gap * Layout.Unit;
+            var n = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                var b = Buttons[i];
+                if (b.Button == null || !Shown(b)) continue;
+                var x = row.Value.FromRight ? a.xMax - (n + 1) * a.height - n * gap : a.xMin + n * (a.height + gap);
+                n++;
+                var s = b.Button.style;
+                s.left = x * kx;
+                s.right = StyleKeyword.Null;
+                s.bottom = a.yMin * ky;
+                s.width = a.height * kx;
+                s.height = a.height * ky;
+                s.fontSize = a.height * ky * 18f / Height;
+                s.borderTopLeftRadius = s.borderTopRightRadius = s.borderBottomLeftRadius = s.borderBottomRightRadius = a.height * ky * 10f / Height;
+            }
+            Debug.Log($"[recomp] key buttons in a game mod's row: {a}" + (row.Value.FromRight ? " from the right" : ""));
         }
 
         static float Bottom(int index) => Margin + index * (Height + Gap);
@@ -381,8 +454,15 @@ namespace Recomp
                 _laidOut = area;
                 return;
             }
+            if (_laidRow != null)
+            {
+                _laidOut = area;  // a game mod's row (LayOutRow)
+                return;
+            }
             if (!Layout.Phone)
             {
+                for (int i = 0; i < Buttons.Count; i++)
+                    if (Buttons[i].Button != null) Corner(Buttons[i].Button, i);  // back from a row
                 _laidOut = area;
                 return;
             }
@@ -428,19 +508,27 @@ namespace Recomp
             var b = new Button { text = label, name = "recomp-key-" + label, pickingMode = PickingMode.Ignore };
             var s = b.style;
             s.position = Position.Absolute;
-            s.bottom = Bottom(index);  // bottom corner: clear of the menus games put along the top
-            if (_right) s.right = Margin;
-            else s.left = Margin;
-            s.width = Width;
-            s.height = Height;
-            s.fontSize = 18;
+            Corner(b, index);
             s.color = Color.white;
             s.backgroundColor = new Color(0f, 0f, 0f, 0.45f);
             s.opacity = 0.75f;
-            s.borderTopLeftRadius = s.borderTopRightRadius = s.borderBottomLeftRadius = s.borderBottomRightRadius = 10;
             s.borderTopWidth = s.borderBottomWidth = s.borderLeftWidth = s.borderRightWidth = 1;
             s.borderTopColor = s.borderBottomColor = s.borderLeftColor = s.borderRightColor = new Color(1f, 1f, 1f, 0.5f);
             return b;
+        }
+
+        // The usual place of a UI Toolkit key on an iPad, in the panel's units: the bottom corner,
+        // clear of the menus games put along the top.
+        static void Corner(Button b, int index)
+        {
+            var s = b.style;
+            s.bottom = Bottom(index);
+            if (_right) { s.right = Margin; s.left = StyleKeyword.Null; }
+            else { s.left = Margin; s.right = StyleKeyword.Null; }
+            s.width = Width;
+            s.height = Height;
+            s.fontSize = 18;
+            s.borderTopLeftRadius = s.borderTopRightRadius = s.borderBottomLeftRadius = s.borderBottomRightRadius = 10;
         }
     }
 }

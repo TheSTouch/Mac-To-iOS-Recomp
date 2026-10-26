@@ -20,6 +20,7 @@ namespace Recomp.TheSTouchscreen
             containerDefinition.Bind<MobileHud>().AsSingleton();
             containerDefinition.Bind<WorldInput>().AsSingleton();
             containerDefinition.Bind<DevControls>().AsSingleton();
+            containerDefinition.Bind<KeyRow>().AsSingleton();
         }
     }
 }
