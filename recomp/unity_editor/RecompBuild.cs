@@ -3,6 +3,7 @@
 // Invoked by recomp/unity_ios.py with -executeMethod Recomp.Build.Run.
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -113,6 +114,24 @@ namespace Recomp
             ipad.AddString("UIInterfaceOrientationLandscapeLeft");
             ipad.AddString("UIInterfaceOrientationLandscapeRight");
             plist.WriteToFile(plistPath);
+
+            // Swipes from the screen edges (home, Control Center) take a second swipe while the game
+            // runs, and the home indicator fades out, so taps near the bottom edge reach the game (as
+            // the Unreal route's RecompInput.m). The player settings that hold these come from the
+            // game's own data after inject, so the trampoline answers for them. The whole method body
+            // is replaced: Unity 6000.0 asks per edge, 6000.5 once for all edges.
+            var controller = Path.Combine(xcodeDir, "Classes/UI/UnityViewControllerBase+iOS.mm");
+            var source = File.ReadAllText(controller);
+            foreach (var (method, body) in new[] {
+                ("- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures", "return UIRectEdgeAll;"),
+                ("- (BOOL)prefersHomeIndicatorAutoHidden", "return YES;") })
+            {
+                var found = Regex.Match(source, Regex.Escape(method) + @"\s*\{.*?\n\}", RegexOptions.Singleline);
+                if (!found.Success)
+                    throw new Exception("UnityViewControllerBase+iOS.mm no longer has: " + method);
+                source = source.Remove(found.Index, found.Length).Insert(found.Index, method + "\n{\n    " + body + "\n}");
+            }
+            File.WriteAllText(controller, source);
 
             var projPath = PBXProject.GetPBXProjectPath(xcodeDir);
             var proj = new PBXProject();
