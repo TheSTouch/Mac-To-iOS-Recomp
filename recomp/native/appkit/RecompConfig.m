@@ -8,7 +8,11 @@
 // generic phone defaults, see unreal_ios.py) is laid over RecompIniOverrides key
 // by key: phone values win, base keys it does not name are kept.
 //
-// Keys are rewritten at every launch, in case the game saved over them.
+// Engine.ini keys are workarounds: they are rewritten at every launch, in case
+// the game saved over them. Every other file's keys are defaults the player may
+// change in the game: one is written only when the file lacks it or the
+// profile's value changed since the shim last wrote it, which <Name>.ini.recomp
+// (next to the .ini) remembers.
 //
 // The value "auto" for r.Streaming.PoolSize sizes the texture pool from the
 // device's RAM: Mac builds size it for a GPU with its own memory, while an
@@ -35,9 +39,16 @@ static NSDictionary *Overlay(NSDictionary *base, NSDictionary *over) {
     return out;
 }
 
-static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sections) {
+// Writes the sections' keys into the .ini at path. forced: every key; otherwise
+// only missing keys and keys whose wanted value changed since the last write.
+// Adds the lines written to written, and the player's lines left alone to kept.
+static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sections, BOOL forced,
+                  NSMutableArray *written, NSMutableArray *kept) {
     NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
     NSMutableArray<NSString *> *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
+    NSString *sidecar = [path stringByAppendingPathExtension:@"recomp"];
+    NSDictionary *last = forced ? nil : [NSDictionary dictionaryWithContentsOfFile:sidecar];
+    NSMutableDictionary *wrote = [NSMutableDictionary new];
     for (NSString *section in sections) {
         NSString *header = [NSString stringWithFormat:@"[%@]", section];
         NSUInteger start = [lines indexOfObject:header];
@@ -47,18 +58,29 @@ static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sect
             start = lines.count - 1;
         }
         NSDictionary *keys = sections[section];
+        NSMutableDictionary *wroteHere = [NSMutableDictionary new];
         for (NSString *key in keys) {
-            NSString *line = [NSString stringWithFormat:@"%@=%@", key, Resolve(key, keys[key])];
+            NSString *want = Resolve(key, keys[key]);
+            NSString *prefix = [key stringByAppendingString:@"="];
             NSUInteger i = start + 1, found = NSNotFound;
             for (; i < lines.count && ![lines[i] hasPrefix:@"["]; i++)
-                if ([lines[i] hasPrefix:[key stringByAppendingString:@"="]]) found = i;
+                if ([lines[i] hasPrefix:prefix]) found = i;
+            wroteHere[key] = want;
+            if (!forced && found != NSNotFound && [last[section][key] isEqualToString:want]) {
+                [kept addObject:lines[found]];
+                continue;
+            }
+            NSString *line = [prefix stringByAppendingString:want];
             if (found != NSNotFound) lines[found] = line;
             else [lines insertObject:line atIndex:start + 1];
+            [written addObject:line];
         }
+        wrote[section] = wroteHere;
     }
     [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES attributes:nil error:nil];
     [[lines componentsJoinedByString:@"\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (!forced) [wrote writeToFile:sidecar atomically:YES];
 }
 
 __attribute__((constructor)) static void RecompConfigInit(void) {
@@ -76,11 +98,13 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         for (NSString *name in names) {
             NSDictionary *sections = Overlay(files[name], phoneFiles[name]);
             if (![sections count]) continue;
-            Merge([dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]], sections);
-            NSMutableArray *applied = [NSMutableArray new];
-            for (NSString *sec in sections)
-                for (NSString *k in sections[sec]) [applied addObject:[NSString stringWithFormat:@"%@=%@", k, Resolve(k, sections[sec][k])]];
-            RLOG(@"config: %@.ini (%@): %@", name, set, [applied componentsJoinedByString:@", "]);
+            BOOL forced = [name isEqualToString:@"Engine"];
+            NSMutableArray *written = [NSMutableArray new], *kept = [NSMutableArray new];
+            Merge([dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]], sections, forced,
+                  written, kept);
+            RLOG(@"config: %@.ini (%@): %@ %@%@%@", name, set, forced ? @"forced" : @"defaults written:",
+                 written.count ? [written componentsJoinedByString:@", "] : @"none",
+                 kept.count ? @"; left as the player set them: " : @"", [kept componentsJoinedByString:@", "]);
         }
     }
 }
