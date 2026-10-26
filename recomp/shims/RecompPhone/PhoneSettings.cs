@@ -37,6 +37,7 @@ namespace Recomp
             public int qualityLevel = -1;      // -1: the game's own
             public Pref[] playerPrefs;
             public bool portrait;              // the iPhone also plays upright
+            public float portraitHorizontalFov; // degrees across upright; 0: the game's field of view
         }
 
         [Serializable]
@@ -95,6 +96,7 @@ namespace Recomp
             var applied = new List<string> { SystemInfo.deviceModel };
             Screen.autorotateToPortrait = phone.portrait;
             applied.Add(phone.portrait ? "portrait and landscape" : "landscape only");
+            if (phone.portrait) PortraitCamera.Install(phone.portraitHorizontalFov);
 
             if (phone.renderScale > 0f && phone.renderScale < 1f)
             {
@@ -163,7 +165,7 @@ namespace Recomp
 
         // Whether the view stands upright: the display's own size turns with it (layer bounds,
         // not the render size); the content orientation is the fallback.
-        static bool Upright()
+        internal static bool Upright()
         {
             var display = Display.main;
             if (display.systemWidth > 0 && display.systemHeight > 0 && display.systemWidth != display.systemHeight)

@@ -78,6 +78,8 @@ KEEP_FROM_SHELL = {"Managed", "unity default resources", "Resources/unity defaul
 #   player_prefs       {key: value}, each written only when the player has none yet
 #   portrait           true: the iPhone also plays upright (home indicator down) and rotates with
 #                      the phone; the iPad stays landscape (Info.plist ~ipad key, and at runtime)
+#   portrait_horizontal_fov  upright, the degrees across a perspective camera shows (default: the
+#                      game's own, vertical, field of view, so upright is as wide as landscape is tall)
 PHONE_DEFAULTS = {"render_scale": 0.75, "portrait": False}
 
 # Serialized-file target platform ids (BuildTarget).
@@ -484,7 +486,8 @@ def phone_settings(profile):
             "targetFrameRate": int(phone.get("target_frame_rate") or 0),
             "qualityLevel": int(phone["quality_level"]) if phone.get("quality_level") is not None else -1,
             "playerPrefs": prefs,
-            "portrait": bool(phone.get("portrait"))}
+            "portrait": bool(phone.get("portrait")),
+            "portraitHorizontalFov": float(phone.get("portrait_horizontal_fov") or 0)}
 
 
 def write_shim_config(game, data):
