@@ -234,7 +234,7 @@ def cmd_mods(rest):
     p.add_argument("app")
     p.add_argument("--include", action="append", default=[], metavar="ID", help="put this mod in the next port")
     p.add_argument("--exclude", action="append", default=[], metavar="ID", help="leave this mod out of the next port")
-    p.add_argument("--device", help="copy the last port's mods to this iPad")
+    p.add_argument("--device", help="copy the last port's mods to this iPhone or iPad")
     p.add_argument("--bundle-id")
     p.add_argument("--work")
     p.add_argument("--unity")

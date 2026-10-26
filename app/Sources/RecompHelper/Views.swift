@@ -527,6 +527,15 @@ struct PortSheet: View {
                 if case .failed = job.phase, job.stages.last?.state == .failed {
                     Button("Retry Install") { job.retryInstall() }
                 }
+                if job.phase == .finished {
+                    Menu("Install on another device…") {
+                        ForEach(otherDevices) { d in Button(d.label) { job.install(on: d) } }
+                        if otherDevices.isEmpty { Text("No other iPhone or iPad paired") }
+                        Divider()
+                        Button("Refresh devices") { Task { await state.refreshEnvironment() } }
+                    }
+                    .fixedSize()
+                }
                 Spacer()
                 if job.phase == .running || job.phase == .checking {
                     Button("Stop") { job.cancel() }
@@ -538,6 +547,10 @@ struct PortSheet: View {
         .padding(24)
         .frame(width: 620)
         .interactiveDismissDisabled()
+    }
+
+    private var otherDevices: [BuildEnvironment.Device] {
+        (state.environment?.portDevices ?? []).filter { $0.id != job.settings.device }
     }
 
     @ViewBuilder private func stageIcon(_ s: PortJob.StageState) -> some View {

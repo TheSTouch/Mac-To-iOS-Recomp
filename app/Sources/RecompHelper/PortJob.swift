@@ -17,7 +17,7 @@ final class PortJob: ObservableObject, Identifiable {
 
     struct Stage: Identifiable {
         let id: String
-        let title: String
+        var title: String
         var state: StageState = .pending
     }
 
@@ -31,7 +31,8 @@ final class PortJob: ObservableObject, Identifiable {
     }
 
     let game: Game
-    let settings: Settings
+    /// The device changes when the finished port is installed on another one.
+    @Published private(set) var settings: Settings
     @Published var phase: Phase = .checking
     @Published var stages: [Stage]
     @Published var fraction: Double?
@@ -113,9 +114,20 @@ final class PortJob: ObservableObject, Identifiable {
         Task {
             phase = .running
             mark("install", .pending)
-            _ = await run([route, game.app, "install"] + portOptions)
-            if case .running = phase { phase = .finished }
+            if await run([route, game.app, "install"] + portOptions) { finish() }
         }
+    }
+
+    /// Install the finished port on another iPhone or iPad: the build is universal, so only
+    /// the install stage runs, with the same team and bundle ID.
+    func install(on device: BuildEnvironment.Device) {
+        settings.device = device.id
+        settings.deviceName = device.shortName
+        settings.deviceKind = device.kind
+        if let i = stages.firstIndex(where: { $0.id == "install" }) { stages[i].title = "Install on \(device.shortName)" }
+        hints = []
+        fraction = nil
+        retryInstall()
     }
 
     private var portOptions: [String] {
@@ -128,6 +140,10 @@ final class PortJob: ObservableObject, Identifiable {
             guard await run(["toolchain", game.app]) else { return }
         }
         guard await run([route, game.app] + portOptions) else { return }
+        finish()
+    }
+
+    private func finish() {
         phase = .finished
         fraction = 1
         detail = "Installed. Open it from your \(settings.deviceKind)'s home screen."
