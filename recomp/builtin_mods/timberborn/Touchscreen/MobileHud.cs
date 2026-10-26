@@ -81,7 +81,7 @@ namespace Recomp.Touchscreen
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
         Vector2 _panelSize;
         float _nextCheck;
-        bool _placing;
+        bool _placing, _keysStyled;
 
         public MobileHud(EventBus eventBus, UILayout uiLayout)
         {
@@ -175,6 +175,7 @@ namespace Recomp.Touchscreen
             SweepView();
             ArrangeView();
             PlaceColonyDrawer();
+            StyleKeys();
             KeepPlaceLast();
             var root = _gameUI.panel?.visualTree.layout ?? default;
             var safe = SafeArea();
@@ -346,6 +347,34 @@ namespace Recomp.Touchscreen
             _uiLayout.AddTopLeft(_colonyTab, int.MinValue);
             _uiLayout.AddTopLeft(_colonyDrawer, int.MaxValue);
             SweepColony();
+        }
+
+        // The port's Esc and Dev keys (Recomp.KeyButtons, their own overlay panel) drawn as the game's
+        // buttons: its button-game image (green, gold border, rounded corners), nine-sliced as the
+        // game's CommonStyle.uss slices it, and its yellow text.
+        void StyleKeys()
+        {
+            if (_keysStyled) return;
+            UIDocument overlay = null;
+            foreach (var doc in UnityEngine.Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
+                if (doc.name == "RecompOverlay") overlay = doc;
+            var keys = overlay?.rootVisualElement?.Query<Button>().Where(b => b.name.StartsWith("recomp-key-", StringComparison.Ordinal)).ToList();
+            if (keys == null || keys.Count == 0) return;
+            var image = PlacementButtons.Image("UI/Images/Buttons/button-game");
+            foreach (var b in keys)
+            {
+                var s = b.style;
+                s.backgroundImage = image;
+                s.unitySliceLeft = s.unitySliceRight = s.unitySliceTop = s.unitySliceBottom = 24;
+                s.unitySliceScale = 0.5f;
+                s.backgroundColor = Color.clear;
+                s.borderTopWidth = s.borderBottomWidth = s.borderLeftWidth = s.borderRightWidth = 0f;
+                s.opacity = 1f;
+                s.color = new Color(0.95f, 0.87f, 0.6f);
+                s.unityFontStyleAndWeight = FontStyle.Bold;
+            }
+            _keysStyled = true;
+            Debug.Log("[Touchscreen] key buttons drawn as the game's buttons: " + keys.Count);
         }
 
         // The Colony drawer under the lowest of what hangs below the strip: the goods counters' labels
