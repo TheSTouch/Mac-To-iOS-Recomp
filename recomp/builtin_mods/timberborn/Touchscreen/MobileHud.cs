@@ -6,6 +6,9 @@
 // iPhone 17 at the game's largest UI scale one unit is about 0.54 pt, so Apple's 44 pt
 // touch target is about 80 units.
 // - The HUD keeps inside the safe area: clear of the Dynamic Island and the home indicator.
+//   On the side away from the island it keeps only a third of the safe area's margin (that
+//   margin is there for the island's side; the other side has just the rounded corners). The
+//   port's Esc and Dev keys sit in the island's strip (the profile's "touch_keys_corner": "island").
 // - Top strip, 80 units tall: a Colony tab, the goods counters drawn 1.45 times larger with
 //   their breakdowns closed, the speed buttons at 80 x 66, and a View tab at the right end.
 //   Date and weather stay under the speed buttons.
@@ -13,14 +16,14 @@
 //   dragging: the general tools (Select ... Priority), the 15 building groups and Options. An
 //   open group's tools go into a second column beside it, both the full height under the strip.
 //   Their hover tooltips are removed: a touchscreen has no hover, and they stuck out of the
-//   narrow columns. The bottom of the screen stays clear; the port's Esc and Dev keys sit in
-//   the bottom-right corner (the profile's "touch_keys_corner"), under the rail.
+//   narrow columns.
 // - Colony drawer: the well-being line, population, notifications (log height capped) and
 //   pinned levers. View drawer: working hours, layers, districts, the overlay buttons and
 //   the day clock. Both drawn larger.
 // - The tool panel moves to the bottom edge, centred, its description folded to the title (a tap on
-//   it unfolds it); rotate, flip, Rows and Place go into a rail on the right edge, as large
-//   square icon buttons without their keyboard hints.
+//   it unfolds it) and the building's cost (the green box) to its right; rotate, flip, Rows and
+//   Place go into a rail on the right edge, as large square icon buttons of one size without
+//   their keyboard hints.
 // A moved panel takes the style sheets of its old ancestors with it (the game attaches some
 // to containers, e.g. the tool panel's to ToolPanel). Elements of ours that go into the game's
 // ordered slots are added through UILayout, which looks up the order of every element in a
@@ -42,7 +45,8 @@ namespace Recomp.Touchscreen
         const float StripHeight = 80f, ColonyTabWidth = 130f, ViewTabWidth = 88f, Gap = 8f;
         const float SpeedWidth = 80f, SpeedHeight = 66f;
         const float BelowStrip = 150f;          // top of the View drawer, under the speed and date block
-        const float RailButton = 76f, PlaceButton = 84f, RailIcon = 44f, RailGap = 6f;
+        const float RailButton = 76f, RailIcon = 44f, RailGap = 6f;
+        const float AwayFromIsland = 1f / 3f;  // the share of the safe area's side margin kept away from the island
         const float NotificationLogHeight = 90f;
         const float CheckSeconds = 0.5f;
 
@@ -53,11 +57,13 @@ namespace Recomp.Touchscreen
         readonly EventBus _eventBus;
         readonly UILayout _uiLayout;
         VisualElement _gameUI, _absolute, _topLeft, _topRight, _topBar, _bottomSlot, _bar, _subSection;
-        VisualElement _colonyDrawer, _viewDrawer, _rail, _placementPanel, _description;
+        VisualElement _colonyDrawer, _viewDrawer, _rail, _placementPanel, _toolPanel;
+        readonly HashSet<VisualElement> _descriptions = new HashSet<VisualElement>();  // the game makes one per tool
         ScrollView _column, _toolsColumn;
         Button _colonyTab, _viewTab;
         Type _nineSliceButton, _nineSlice;
         Rect _safe;
+        ScreenOrientation _orientation;
         float _columnHeight = 300f;  // the columns' visible height, in their own (unscaled) units
         Vector2 _panelSize;
         float _nextCheck;
@@ -128,7 +134,7 @@ namespace Recomp.Touchscreen
                 _placing = Placement.Active;
                 if (_placing) CloseAll();
             }
-            if (_description != null && !_descriptionOpen) FoldDescription(false);  // the game shows them again per tool
+            ArrangeDescriptions();
             if (_column != null)
             {
                 // Shown with the game's bottom bar (hidden until the game starts, and by the batch
@@ -146,14 +152,19 @@ namespace Recomp.Touchscreen
             KeepPlaceLast();
             var root = _gameUI.panel?.visualTree.layout ?? default;
             var safe = SafeArea();
-            if (root.width <= 0f || (safe == _safe && root.size == _panelSize)) return;
+            if (root.width <= 0f || (safe == _safe && root.size == _panelSize && Screen.orientation == _orientation)) return;
             _safe = safe;
             _panelSize = root.size;
+            _orientation = Screen.orientation;
             // Screen pixels (origin bottom-left) to the panel's units.
             float kx = root.width / Screen.width, ky = root.height / Screen.height;
             var s = _gameUI.style;
-            s.left = safe.xMin * kx;
-            s.right = (Screen.width - safe.xMax) * kx;
+            // Sideways, the island is on the left in LandscapeLeft (turned counter-clockwise), else the right.
+            float left = safe.xMin, right = Screen.width - safe.xMax;
+            if (_orientation == ScreenOrientation.LandscapeLeft) right *= AwayFromIsland;
+            else if (_orientation == ScreenOrientation.LandscapeRight) left *= AwayFromIsland;
+            s.left = left * kx;
+            s.right = right * kx;
             s.top = (Screen.height - safe.yMax) * ky;
             s.bottom = safe.yMin * ky;
             if (_column != null)
@@ -272,8 +283,9 @@ namespace Recomp.Touchscreen
         [OnEvent]
         public void OnToolEntered(ToolEnteredEvent toolEnteredEvent)
         {
-            // A tool picked: the drawers have done their job.
+            // A tool picked: the drawers have done their job, and its description starts folded.
             CloseAll();
+            _descriptionOpen = false;
         }
 
         // The goods counters, larger, with their breakdowns closed (a tap on a counter opens its
@@ -382,7 +394,7 @@ namespace Recomp.Touchscreen
         }
 
         // The placement panel (rotate, flip and the Touchscreen's Place and Rows) on the right edge:
-        // square icon buttons, Place last and largest. The game shows and hides the panel itself.
+        // square icon buttons of one size, Place last. The game shows and hides the panel itself.
         void LayOutRail()
         {
             _placementPanel = _gameUI.Q("BlockObjectPlacementPanel");
@@ -407,9 +419,9 @@ namespace Recomp.Touchscreen
             if (_placementPanel == null) return;
             foreach (var b in _placementPanel.Query<Button>().ToList())
             {
-                var size = b.name == "TouchscreenPlace" ? PlaceButton : RailButton;
-                if (b.style.width == size) continue;
-                b.style.width = b.style.height = size;
+                if (b.style.width == RailButton) continue;
+                b.style.width = b.style.height = b.style.minWidth = b.style.minHeight = b.style.maxWidth = b.style.maxHeight = RailButton;
+                b.style.paddingLeft = b.style.paddingRight = b.style.paddingTop = b.style.paddingBottom = 0f;
                 b.style.marginLeft = b.style.marginRight = 0f;
                 b.style.marginBottom = RailGap;
                 b.style.justifyContent = Justify.Center;
@@ -437,25 +449,41 @@ namespace Recomp.Touchscreen
             var s = holder.style;
             s.position = Position.Absolute;
             s.left = s.right = 0f;
-            s.bottom = Gap;  // between the tool column and the Esc and Dev keys; unfolds upwards
+            s.bottom = Gap;  // between the tool column and the rail; unfolds upwards
             s.alignItems = Align.Center;
             CarryStyles(toolPanel, holder);
             holder.Add(toolPanel);
             _uiLayout.AddAbsoluteItem(holder);
-            _description = toolPanel.Q("DescriptionPanel");
-            if (_description == null) return;
-            _description.RegisterCallback<ClickEvent>(_ => FoldDescription(!_descriptionOpen));
-            FoldDescription(false);
+            _toolPanel = toolPanel;
+            ArrangeDescriptions();
         }
 
-        void FoldDescription(bool open)
+        // Every frame, as the game makes a description panel per tool (Common/ToolPanel/
+        // DescriptionPanel.uxml: the DescriptionPanel frame, then ExternalSections beside it): the
+        // two in a row, bottoms aligned, and the frame's sections folded unless tapped open. The game
+        // switches InternalSections' display every frame, so the fold uses its height instead.
+        void ArrangeDescriptions()
         {
-            _descriptionOpen = open;
-            var shown = open ? DisplayStyle.Flex : DisplayStyle.None;
-            var internalSections = _description.Q("InternalSections");
-            if (internalSections != null) internalSections.style.display = shown;
-            var external = _description.parent?.Q("ExternalSections");
-            if (external != null) external.style.display = shown;
+            if (_toolPanel == null) return;
+            _toolPanel.Query("DescriptionPanel").ForEach(description =>
+            {
+                if (_descriptions.Add(description))
+                {
+                    description.RegisterCallback<ClickEvent>(_ => _descriptionOpen = !_descriptionOpen);
+                    var row = description.parent;
+                    row.style.flexDirection = FlexDirection.Row;
+                    row.style.alignItems = Align.FlexEnd;
+                    var external = row.Q("ExternalSections");
+                    if (external != null) external.style.marginLeft = Gap;
+                }
+                var sections = description.Q("InternalSections");
+                if (sections == null) return;
+                var folded = !_descriptionOpen;
+                if (sections.visible == !folded) return;
+                sections.visible = !folded;
+                sections.style.maxHeight = folded ? new StyleLength(0f) : new StyleLength(StyleKeyword.Null);
+                sections.style.overflow = folded ? new StyleEnum<Overflow>(Overflow.Hidden) : new StyleEnum<Overflow>(StyleKeyword.Null);
+            });
         }
 
         // The style sheets the element got from its ancestors, up to the game's HUD root.
