@@ -59,7 +59,7 @@ namespace Recomp.Touchscreen
         readonly UILayout _uiLayout;
         VisualElement _gameUI, _absolute, _topLeft, _topRight, _topBar, _bottomSlot, _bar, _subSection;
         VisualElement _colonyDrawer, _viewDrawer, _rail, _placementPanel, _toolPanel;
-        VisualElement _timeBlock, _timeColumn, _clockHolder, _clock, _speed, _speedRow, _date;
+        VisualElement _timeBlock, _timeColumn, _clockHolder, _clock, _speedRow, _date;
         readonly HashSet<VisualElement> _descriptions = new HashSet<VisualElement>();  // the game makes one per tool
         ScrollView _column, _toolsColumn;
         Button _colonyTab, _viewTab;
@@ -353,7 +353,9 @@ namespace Recomp.Touchscreen
         void LayOutView()
         {
             _timeBlock = new VisualElement { name = "TouchscreenTimeBlock", pickingMode = PickingMode.Ignore };
-            CarryStyles(_topRight.Q("SpeedControlPanel") ?? _topRight.Q("DatePanel") ?? _topRight, _timeBlock);
+            // The game's panels arrive later (SweepView): the style sheets of the block and its ancestors.
+            CarryStyles(_topRight, _timeBlock);
+            for (int i = 0; i < _topRight.styleSheets.count; i++) _timeBlock.styleSheets.Add(_topRight.styleSheets[i]);
             var s = _timeBlock.style;
             s.position = Position.Absolute;
             s.right = ViewTabWidth + Gap;
@@ -367,29 +369,6 @@ namespace Recomp.Touchscreen
             _timeColumn.style.alignItems = Align.Center;
             _timeBlock.Add(_clockHolder);
             _timeBlock.Add(_timeColumn);
-            foreach (var name in TopRightKept)
-            {
-                var child = ChildWith(_topRight, name);
-                if (child == null) continue;
-                child.style.marginLeft = child.style.marginRight = 0f;
-                child.style.alignSelf = Align.Center;  // the game's style puts some at the end
-                _timeColumn.Add(child);
-            }
-            _speed = _timeColumn.Q("SpeedControlPanel");
-            _date = _timeColumn.Q("DatePanel");
-            if (_speed != null)
-            {
-                // The game pads the speed buttons' right for the clock, which overlapped the block:
-                // the buttons and their frame alone, to be scaled to the date's width.
-                var wrapper = _speed.parent == _timeColumn ? _speed : _speed.parent;
-                wrapper.style.paddingRight = 0f;
-                wrapper.style.minWidth = 0f;
-                wrapper.style.height = StyleKeyword.Auto;
-                _speed.style.paddingRight = _speed.style.paddingLeft = 4f;
-                _speed.style.minWidth = 0f;
-                _speed.style.flexGrow = 0f;
-                _speedRow = wrapper;
-            }
             _uiLayout.AddAbsoluteItem(_timeBlock);
 
             _viewDrawer = Drawer("TouchscreenViewDrawer");
@@ -406,21 +385,53 @@ namespace Recomp.Touchscreen
             SweepView();
         }
 
-        static VisualElement ChildWith(VisualElement parent, string name)
+        // The place of a top-right panel in the column (TopRightKept), or -1.
+        static int KeptIndex(VisualElement e)
         {
-            foreach (var child in parent.Children())
-                if (child.name == name || child.Q(name) != null) return child;
-            return null;
+            for (int i = 0; i < TopRightKept.Length; i++)
+                if (e.name == TopRightKept[i] || e.Q(TopRightKept[i]) != null) return i;
+            return -1;
         }
 
-        // What the game adds to the top-right block: the clock beside the column, the rest into the drawer.
+        // A speed, date or weather panel, as the game adds it (after this layout), into the column in
+        // that order.
+        void AddToColumn(VisualElement e, int index)
+        {
+            e.style.marginLeft = e.style.marginRight = 0f;
+            e.style.alignSelf = Align.Center;  // the game's style puts some at the end
+            var at = 0;
+            foreach (var child in _timeColumn.Children())
+                if (KeptIndex(child) < index) at++;
+            _timeColumn.Insert(at, e);
+            var speed = e.name == "SpeedControlPanel" ? e : e.Q("SpeedControlPanel");
+            if (speed != null)
+            {
+                // The game pads the speed buttons' right for the clock, which overlapped the block:
+                // the buttons and their frame alone, to be scaled to the date's width.
+                e.style.paddingRight = 0f;
+                e.style.minWidth = 0f;
+                e.style.height = StyleKeyword.Auto;
+                speed.style.paddingRight = speed.style.paddingLeft = 4f;
+                speed.style.minWidth = 0f;
+                speed.style.flexGrow = 0f;
+                _speedRow = e;
+            }
+            var date = e.name == "DatePanel" ? e : e.Q("DatePanel");
+            if (date != null) _date = date;
+            Debug.Log("[Touchscreen] phone layout: " + TopRightKept[index] + " into the time column");
+        }
+
+        // What the game adds to the top-right block: speed, date and weather into the column, the
+        // clock beside it, the rest into the drawer.
         void SweepView()
         {
             if (_viewDrawer == null) return;
             var moved = new List<VisualElement>(_topRight.Children());
             foreach (var e in moved)
             {
-                if (_clock == null && (e.name == "Clock" || e.Q("Clock") != null))
+                var kept = KeptIndex(e);
+                if (kept >= 0) AddToColumn(e, kept);
+                else if (_clock == null && (e.name == "Clock" || e.Q("Clock") != null))
                 {
                     // Absolute over the block's top-right corner in the game; at the holder's corner here.
                     _clock = e;
@@ -490,6 +501,7 @@ namespace Recomp.Touchscreen
             Add("speed", _speedRow);
             Add("date", _date);
             Add("weather", _timeColumn.Q("WeatherPanel"));
+            Add("column", _timeColumn);
             Add("view tab", _viewTab);
             Add("drawer", _viewDrawer);
             foreach (var child in _viewDrawer.Children())
