@@ -76,10 +76,6 @@ uint64_t RS_AppOwner(void) { return RS_SteamID(); }
 // --- presence -------------------------------------------------------------------------------------
 
 static BOOL gPlaying, gWatching;
-#if TARGET_OS_IPHONE
-static uint64_t gBackgroundGen;
-static const double kBackgroundGrace = 5 * 60;   // in the background this long: no longer "playing"
-#endif
 
 static void SetPlaying(BOOL on)
 {
@@ -99,15 +95,24 @@ static void Watch(void)
     });
     atexit_b(^{ SetPlaying(NO); });
 #if TARGET_OS_IPHONE
+    // Leaving the game is leaving it: iOS suspends a backgrounded app within seconds, and
+    // Steam would go on counting it as played (and refuse the game on another device) until
+    // its connection timed out. A background task lets the message go out first.
     NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
     [nc addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
-        uint64_t gen = ++gBackgroundGen;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kBackgroundGrace * NSEC_PER_SEC)), RecompSteam_Queue(), ^{
-            if (gen == gBackgroundGen && gPlaying) SetPlaying(NO);
+        if (!gPlaying) return;
+        UIApplication *app = UIApplication.sharedApplication;
+        __block UIBackgroundTaskIdentifier task = [app beginBackgroundTaskWithName:@"Steam presence" expirationHandler:^{
+            [app endBackgroundTask:task];
+            task = UIBackgroundTaskInvalid;
+        }];
+        SetPlaying(NO);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (task != UIBackgroundTaskInvalid) [app endBackgroundTask:task];
+            task = UIBackgroundTaskInvalid;
         });
     }];
     [nc addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
-        ++gBackgroundGen;
         if (gPlaying) SetPlaying(YES);
     }];
     [nc addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
