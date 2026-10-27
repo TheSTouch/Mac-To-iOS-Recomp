@@ -116,6 +116,13 @@ def profile_for(game):
     return None
 
 
+def steam_cloud_plist(app, profile, platform="mac"):
+    """Info.plist keys for Steam Cloud saves (recomp/steam_cloud.py), with Mac folders for a Mac
+    test clone of the game (scripts/steam-mac-clone.py)."""
+    from recomp import steam_cloud
+    return steam_cloud.plist_keys(app, profile, "steam", platform, log)
+
+
 def has_saves(app):
     """For the scan: whether the game's profile has a saves block."""
     try:
