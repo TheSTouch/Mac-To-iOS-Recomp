@@ -32,8 +32,9 @@ NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
 # The pseudo Steam client every port carries (session, Steamworks flat API, cloud, networking).
 STEAM_RUNTIME = os.path.join(NATIVE_SRC, "RecompSteam")
 PROFILES = os.path.join(ROOT, "recomp", "profiles")
-# The Unreal route's libsteam_api stand-in; Unity ports get SteamAPI_* from recomp_native_stubs.c.
-NATIVE_SKIP = {"steam_api_stub.c"}
+# Top-level files of recomp/native that Unity ports leave out (none at present: the Steam
+# runtime in RecompSteam/ serves both routes).
+NATIVE_SKIP = set()
 
 # Managed shims added to the game, each enabled when the game ships the
 # assembly it builds on (every game when "requires" is None), and started
