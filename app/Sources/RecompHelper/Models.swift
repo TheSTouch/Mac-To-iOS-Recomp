@@ -20,6 +20,8 @@ struct Game: Decodable, Identifiable, Hashable {
     let checks: [String]
     /// The game's profile has a saves block: its saves can sync with the iOS port through iCloud Drive.
     let saves: Bool?
+    /// A Steam game with Steam Cloud: its port syncs saves with Steam Cloud by default (recomp/steam_cloud.py).
+    let steamCloud: Bool?
     /// The game's profile says where its mods live: the port can compile them in (recomp/mods.py).
     let mods: Bool?
     /// What the game's profile records for each kind of device, nil where it was not played on one
@@ -31,6 +33,8 @@ struct Game: Decodable, Identifiable, Hashable {
     var support: Support { Support(rawValue: status) ?? .planned }
     var engineLabel: String { engineBackend.map { "\(engine) (\($0))" } ?? engine }
     var slug: String { name.filter { $0.isLetter || $0.isNumber } }
+    /// The port's save sync unless the player picks another: `--saves` of recomp.py.
+    var defaultSaves: String { steamCloud == true ? "steam" : saves == true ? "icloud" : "off" }
 
     var iphoneStatus: String { testedIphone.map { "Tested on iPhone: \($0)" } ?? "Not tried on iPhone yet" }
     /// The list's one-line summary per device, e.g. "Tested on iPad · not tried on iPhone yet".
@@ -119,6 +123,9 @@ struct SaveSyncStatus: Decodable {
     let syncedGames: Int
     let backup: String?
     let conflicts: Int?
+    /// The save sync of the game's last port ("steam", "icloud", "off"), nil before one; and the next one's default.
+    let portMode: String?
+    let defaultMode: String?
 }
 
 /// `recomp.py mods <app> [--include ID] [--exclude ID] --json` (recomp/mods.py): the mods on this

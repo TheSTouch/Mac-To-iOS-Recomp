@@ -159,7 +159,7 @@ struct GameDetail: View {
                     row("Found in", game.source)
                     row("Location", game.app)
                 }
-                if game.saves == true {
+                if game.saves == true || game.steamCloud == true {
                     SaveSyncBox(game: game).id(game.id)
                 }
                 if game.mods == true {
@@ -206,47 +206,65 @@ struct SaveSyncBox: View {
 
     var body: some View {
         GroupBox("Saves") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Toggle("Sync saves with iCloud Drive", isOn: Binding(
-                        get: { status?.enabled ?? false },
-                        set: { on in Task { await run(on ? "--enable" : "--disable") } }))
-                        .disabled(busy || status == nil || status?.icloud == false)
-                    if busy { ProgressView().controlSize(.small) }
+            if status?.portMode == "steam" || (status?.portMode == nil && game.saves != true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(status?.portMode == "steam" ? "Saves: Steam Cloud" : "Saves: Steam Cloud from the next port",
+                          systemImage: "icloud").font(.callout)
+                    Text("The port syncs its saves with Steam Cloud, like the Steam client: they come down when it starts and go up while it plays and when it goes to the background. On this Mac, Steam syncs the game as usual. Choose another way when porting.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPhone and iPad ports sync with: right after the game quits, when saves arrive from iOS, and hourly. Only changed files are copied.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let s = status {
-                    if !s.icloud {
-                        Label("iCloud Drive is off on this Mac. Turn it on in System Settings > your name > iCloud.",
-                              systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                    }
-                    if s.enabled {
-                        Label("Last sync: " + (s.lastSync.map(shown) ?? "not yet") + (s.running ? " (\(game.name) is running: it syncs after it quits)" : ""),
-                              systemImage: "arrow.triangle.2.circlepath").font(.callout)
-                    }
-                    ForEach(s.entries, id: \.self) { e in
-                        Label("\(e.name): last change on this Mac \(e.mac.map(shown) ?? "—"), in iCloud Drive \(e.icloud.map(shown) ?? "—")",
-                              systemImage: "doc").font(.callout)
-                    }
-                    if let backup = s.backup {
-                        Label("Backup of the previous saves: \(backup)", systemImage: "archivebox").font(.caption)
-                            .textSelection(.enabled)
-                    }
-                    if let n = s.conflicts, n > 0 {
-                        Label("\(n) files differed on the Mac and in iCloud Drive: the newest is used, the other is kept next to it as a .conflict copy.",
-                              systemImage: "doc.on.doc").font(.caption)
-                    }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .task { await run("--status") }
+            } else {
+                iCloudBox
+            }
+        }
+    }
+
+    @ViewBuilder private var iCloudBox: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if status?.portMode == "off" {
+                Label("The last port does not sync its saves.", systemImage: "icloud.slash").font(.callout)
+            }
+            HStack {
+                Toggle("Sync saves with iCloud Drive", isOn: Binding(
+                    get: { status?.enabled ?? false },
+                    set: { on in Task { await run(on ? "--enable" : "--disable") } }))
+                    .disabled(busy || status == nil || status?.icloud == false)
+                if busy { ProgressView().controlSize(.small) }
+            }
+            Text("The game keeps saving to its usual folder, and Steam Cloud keeps syncing it. Recomp Helper copies the saves both ways with iCloud Drive/Recomp Saves/\(game.name), the folder its iPhone and iPad ports sync with: right after the game quits, when saves arrive from iOS, and hourly. Only changed files are copied.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let s = status {
+                if !s.icloud {
+                    Label("iCloud Drive is off on this Mac. Turn it on in System Settings > your name > iCloud.",
+                          systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 }
-                if let note {
-                    Label(note, systemImage: "info.circle").font(.callout)
+                if s.enabled {
+                    Label("Last sync: " + (s.lastSync.map(shown) ?? "not yet") + (s.running ? " (\(game.name) is running: it syncs after it quits)" : ""),
+                          systemImage: "arrow.triangle.2.circlepath").font(.callout)
                 }
-                if let error {
-                    Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
+                ForEach(s.entries, id: \.self) { e in
+                    Label("\(e.name): last change on this Mac \(e.mac.map(shown) ?? "—"), in iCloud Drive \(e.icloud.map(shown) ?? "—")",
+                          systemImage: "doc").font(.callout)
+                }
+                if let backup = s.backup {
+                    Label("Backup of the previous saves: \(backup)", systemImage: "archivebox").font(.caption)
+                        .textSelection(.enabled)
+                }
+                if let n = s.conflicts, n > 0 {
+                    Label("\(n) files differed on the Mac and in iCloud Drive: the newest is used, the other is kept next to it as a .conflict copy.",
+                          systemImage: "doc.on.doc").font(.caption)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if let note {
+                Label(note, systemImage: "info.circle").font(.callout)
+            }
+            if let error {
+                Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .task { await run("--status") }
     }
 
@@ -400,6 +418,7 @@ struct PortSetup: View {
     @State private var team = ""
     @State private var device = ""
     @State private var bundleId = ""
+    @State private var saves = "off"
 
     var devices: [BuildEnvironment.Device] { state.environment?.portDevices ?? [] }
 
@@ -414,6 +433,12 @@ struct PortSetup: View {
                     ForEach(state.environment?.teams ?? []) { Text($0.identity).tag($0.id) }
                 }
                 TextField("Bundle ID", text: $bundleId)
+                Picker("Saves", selection: $saves) {
+                    if game.steamCloud == true { Text("Steam Cloud").tag("steam") }
+                    if game.saves == true { Text("iCloud Drive").tag("icloud") }
+                    Text("Do not sync").tag("off")
+                }
+                Text(savesNote).font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Workspace") {
                     HStack {
                         Text(state.workspace).lineLimit(1).truncationMode(.middle)
@@ -453,7 +478,7 @@ struct PortSetup: View {
                     let job = PortJob(game: game, settings: .init(team: team, bundleId: bundleId, device: device,
                                                                   deviceName: picked?.shortName ?? device,
                                                                   deviceKind: picked?.kind ?? "device",
-                                                                  workspace: state.workspace))
+                                                                  workspace: state.workspace, saves: saves))
                     dismiss()
                     state.job = job
                     job.start()
@@ -471,6 +496,15 @@ struct PortSetup: View {
             team = state.environment?.teams.first?.id ?? ""
             device = state.environment?.defaultDevice?.id ?? ""
             bundleId = "recomp.\(team.lowercased()).\(game.slug.lowercased())"
+            saves = game.defaultSaves
+        }
+    }
+
+    private var savesNote: String {
+        switch saves {
+        case "steam": return "Like the Steam client: the port signs in to Steam and syncs with Steam Cloud, so its saves are the Mac game's."
+        case "icloud": return "Through iCloud Drive/Recomp Saves/\(game.name); turn on the Mac side in the game's Saves box."
+        default: return "The port keeps its saves on the device only."
         }
     }
 }

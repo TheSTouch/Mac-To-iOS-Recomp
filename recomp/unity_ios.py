@@ -525,20 +525,21 @@ def write_shim_config(game, data):
 
 
 def write_save_info(game, xcode_dir):
-    """Info.plist keys the shared native save sync (RecompSaves.m) reads: the game's
-    name and its profile's "saves" block (mac root, ios root, include list)."""
+    """Info.plist keys of the port's save sync (recomp/steam_cloud.py): the game's name,
+    RecompSavesMode, and RecompSaves for the iCloud Drive sync (RecompSaves.m) or
+    RecompSteamCloud for Steam Cloud (RecompSteam/cloud*.m). recomp.py sets game.saves_mode
+    from --saves; without it, the default for the game."""
+    from recomp import steam_cloud
     path = os.path.join(xcode_dir, "Info.plist")
     with open(path, "rb") as f:
         info = plistlib.load(f)
     info["RecompGame"] = game.name
-    saves = (game_profile(game) or {}).get("saves")
-    if saves:
-        info["RecompSaves"] = saves
-    else:
-        info.pop("RecompSaves", None)
+    for k in ("RecompSavesMode", "RecompSaves", "RecompSteamCloud"):
+        info.pop(k, None)
+    info.update(steam_cloud.plist_keys(game.app, game_profile(game), getattr(game, "saves_mode", None), "ios", log))
     with open(path, "wb") as f:
         plistlib.dump(info, f)
-    log(f"Info.plist: RecompGame={game.name}" + (f", RecompSaves={saves}" if saves else ", no saves block"))
+    log(f"Info.plist: RecompGame={game.name}, RecompSavesMode={info['RecompSavesMode']}")
 
 
 def apply_profiles(game, game_dlls, plugins):

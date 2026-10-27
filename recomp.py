@@ -19,6 +19,10 @@
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
+         --saves steam|icloud|off   how the port's saves follow the player: Steam Cloud (like the
+                                    Steam client), iCloud Drive (recomp.py saves), or not at all.
+                                    Default: steam for a Steam game with Steam Cloud, else icloud
+                                    when its profile has a saves block, else off.
 The bundle ID defaults to Recomp Helper's, recomp.<team>.<game>, so a port installs over the last one.
 
 Large files (Unity editors, build output) go under $RECOMP_HOME, default this folder.
@@ -67,6 +71,7 @@ def cmd_scan(rest):
     from recomp import saves
     for g in games:
         g["saves"] = g.get("status") != "missing" and saves.has_saves(g["app"])
+        g["steamCloud"] = g.get("status") != "missing" and g.get("route") in ("unity", "unreal") and steam_cloud(g["app"])
         g["mods"] = g.get("status") != "missing" and g.get("route") == "unity" and has_mods(g["app"])
     if a.json:
         print(json.dumps(games))
@@ -74,6 +79,24 @@ def cmd_scan(rest):
         for g in sorted(games, key=lambda g: (g["status"], g["name"].lower())):
             print(f"{g['status']:<12} {g['name']:<32} {g['engine']:<28} {g['source']}")
     return 0
+
+
+def steam_cloud(app):
+    """Whether the game's port would sync with Steam Cloud by default (recomp/steam_cloud.py)."""
+    from recomp import saves
+    try:
+        return saves.default_mode(saves.Game(app)) == "steam"
+    except (SystemExit, Exception):
+        return False
+
+
+def saves_mode(game, profile, chosen, log):
+    """The port's save sync (--saves, else the game's default), kept on the game for the
+    Info.plist writers and recorded for `recomp.py saves --status` and Recomp Helper."""
+    from recomp import saves, steam_cloud
+    game.saves_mode = chosen or steam_cloud.default_mode(game.app, profile)
+    saves.record_mode(game.name, game.saves_mode)
+    log(f"saves: {saves.MODE_NAMES[game.saves_mode]}" + ("" if chosen else " (the default for this game)"))
 
 
 def has_mods(app):
@@ -120,6 +143,7 @@ def cmd_unity(rest):
     p.add_argument("--device")
     p.add_argument("--work")
     p.add_argument("--unity")
+    p.add_argument("--saves", choices=["steam", "icloud", "off"])
     a = p.parse_args(rest)
     bad = [s for s in a.stages if s not in STAGES]
     if bad:
@@ -134,6 +158,8 @@ def cmd_unity(rest):
     if "install" in stages and stages != ["install"]:
         storage.check_port(a.device, game.app)
     unity, ios = u.editor_paths(game.unity_version, a.unity)
+    if "player" in stages:
+        saves_mode(game, u.game_profile(game), a.saves, u.log)
     u.log(f"{game.name}: Unity {game.unity_version} -> {work}")
     for s in STAGES:
         if s not in stages:
@@ -169,6 +195,7 @@ def cmd_unreal(rest):
     p.add_argument("--bundle-id")
     p.add_argument("--device")
     p.add_argument("--work")
+    p.add_argument("--saves", choices=["steam", "icloud", "off"])
     a = p.parse_args(rest)
     bad = [s for s in a.stages if s not in UNREAL_STAGES]
     if bad:
@@ -185,6 +212,8 @@ def cmd_unreal(rest):
     if "install" in stages and stages != ["install"]:
         storage.check_port(a.device, game.app)
     u.log(f"{game.name}: Unreal ({', '.join(game.projects)}) -> {work}")
+    if "xcode" in stages:
+        saves_mode(game, game.profile, a.saves, u.log)
     for s in UNREAL_STAGES:
         if s not in stages:
             continue

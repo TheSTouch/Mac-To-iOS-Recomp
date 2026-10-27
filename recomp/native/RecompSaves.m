@@ -5,7 +5,9 @@
 //
 // Info.plist "RecompSaves" is the profile's saves block ({"ios": root relative
 // to the app container, "include": top-level names under it}) and "RecompGame"
-// the game's name. Without them this file does nothing.
+// the game's name. Without them this file does nothing, nor when "RecompSavesMode"
+// (chosen at port time, recomp/steam_cloud.py) is not "icloud": "steam" ports sync
+// with Steam Cloud instead (RecompSteam/cloud*.m), "off" ones not at all.
 //
 // The first launch asks for a folder through the document picker, so no iCloud
 // entitlement is needed: the player picks "Recomp Saves" and the port syncs with
@@ -577,6 +579,11 @@ __attribute__((constructor)) static void RecompSavesInit(void) {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
         NSDictionary *saves = info[@"RecompSaves"];
         NSString *game = info[@"RecompGame"];
+        NSString *mode = info[@"RecompSavesMode"];
+        if (mode && ![mode isEqual:@"icloud"]) {
+            SLOG(@"saves sync with %@: iCloud Drive not used", [mode isEqual:@"steam"] ? @"Steam Cloud" : @"nothing");
+            return;
+        }
         if (![saves isKindOfClass:NSDictionary.class] || ![game isKindOfClass:NSString.class] || !game.length ||
             ![saves[@"ios"] isKindOfClass:NSString.class])
             return;

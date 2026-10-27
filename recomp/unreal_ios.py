@@ -445,8 +445,9 @@ def info_plist(game):
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }
-    if game.profile.get("saves"):
-        plist["RecompSaves"] = game.profile["saves"]
+    # The port's save sync, from --saves (recomp.py sets game.saves_mode) or the game's default.
+    from recomp import steam_cloud
+    plist.update(steam_cloud.plist_keys(game.app, game.profile, getattr(game, "saves_mode", None), "ios", log))
     # Read by RecompLicense.m: the Steam app the player's account must own.
     plist.update(steam_license.plist_keys(game.app, game.profile, log))
     return plist

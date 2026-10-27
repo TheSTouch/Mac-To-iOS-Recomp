@@ -16,7 +16,15 @@ enum SaveSyncAgent {
     static let gamesFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Recomp Helper/save-sync/games.json")
     static let icloudFolder = "\(NSHomeDirectory())/Library/Mobile Documents/com~apple~CloudDocs/Recomp Saves"
+    static let modesFile = gamesFile.deletingLastPathComponent().appendingPathComponent("modes.json")
     private static var job: String { "gui/\(getuid())/\(label)" }
+
+    /// Each game's port save sync by name ("steam", "icloud", "off"), recorded at port time by recomp.py.
+    /// A game whose port uses Steam Cloud is left to Steam on the Mac: the agent does not sync it.
+    static func portModes() -> [String: String] {
+        guard let data = try? Data(contentsOf: modesFile) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    }
 
     /// Synced games by name -> app path (written by `recomp.py saves --enable`).
     static func syncedGames() -> [String: String] {
@@ -100,8 +108,10 @@ final class SaveSyncDaemon: @unchecked Sendable {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let modes = SaveSyncAgent.portModes()
             guard let path = app?.bundleURL?.standardizedFileURL.path,
-                  SaveSyncAgent.syncedGames().values.contains(where: { URL(fileURLWithPath: $0).standardizedFileURL.path == path })
+                  SaveSyncAgent.syncedGames().contains(where: {
+                      modes[$0.key] != "steam" && URL(fileURLWithPath: $0.value).standardizedFileURL.path == path })
             else { return }
             request(path)
         }

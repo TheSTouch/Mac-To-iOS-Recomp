@@ -90,13 +90,23 @@ def _kv(buf, pos, keys):
             raise ValueError(f"appinfo.vdf: value type {t} not known")
 
 
+_cache = {}
+
+
 def app_info(appid, path=APPINFO):
     """The "appinfo" section of one app in Steam's cache, or None."""
+    if (path, appid) in _cache:
+        return _cache[path, appid]
     try:
         with open(path, "rb") as f:
             buf = f.read()
     except OSError:
         return None
+    _cache[path, appid] = info = _find(buf, appid)
+    return info
+
+
+def _find(buf, appid):
     magic, _universe = struct.unpack_from("<II", buf, 0)
     if magic == 0x07564429:      # v29: keys are indices into a string table at the end
         table = struct.unpack_from("<q", buf, 8)[0]

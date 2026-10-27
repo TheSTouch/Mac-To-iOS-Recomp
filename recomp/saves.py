@@ -26,6 +26,11 @@ iCloud Drive once the player allows it. Only files that changed are copied.
   --status   per entry: last change here and in iCloud Drive, last sync
   --sync     one sync now (refused while the game runs)
 
+A port can sync its saves with Steam Cloud instead (recomp/steam_cloud.py): then the
+Mac game's own Steam client is the Mac side, and this module leaves the game alone.
+The mode each game's last port was made with is kept in save-sync/modes.json;
+--status reports it ("port_mode") with the one the next port would get by default.
+
 Profile schema: "saves": {"mac": "<save root, ~ and glob characters allowed>",
 "ios": "<root relative to the app container>", "include": ["<top-level names>"]}.
 A glob matching several folders (one per Steam account, say) uses the most
@@ -196,6 +201,22 @@ def games_file():
     return os.path.join(STATE, "games.json")
 
 
+def modes_file():
+    return os.path.join(STATE, "modes.json")
+
+
+def record_mode(name, mode):
+    """At port time: the save sync the game's port uses ("steam", "icloud" or "off")."""
+    modes = load(modes_file(), {})
+    modes[name] = mode
+    save(modes_file(), modes)
+
+
+def port_mode(game):
+    """The save sync of the game's last port, None before its first port with this version."""
+    return load(modes_file(), {}).get(game.name)
+
+
 def state_file(game):
     return os.path.join(STATE, f"{game.name}.json")
 
@@ -338,8 +359,15 @@ def synced_games():
     return load(games_file(), {})
 
 
+def steam_mode(game):
+    if port_mode(game) == "steam":
+        sys.exit(f"{game.name}: its port syncs saves with Steam Cloud, like the Mac game does through Steam; "
+                 "iCloud Drive sync is not used. Port it with --saves icloud to use iCloud Drive instead.")
+
+
 def enable(game):
     check(game)
+    steam_mode(game)
     icloud_game(game)
     games = synced_games()
     extra = {"backup": None}
@@ -367,6 +395,7 @@ def disable(game):
 
 def sync_now(game):
     check(game)
+    steam_mode(game)
     if running(game):
         sys.exit(f"Quit {game.name} first: its saves sync while it is not running.")
     return status(game, sync(game, "by hand"))
@@ -377,7 +406,7 @@ def sync_all():
     for name, app in sorted(synced_games().items()):
         try:
             game = Game(app)
-            if game.saves and not running(game):
+            if game.saves and port_mode(game) != "steam" and not running(game):
                 sync(game, "background")
         except (SystemExit, Exception) as e:
             log(f"{name}: {e}")
@@ -392,8 +421,9 @@ def newest(top, names):
 def status(game, extra=None):
     out = {"game": game.name, "supported": bool(game.saves), "icloud": os.path.isdir(ICLOUD), "enabled": False,
            "root": None, "cloud": None, "entries": [], "last_change": None, "last_sync": None, "running": False,
-           "synced_games": len(synced_games())}
+           "synced_games": len(synced_games()), "port_mode": port_mode(game), "default_mode": default_mode(game)}
     if not game.saves:
+        out.update(extra or {})
         return out
     root = mac_root(game)
     cloud = os.path.join(ICLOUD, FOLDER, game.name)
@@ -410,7 +440,24 @@ def status(game, extra=None):
     return out
 
 
+def default_mode(game):
+    from recomp import steam_cloud
+    try:
+        return steam_cloud.default_mode(game.app, game.profile)
+    except (SystemExit, Exception):
+        return "icloud" if game.saves else "off"
+
+
+MODE_NAMES = {"steam": "Steam Cloud", "icloud": "iCloud Drive", "off": "no sync"}
+
+
 def show(st):
+    mode = st.get("port_mode")
+    print(f"{st['game']}: the port's saves: " + (f"{MODE_NAMES.get(mode, mode)}" if mode else "not ported yet with a saves choice")
+          + f" (the next port's default: {MODE_NAMES.get(st.get('default_mode'), '-')})")
+    if mode == "steam":
+        print("  the port syncs with Steam Cloud like the Steam client; the Mac game syncs through Steam itself")
+        return
     if not st["supported"]:
         print(f"{st['game']}: save sync is not available (no saves block in its profile)")
         return

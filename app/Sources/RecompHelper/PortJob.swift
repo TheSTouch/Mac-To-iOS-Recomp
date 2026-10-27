@@ -11,6 +11,8 @@ final class PortJob: ObservableObject, Identifiable {
         var deviceName: String
         var deviceKind: String
         var workspace: String
+        /// How the port's saves follow the player: "steam", "icloud" or "off" (`--saves`).
+        var saves: String
     }
 
     enum StageState { case pending, running, done, failed }
@@ -131,7 +133,7 @@ final class PortJob: ObservableObject, Identifiable {
     }
 
     private var portOptions: [String] {
-        ["--team", settings.team, "--bundle-id", settings.bundleId, "--device", settings.device]
+        ["--team", settings.team, "--bundle-id", settings.bundleId, "--device", settings.device, "--saves", settings.saves]
     }
 
     private func runPipeline() async {
