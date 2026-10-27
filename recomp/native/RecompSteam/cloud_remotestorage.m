@@ -18,10 +18,13 @@ static uint64_t gNextStream = 1;
 static BOOL gAppEnabled = YES;
 
 static NSString *Path(const char *name) {
+    RSCloudWaitForLaunch();
     NSString *root = RSCloudRemoteFolder();
     if (!root || !name || !name[0]) return nil;
+    // Steam names a file without a leading slash: Valheim's "/characters/x.fch" is "characters/x.fch".
     NSString *n = [[NSString stringWithUTF8String:name] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
-    if ([n hasPrefix:@"/"] || [n hasPrefix:@"%"]) return nil;
+    while ([n hasPrefix:@"/"]) n = [n substringFromIndex:1];
+    if (!n.length || [n hasPrefix:@"%"]) return nil;
     for (NSString *part in [n componentsSeparatedByString:@"/"])
         if ([part isEqualToString:@".."]) return nil;
     return [root stringByAppendingPathComponent:n];
@@ -38,6 +41,7 @@ static BOOL Write(NSString *path, NSData *data) {
 }
 
 static NSArray<NSString *> *Files(uint64_t *bytes) {
+    RSCloudWaitForLaunch();
     NSString *root = RSCloudRemoteFolder();
     NSMutableArray *out = [NSMutableArray array];
     uint64_t total = 0;

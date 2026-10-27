@@ -61,4 +61,10 @@ RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL settle, NSTimeInte
 // version not kept goes to the backup folder first.
 RSCloudReport *RSCloudResolve(NSArray<RSCloudConflict *> *conflicts, BOOL keepCloud);
 void RSCloudWriteOffline(NSString *why);
+
+// --- cloud_launch.m ----------------------------------------------------------------------
+// Waits (at most until 15 s after the launch) for the launch pass to bring Steam Cloud's saves
+// down. SteamAPI_Init and ISteamRemoteStorage call it, from the game's threads; a no-op outside
+// steam mode and once the pass is done.
+void RSCloudWaitForLaunch(void);
 NSString *RSCloudBackupShown(void);

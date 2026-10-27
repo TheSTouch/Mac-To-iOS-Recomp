@@ -1,6 +1,9 @@
 // Steam Cloud saves around the game's life, as the Steam client syncs them around a game:
-//   - at launch, before the game reads its saves (a constructor, like RecompSaves.m's),
-//     the session logs on and Steam Cloud's changes come down; at most kLaunchWait;
+//   - at launch the session logs on and Steam Cloud's changes come down, before the game
+//     reads its saves: a constructor starts the pass, and the game's first Steam calls
+//     (SteamAPI_Init, ISteamRemoteStorage) wait for it, kLaunchWait after the start at
+//     most. The constructor itself must not wait: while initializers run, dyld holds its
+//     lock, and the session's networking threads need it to load what they use;
 //   - this device's changes go up right after, every kPeriod while it plays, when it
 //     goes to the background and when it quits;
 //   - while the game runs, Steam Cloud's changes wait for the next launch; when the
@@ -29,7 +32,9 @@ static const NSTimeInterval kPeriod = 300;
 static dispatch_queue_t gQueue;                 // every pass runs here, one at a time
 static dispatch_source_t gTimer;
 static NSString *gGame, *gDevice;
-static BOOL gLaunchSynced, gAsking, gQuitting;
+static BOOL gLaunchSynced, gAsking, gQuitting, gGaveUp;
+static dispatch_group_t gLaunch;               // the launch pass, which the game's first Steam calls wait for
+static CFAbsoluteTime gLaunchDeadline;
 
 #if TARGET_OS_IPHONE
 // --- asking the player (iOS) --------------------------------------------------------------
@@ -230,6 +235,16 @@ static void AtExit(void) { PassAndWait(@"quit", 10); }
 
 // --- start-up ------------------------------------------------------------------------------
 
+// From the game's threads only (never the session's queue or this file's).
+void RSCloudWaitForLaunch(void) {
+    if (!gLaunch || !dispatch_group_wait(gLaunch, DISPATCH_TIME_NOW)) return;
+    double left = MAX(gLaunchDeadline - CFAbsoluteTimeGetCurrent(), 0);
+    if (dispatch_group_wait(gLaunch, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(left * NSEC_PER_SEC)))) {
+        if (!gGaveUp) CLOG(@"launch: still syncing after %.0f s, the game goes on", kLaunchWait);
+        gGaveUp = YES;
+    }
+}
+
 __attribute__((constructor)) static void RecompSteamCloudInit(void) {
     @autoreleasepool {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
@@ -256,32 +271,33 @@ __attribute__((constructor)) static void RecompSteamCloudInit(void) {
         }
         gQueue = dispatch_queue_create("recomp.steam.cloud", DISPATCH_QUEUE_SERIAL);
 
-        // Down before the game reads its saves; this thread waits, the session does not need it.
+        // Down before the game reads its saves: the game's first Steam call waits for this.
         BOOL stored = RecompSteam_StartStored();
-        dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        __block RSCloudReport *launch = nil;
+        gLaunch = dispatch_group_create();
+        gLaunchDeadline = CFAbsoluteTimeGetCurrent() + kLaunchWait;
+        dispatch_group_enter(gLaunch);
         RecompSteam_WhenLoggedOn(stored ? kLaunchWait - 3 : 0, ^(bool loggedOn) {
             dispatch_async(gQueue, ^{
                 @autoreleasepool {
+                    RSCloudReport *launch = nil;
                     if (loggedOn) {
                         RSCloudSetAccount(RecompSteam_SteamID());
-                        launch = RSCloudSync(@"launch", YES, NO, 10);
+                        launch = RSCloudSync(@"launch", YES, NO, MAX(gLaunchDeadline - CFAbsoluteTimeGetCurrent(), 5));
                         gLaunchSynced = !launch.offline;
                     } else {
                         RSCloudWriteOffline(stored ? @"Steam did not answer in time" : @"not signed in to Steam yet");
                     }
+                    dispatch_group_leave(gLaunch);
+                    // The game went on without these files: it reads them at the next launch.
+                    if (gGaveUp && launch.downloaded + launch.deletedHere > 0)
+                        AskToReopen(@"Your saves from Steam Cloud came after the game had started.");
+                    // Conflicts are asked once the game's window is up; this device's changes go up now.
+                    if (launch) After(launch);
+                    if (gLaunchSynced) Pass(@"after launch", NO, 120);
+                    Passes(); // only now: a pass of its own must not overtake the launch's
                 }
-                dispatch_semaphore_signal(done);
             });
         });
-        if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kLaunchWait * NSEC_PER_SEC))))
-            CLOG(@"launch: still syncing after %.0f s, the game goes on", kLaunchWait);
-        // Conflicts are asked once the game's window is up; this device's changes go up now.
-        dispatch_async(gQueue, ^{
-            if (launch) After(launch);
-            if (gLaunchSynced) Pass(@"after launch", NO, 120);
-        });
-        Passes();
 
 #if TARGET_OS_IPHONE
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
