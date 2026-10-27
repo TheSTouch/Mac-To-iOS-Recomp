@@ -138,11 +138,28 @@ int main(int argc, char **argv)
             });
         } else if ([cmd isEqual:@"playing"]) {
             WithLogon(app, ^{
+                // What friends see: the account's own persona state, with the game it plays.
+                RecompSteam_Subscribe(RS_ClientPersonaState, ^(const RecompSteamMessage *m) {
+                    rs_pb_reader r = rs_pb_read(m->body, m->length);
+                    rs_pb_field f;
+                    while (rs_pb_next(&r, &f))
+                        if (f.number == 2 && f.wire == RS_PB_BYTES &&
+                            rs_pb_get_varint(f.data, f.length, 1, 0) == RecompSteam_SteamID()) {
+                            char game[128];
+                            rs_pb_get_string(f.data, f.length, 55, game, sizeof game);
+                            Out(@"persona: playing app %llu %s", rs_pb_get_varint(f.data, f.length, 3, 0), game);
+                        }
+                });
+                rs_pb_writer w = {0};
+                rs_pb_varint(&w, 1, 0xFFFF);   // every persona field
+                rs_pb_fixed64(&w, 2, RecompSteam_SteamID());
+                RecompSteam_Send(RS_ClientRequestFriendData, w.data, w.length);
+                rs_pb_free(&w);
                 // ClientPlayingSessionState arrives just after the logon.
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), RecompSteam_Queue(), ^{
                     uint32_t other = 0;
                     bool blocked = RecompSteam_PlayingBlocked(&other);
-                    Out(blocked ? @"playing app %u on another device" : @"not playing anywhere else (%u)", other);
+                    Out(blocked ? @"playing app %u on another device" : @"not blocked by another device (%u)", other);
                     RecompSteam_Stop();
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), RecompSteam_Queue(), ^{ Exit(0); });
                 });

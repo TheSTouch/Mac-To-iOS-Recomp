@@ -345,7 +345,8 @@ static void PauseGame(BOOL pause) {
     typedef void (*UnityPauseFn)(int);
     static UnityPauseFn unityPause;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ unityPause = (UnityPauseFn)dlsym(RTLD_DEFAULT, "UnityPause"); });
+    // RecompUnityPause.c, in Unity ports only: UnityFramework does not export UnityPause itself.
+    dispatch_once(&once, ^{ unityPause = (UnityPauseFn)dlsym(RTLD_DEFAULT, "RecompUnityPause"); });
     if (!unityPause || paused == pause) return;
     paused = pause;
     LLOG(@"%@ the game while the player signs in", pause ? @"pausing" : @"resuming");

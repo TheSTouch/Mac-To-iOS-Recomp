@@ -810,16 +810,32 @@ void RecompSteam_Call(const char *method, const void *request, size_t length, do
     RecompSteamReply r = [reply copy];
     double limit = timeout > 0 ? timeout : 20;
     double start = CFAbsoluteTimeGetCurrent();
-    RecompSteam_WhenLoggedOn(limit, ^(bool ok) {
-        double left = limit - (CFAbsoluteTimeGetCurrent() - start);
-        if (!ok || !gLink || left <= 0) {
-            RecompSteamMessage none = {.emsg = 0, .eresult = RecompSteamResultTimeout};
-            r(&none);
-            return;
-        }
-        [gLink send:RS_ServiceMethodCallFromClient body:d.bytes length:d.length jobName:name.UTF8String routing:0
-            timeout:left reply:r];
-    });
+    __block int tries = 0;
+    __block void (^attempt)(void);
+    attempt = ^{
+        RecompSteam_WhenLoggedOn(limit - (CFAbsoluteTimeGetCurrent() - start), ^(bool ok) {
+            double left = limit - (CFAbsoluteTimeGetCurrent() - start);
+            if (!ok || !gLink || left <= 0) {
+                RecompSteamMessage none = {.emsg = 0, .eresult = RecompSteamResultTimeout};
+                attempt = nil;
+                r(&none);
+                return;
+            }
+            RSLink *link = gLink;
+            [link send:RS_ServiceMethodCallFromClient body:d.bytes length:d.length jobName:name.UTF8String routing:0
+                timeout:left reply:^(const RecompSteamMessage *m) {
+                // The connection dropped under the call (a reconnect, a new token): send it
+                // again once the session is back, within the same time limit.
+                if (!m->emsg && link.closed && ++tries < 3 && limit - (CFAbsoluteTimeGetCurrent() - start) > 1) {
+                    attempt();
+                    return;
+                }
+                attempt = nil;
+                r(m);
+            }];
+        });
+    };
+    attempt();
 }
 
 void RecompSteam_GamesPlayed(const uint32_t *app_ids, int count)
