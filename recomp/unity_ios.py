@@ -37,9 +37,10 @@ NATIVE_SKIP = {"steam_api_stub.c"}
 # through RuntimeInitializeOnLoads.json.
 SHIM_SPECS = [
     {"project": "RecompPhone", "assembly": "Recomp.Phone", "requires": None,
-     "init": {"nameSpace": "Recomp", "className": "PhoneSettings", "methodName": "Install", "loadTypes": 1}},
+     "init": [{"nameSpace": "Recomp", "className": "PhoneSettings", "methodName": "Install", "loadTypes": 1},
+              {"nameSpace": "Recomp", "className": "BuiltinMods", "methodName": "Install", "loadTypes": 1}]},
     {"project": "RecompTouchMouse", "assembly": "Recomp.TouchMouse", "requires": "Unity.InputSystem.dll",
-     "init": {"nameSpace": "Recomp", "className": "TouchMouse", "methodName": "Install", "loadTypes": 1}},
+     "init": [{"nameSpace": "Recomp", "className": "TouchMouse", "methodName": "Install", "loadTypes": 1}]},
 ]
 
 # Native libraries with a hand-written override file in stubs/. Their P/Invokes
@@ -504,17 +505,23 @@ def write_shim_config(game, data):
     the corner they go in ("touch_keys_corner": "left", "right", or "island": beside a
     phone's Dynamic Island when held sideways, bottom-right otherwise), touches on the game's UI left
     to it as real touches ("touch_ui"),
-    and the iPhone settings of its "iphone" block (see PHONE_DEFAULTS)."""
+    the iPhone settings of its "iphone" block (see PHONE_DEFAULTS),
+    and the PlayerPrefs keys that keep the port's built-in mods on (mods.builtin_enabled_prefs)."""
+    from recomp import mods
     profile = game_profile(game) or {}
     os.makedirs(os.path.join(data, "Raw"), exist_ok=True)
     phone = phone_settings(profile)
+    builtin = mods.builtin_enabled_prefs(mods.config(profile), BUILTIN_MODS)
     with open(os.path.join(data, "Raw", "recomp.json"), "w") as f:
         json.dump({"touchGamepad": bool(profile.get("touch_gamepad")),
                    "touchUi": bool(profile.get("touch_ui")),
                    "touchKeys": profile.get("touch_keys", []),
                    "touchKeysCorner": profile.get("touch_keys_corner", "left"),
-                   "phone": phone}, f)
+                   "phone": phone,
+                   "builtinModPrefs": builtin}, f)
     log(f"recomp.json phone settings: {phone}")
+    if builtin:
+        log(f"recomp.json built-in mods kept enabled: {', '.join(builtin)}")
 
 
 def write_save_info(game, xcode_dir):
@@ -604,9 +611,10 @@ def register_shims(game, data):
         if dll not in sa["names"]:
             sa["names"].append(dll)
             sa["types"].append(16)  # user assembly
-        entry = dict(spec["init"], assemblyName=spec["assembly"], isUnityClass=False)
-        if entry not in rt["root"]:
-            rt["root"].append(entry)
+        for init in spec["init"]:
+            entry = dict(init, assemblyName=spec["assembly"], isUnityClass=False)
+            if entry not in rt["root"]:
+                rt["root"].append(entry)
     with open(sa_path, "w") as f:
         json.dump(sa, f)
     with open(rt_path, "w") as f:

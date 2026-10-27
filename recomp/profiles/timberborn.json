@@ -34,7 +34,8 @@
     ],
     "builtin": [
       "timberborn/TheSTouchscreen"
-    ]
+    ],
+    "enabled_pref": "ModEnabled.Local.{folder}.{id}"
   },
   "touch_keys": [
     {

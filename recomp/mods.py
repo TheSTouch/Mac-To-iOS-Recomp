@@ -9,13 +9,16 @@ port time. A game profile's "mods" block says where the game keeps its mods:
     "manifest": "manifest.json",             # a folder holding one is a mod
     "version_dirs": "version-",              # optional: per-game-version subfolders
     "exclude": [".git", "src", "*.zip"],     # not copied to the iPad by `recomp.py mods`
-    "builtin": ["timberborn/TheSTouchscreen"]    # optional: mods of the port itself (recomp/builtin_mods)
+    "builtin": ["timberborn/TheSTouchscreen"],   # optional: mods of the port itself (recomp/builtin_mods)
+    "enabled_pref": "ModEnabled.Local.{folder}.{id}"  # optional: the PlayerPrefs key that says whether a
+                                             # mod is on ({folder}: its folder on the iPad, {id}: its Id)
   }
 
 Built-in mods are part of every port of the game: built at port time against the game and
 the port's shims, laid out in work/builtin-mods like a mod on the Mac (source "Built in"),
 then checked, compiled in and copied to the iPad like the others. The player can still
-leave one out, or turn it off in the game's own mod list.
+leave one out of a port, but not turn it off in the game: given "enabled_pref", the port sets
+each built-in mod's key to on at every launch (recomp.json "builtinModPrefs", Recomp.BuiltinMods).
 
 prepare() picks the DLLs the game would load, checks each one against the iOS class
 library and the game (asmtool check), and returns the assemblies to compile in. The
@@ -272,13 +275,31 @@ def copy_filter(cfg):
     return lambda _dir, names: [n for n in names if any(fnmatch.fnmatch(n, p) for p in patterns)]
 
 
+def ios_folder(name, mod_id):
+    """The folder a mod gets on the iPad: its name, made safe for a file name."""
+    return re.sub(r'[/:\\"*?<>|]', "_", name).strip() or mod_id
+
+
+def builtin_enabled_prefs(cfg, builtin_root):
+    """The PlayerPrefs key of each built-in mod (cfg "builtin", under builtin_root) that says whether
+    the game loads it: cfg "enabled_pref" filled with the mod's folder on the iPad and its Id."""
+    pattern = (cfg or {}).get("enabled_pref")
+    keys = []
+    for rel in (cfg or {}).get("builtin", []) if pattern else []:
+        info = read_manifest(os.path.join(builtin_root, rel, cfg.get("manifest", "manifest.json")))
+        if info and info.get("Id"):
+            keys.append(pattern.format(folder=ios_folder(info.get("Name") or os.path.basename(rel), info["Id"]),
+                                       id=info["Id"]))
+    return keys
+
+
 def stage(mods, cfg, out):
     """Copy each mod folder as the iPad should see it (minus "exclude") under out/<name>."""
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     used = set()
     for m in mods:
-        name = re.sub(r'[/:\\"*?<>|]', "_", m["name"]).strip() or m["id"]
+        name = ios_folder(m["name"], m["id"])
         if name in used:
             name = f"{name} ({m['id']})"
         used.add(name)
