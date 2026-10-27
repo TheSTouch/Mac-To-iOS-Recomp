@@ -9,10 +9,13 @@
 //    their header says macOS; with that flag cleared the same code loads and runs;
 //  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged;
 //  - command buffers wait while the app is inactive, since iOS refuses GPU work
-//    from the background and the engine would stop with a fatal error.
+//    from the background and the engine would stop with a fatal error;
+//  - the GPU time of every command buffer, and the time the game's threads wait
+//    for pipeline states and shader libraries, are added up for the heartbeat.
 #import "RecompAppKit.h"
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
+#import <os/lock.h>
 
 static const NSUInteger kManagedOption = 1 << MTLResourceStorageModeShift;
 static const NSUInteger kStorageMask = 0xF << MTLResourceStorageModeShift;
@@ -66,6 +69,68 @@ static BOOL ReturnYES(id self, SEL s) { return YES; }
 static NSUInteger ReturnZero(id self, SEL s) { return 0; }
 static uint32_t ReturnOne32(id self, SEL s) { return 1; }
 
+// --- time spent waiting for Metal -----------------------------------------------------
+// Pipeline states made on the caller's thread (the engine's render and RHI threads
+// wait for them; the driver compiles each one the first time it is asked for) and
+// shader libraries loaded: how many, how long in all, the longest. Calls nested in
+// a timed one (a variant calling another, a library retried) count once.
+
+static os_unfair_lock gTimeLock = OS_UNFAIR_LOCK_INIT;
+static double gTimes[6]; // pipelines: count, seconds, longest; libraries: the same
+static __thread int gTimedDepth;
+
+static double TimedStart(void) { return gTimedDepth++ ? 0 : CACurrentMediaTime(); }
+static void TimedEnd(int kind, double start) {
+    if (--gTimedDepth) return;
+    double t = CACurrentMediaTime() - start, *k = gTimes + kind * 3;
+    os_unfair_lock_lock(&gTimeLock);
+    k[0]++;
+    k[1] += t;
+    k[2] = MAX(k[2], t);
+    os_unfair_lock_unlock(&gTimeLock);
+}
+
+// The totals since the last call.
+void RecompMetalTimes(double out[6]) {
+    os_unfair_lock_lock(&gTimeLock);
+    memcpy(out, gTimes, sizeof gTimes);
+    memset(gTimes, 0, sizeof gTimes);
+    os_unfair_lock_unlock(&gTimeLock);
+}
+
+static IMP oRenderPipe, oRenderPipeRefl, oComputePipe, oComputePipeRefl, oComputePipeDesc;
+
+static id TimeRenderPipe(id self, SEL s, id d, NSError **e) {
+    double t = TimedStart();
+    id p = ((id (*)(id, SEL, id, NSError **))oRenderPipe)(self, s, d, e);
+    TimedEnd(0, t);
+    return p;
+}
+static id TimeRenderPipeRefl(id self, SEL s, id d, NSUInteger o, id *r, NSError **e) {
+    double t = TimedStart();
+    id p = ((id (*)(id, SEL, id, NSUInteger, id *, NSError **))oRenderPipeRefl)(self, s, d, o, r, e);
+    TimedEnd(0, t);
+    return p;
+}
+static id TimeComputePipe(id self, SEL s, id f, NSError **e) {
+    double t = TimedStart();
+    id p = ((id (*)(id, SEL, id, NSError **))oComputePipe)(self, s, f, e);
+    TimedEnd(0, t);
+    return p;
+}
+static id TimeComputePipeRefl(id self, SEL s, id f, NSUInteger o, id *r, NSError **e) {
+    double t = TimedStart();
+    id p = ((id (*)(id, SEL, id, NSUInteger, id *, NSError **))oComputePipeRefl)(self, s, f, o, r, e);
+    TimedEnd(0, t);
+    return p;
+}
+static id TimeComputePipeDesc(id self, SEL s, id d, NSUInteger o, id *r, NSError **e) {
+    double t = TimedStart();
+    id p = ((id (*)(id, SEL, id, NSUInteger, id *, NSError **))oComputePipeDesc)(self, s, d, o, r, e);
+    TimedEnd(0, t);
+    return p;
+}
+
 // --- shader libraries --------------------------------------------------------------
 
 static IMP oLibData, oLibFile, oLibURL;
@@ -85,13 +150,16 @@ static dispatch_data_t WithoutMacFlag(dispatch_data_t data) {
 }
 
 static id FixLibData(id self, SEL s, dispatch_data_t data, NSError **err) {
+    double t = TimedStart();
     NSError *e = nil;
     id lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, data, &e);
     if (!lib && [e.domain isEqualToString:MTLLibraryErrorDomain]) {
         dispatch_data_t fixed = WithoutMacFlag(data);
         if (fixed) lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, fixed, &e);
-        if (lib) RLOG(@"metallib from older tools: loaded with the macOS flag cleared");
+        static dispatch_once_t once;
+        if (lib) dispatch_once(&once, ^{ RLOG(@"metallib from older tools: loaded with the macOS flag cleared (the others are counted in the heartbeat)"); });
     }
+    TimedEnd(1, t);
     if (!lib && err) *err = e;
     return lib;
 }
@@ -107,14 +175,20 @@ static id LibFromPath(id self, NSString *path, NSError **err, id lib, NSError *e
     return lib;
 }
 static id FixLibFile(id self, SEL s, NSString *path, NSError **err) {
+    double t = TimedStart();
     NSError *e = nil;
     id lib = ((id (*)(id, SEL, NSString *, NSError **))oLibFile)(self, s, path, &e);
-    return LibFromPath(self, path, err, lib, e);
+    lib = LibFromPath(self, path, err, lib, e);
+    TimedEnd(1, t);
+    return lib;
 }
 static id FixLibURL(id self, SEL s, NSURL *url, NSError **err) {
+    double t = TimedStart();
     NSError *e = nil;
     id lib = ((id (*)(id, SEL, NSURL *, NSError **))oLibURL)(self, s, url, &e);
-    return LibFromPath(self, url.path, err, lib, e);
+    lib = LibFromPath(self, url.path, err, lib, e);
+    TimedEnd(1, t);
+    return lib;
 }
 
 // --- descriptors ---------------------------------------------------------------------
@@ -162,10 +236,34 @@ static NSCondition *gGate;
 static BOOL gHold;
 static id gLastCommit;
 
+// Seconds the GPU spent on the game's work since launch. Command buffers overlap
+// on the GPU, so each one adds only the part of its run after the latest end seen.
+static os_unfair_lock gGPULock = OS_UNFAIR_LOCK_INIT;
+static double gGPUBusy, gGPULastEnd;
+
+double RecompGPUSeconds(void) {
+    os_unfair_lock_lock(&gGPULock);
+    double busy = gGPUBusy;
+    os_unfair_lock_unlock(&gGPULock);
+    return busy;
+}
+
+static void CountGPUTime(id<MTLCommandBuffer> b) {
+    double start = b.GPUStartTime, end = b.GPUEndTime;
+    if (end <= start) return;
+    os_unfair_lock_lock(&gGPULock);
+    if (end > gGPULastEnd) {
+        gGPUBusy += end - MAX(start, gGPULastEnd);
+        gGPULastEnd = end;
+    }
+    os_unfair_lock_unlock(&gGPULock);
+}
+
 static void Commit(IMP orig, id self, SEL s) {
     [gGate lock];
     while (gHold && !NSThread.isMainThread) [gGate wait];
     gLastCommit = self;
+    [(id<MTLCommandBuffer>)self addCompletedHandler:^(id<MTLCommandBuffer> b) { CountGPUTime(b); }];
     ((void (*)(id, SEL))orig)(self, s);
     [gGate unlock];
 }
@@ -214,6 +312,11 @@ __attribute__((constructor)) static void RecompMetalInit(void) {
         Swizzle(dc, @selector(newLibraryWithFile:error:), (IMP)FixLibFile, &oLibFile);
         Swizzle(dc, @selector(newLibraryWithURL:error:), (IMP)FixLibURL, &oLibURL);
         Swizzle(dc, @selector(supportsFeatureSet:), (IMP)FixSupportsFeatureSet, &oSupportsFeatureSet);
+        Swizzle(dc, @selector(newRenderPipelineStateWithDescriptor:error:), (IMP)TimeRenderPipe, &oRenderPipe);
+        Swizzle(dc, @selector(newRenderPipelineStateWithDescriptor:options:reflection:error:), (IMP)TimeRenderPipeRefl, &oRenderPipeRefl);
+        Swizzle(dc, @selector(newComputePipelineStateWithFunction:error:), (IMP)TimeComputePipe, &oComputePipe);
+        Swizzle(dc, @selector(newComputePipelineStateWithFunction:options:reflection:error:), (IMP)TimeComputePipeRefl, &oComputePipeRefl);
+        Swizzle(dc, @selector(newComputePipelineStateWithDescriptor:options:reflection:error:), (IMP)TimeComputePipeDesc, &oComputePipeDesc);
         AddIfMissing(dc, @selector(isLowPower), (IMP)ReturnNO, "B@:");
         AddIfMissing(dc, @selector(isHeadless), (IMP)ReturnNO, "B@:");
         AddIfMissing(dc, @selector(isRemovable), (IMP)ReturnNO, "B@:");
