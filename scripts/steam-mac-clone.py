@@ -65,6 +65,13 @@ def build_runtime(original=None, out=OUT):
     archs = ["-arch", "arm64", "-arch", "x86_64"]
     common = ["xcrun", "clang", *archs, "-mmacosx-version-min=11.0", "-O1", "-g", "-fobjc-arc", "-fmodules",
               "-fvisibility=default", "-Wno-unused-function", "-Wno-deprecated-declarations"]
+    # Session C's GameNetworkingSockets (Steam servers), when its build script is present.
+    gns = None
+    try:
+        from recomp import gamenetworkingsockets as gns
+        common.append("-DRECOMP_GNS")
+    except ImportError:
+        pass
     objects = []
     for src in runtime_sources():
         o = os.path.join(objs, os.path.basename(src) + ".o")
@@ -74,6 +81,8 @@ def build_runtime(original=None, out=OUT):
     for o in objects:
         r = subprocess.run(["nm", "-gUj", "-arch", "arm64", o], capture_output=True, text=True, check=True)
         defined |= {s[1:] for s in r.stdout.split() if s.startswith("_")}
+    if gns:
+        defined |= set(gns.exports("macos"))
     stubs = os.path.join(out, "steam_api_stubs.c")
     missing = [n for n in exported_c_functions(original) if n not in defined] if original else []
     with open(stubs, "w") as f:
@@ -86,7 +95,8 @@ def build_runtime(original=None, out=OUT):
     dylib = os.path.join(out, "libsteam_api.dylib")
     fw = [x for f in FRAMEWORKS for x in ("-framework", f)]
     run(["xcrun", "clang", *archs, "-mmacosx-version-min=11.0", "-dynamiclib", "-install_name",
-         "@loader_path/libsteam_api.dylib", "-lc++", *fw, *objects, so, "-o", dylib])
+         "@loader_path/libsteam_api.dylib", "-lc++", *fw, *objects, so, *(gns.libraries("macos") if gns else []),
+         "-o", dylib])
     log(f"runtime: {dylib} ({len(defined)} symbols from {len(objects)} sources, {len(missing)} generated stubs)")
     return dylib
 

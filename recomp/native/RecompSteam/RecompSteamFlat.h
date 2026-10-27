@@ -26,6 +26,9 @@ enum {
 // object's address in RS_Interfaces[which] (before the game asks).
 void *RS_Interface(int which);
 extern void *RS_Interfaces[RS_INTERFACE_COUNT];
+// Optional makers: RS_Interface(which) calls RS_InterfaceMakers[which] while the slot is empty
+// and keeps what it returns (RecompSteam/networking.m starts GameNetworkingSockets this way).
+extern void *(*RS_InterfaceMakers[RS_INTERFACE_COUNT])(void);
 int RS_InterfaceForVersion(const char *version);
 
 // Callbacks to the game, from any thread: delivered at its next RunCallbacks or

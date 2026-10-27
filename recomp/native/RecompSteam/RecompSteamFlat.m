@@ -26,11 +26,13 @@
 // Each accessor hands out the address of one object per interface: the flat functions
 // ignore it, the C++ route (RecompSteamCpp.mm) puts a vtable there.
 void *RS_Interfaces[RS_INTERFACE_COUNT];
+void *(*RS_InterfaceMakers[RS_INTERFACE_COUNT])(void);
 static char gDummy[RS_INTERFACE_COUNT][64];
 
 void *RS_Interface(int which)
 {
     if (which < 0 || which >= RS_INTERFACE_COUNT) return NULL;
+    if (!RS_Interfaces[which] && RS_InterfaceMakers[which]) RS_Interfaces[which] = RS_InterfaceMakers[which]();
     return RS_Interfaces[which] ? RS_Interfaces[which] : gDummy[which];
 }
 
