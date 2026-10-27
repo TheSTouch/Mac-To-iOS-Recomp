@@ -101,7 +101,11 @@ static NSDictionary *LoadState(void) {
     return state;
 }
 
-static void Forget(void) { SecItemDelete((__bridge CFDictionaryRef)KeychainQuery()); }
+// Forgetting the sign-in also ends the session that logged on with it.
+static void Forget(void) {
+    SecItemDelete((__bridge CFDictionaryRef)KeychainQuery());
+    RecompSteam_Stop();
+}
 
 // How Steam lists the sign-in under Authorized devices.
 static NSString *DeviceName(void) {

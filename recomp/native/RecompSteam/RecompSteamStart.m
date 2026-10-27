@@ -64,6 +64,17 @@ bool RecompSteam_StartStored(void)
         uint32_t app = RS_GameAppID();
         if (!app) return;
         RS_SetAppID(app);
+#if TARGET_OS_IPHONE
+        // Deleting Documents/Recomp Steam license.txt in Files is how the player signs out
+        // (RecompLicense.m): without it the stored token is not used.
+        const char *home = getenv("CFFIXED_USER_HOME");
+        NSString *container = home ? @(home) : NSHomeDirectory();
+        NSString *status = [container stringByAppendingPathComponent:@"Documents/Recomp Steam license.txt"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:status]) {
+            RecompSteam_Log("signed out (no Recomp Steam license.txt): not logging on");
+            return;
+        }
+#endif
         char *token = RecompSteamAuth_StoredToken(app);
         if (!token) {
             RecompSteam_Log("no Steam sign-in stored for app %u", app);
