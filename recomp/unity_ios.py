@@ -28,6 +28,8 @@ EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
 BUILTIN_MODS = os.path.join(ROOT, "recomp", "builtin_mods")
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
+# The pseudo Steam client every port carries (session, Steamworks flat API, cloud, networking).
+STEAM_RUNTIME = os.path.join(NATIVE_SRC, "RecompSteam")
 PROFILES = os.path.join(ROOT, "recomp", "profiles")
 # The Unreal route's libsteam_api stand-in; Unity ports get SteamAPI_* from recomp_native_stubs.c.
 NATIVE_SKIP = {"steam_api_stub.c"}
@@ -223,7 +225,7 @@ PluginImporter:
 """
 
 
-def native_meta(name):
+def native_meta(name, flags=""):
     guid = hashlib.md5(("recomp-native:" + name).encode()).hexdigest()
     return f"""fileFormatVersion: 2
 guid: {guid}
@@ -247,11 +249,52 @@ PluginImporter:
       iPhone: iOS
     second:
       enabled: 1
-      settings: {{}}
+      settings:
+        CompileFlags: {flags}
   userData:
   assetBundleName:
   assetBundleVariant:
 """
+
+
+# Function definitions in the runtime's sources whose names a game reaches through
+# P/Invoke: at the start of a line, after any __attribute__((...)) and the return type.
+STEAM_EXPORT = re.compile(r"^(?!static\b)(?:__attribute__\(\(.*?\)\)\s*)*[A-Za-z_][\w\s\*]*?\b"
+                          r"((?:SteamAPI|SteamInternal|SteamGameServer|SteamClient|SteamEncryptedAppTicket)\w*)"
+                          r"\s*\([^;{]*\)\s*\{", re.M)
+
+
+def steam_runtime_files():
+    """The runtime's top-level sources and headers (cli/ is the Terminal tool)."""
+    return sorted(n for n in os.listdir(STEAM_RUNTIME)
+                  if os.path.isfile(os.path.join(STEAM_RUNTIME, n)) and n.endswith((".c", ".m", ".mm", ".h")))
+
+
+def steam_runtime_exports():
+    """Every Steamworks function the runtime defines, so asmtool's generated stubs leave
+    them out (a stub and a definition of one name would not link)."""
+    names = set()
+    for n in steam_runtime_files():
+        if n.endswith(".h"):
+            continue
+        with open(os.path.join(STEAM_RUNTIME, n), errors="replace") as f:
+            text = f.read()
+        names.update(STEAM_EXPORT.findall(text))
+        # RecompSteamFlat.m makes the ISteamClient getters with a macro: GETTER(User, RS_IUser).
+        names.update("SteamAPI_ISteamClient_GetISteam" + g for g in re.findall(r"^GETTER\((\w+),", text, re.M))
+    return sorted(names)
+
+
+def write_steam_exports(path):
+    """An overrides file for asmtool that only names the runtime's functions: asmtool counts
+    any "name(" in an overrides file as defined."""
+    names = steam_runtime_exports()
+    with open(path, "w") as f:
+        f.write("// Defined by recomp/native/RecompSteam (listed by unity_ios.py so asmtool generates no stub):\n")
+        for n in names:
+            f.write(f"//   {n}()\n")
+    log(f"Steam runtime: {len(names)} Steamworks functions implemented")
+    return path
 
 
 def prepare(game, work, unity, ios):
@@ -289,6 +332,8 @@ def prepare(game, work, unity, ios):
             shutil.copy2(os.path.join(game.managed, n), os.path.join(plugins, n))
     if users:
         cmd = [ASMTOOL, "internalize", "--out", plugins, "--stub", os.path.join(native, "recomp_native_stubs.c")]
+        if any(m in STUB_PROFILES["steamworks"]["modules"] for m in to_stub):
+            overrides.append(write_steam_exports(os.path.join(work, "recomp_steam_exports.c")))
         for o in overrides:
             cmd += ["--overrides", o]
         for m in sorted(to_stub):
@@ -315,6 +360,12 @@ def prepare(game, work, unity, ios):
         shutil.copy2(src, native)
         with open(os.path.join(native, n + ".meta"), "w") as f:
             f.write(native_meta(n))
+    # The Steam runtime, beside them; its Objective-C is written for ARC.
+    for n in steam_runtime_files():
+        shutil.copy2(os.path.join(STEAM_RUNTIME, n), native)
+        if not n.endswith(".h"):
+            with open(os.path.join(native, n + ".meta"), "w") as f:
+                f.write(native_meta(n, "-fobjc-arc" if n.endswith((".m", ".mm")) else ""))
 
     # Preserve every game assembly from the managed linker: reflection-driven
     # code (dependency injection, serializers) would otherwise lose types. Engine

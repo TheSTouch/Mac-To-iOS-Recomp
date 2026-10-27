@@ -564,8 +564,12 @@ static void SendLogon(RSLink *link)
     rs_pb_string(&w, 6, "english");
     rs_pb_varint(&w, 7, ClientOSType());
     rs_pb_bool(&w, 8, true);
+    // The logon id (an obfuscated private IP): Steam replaces a session that logs on again
+    // with the same token and id (LogonSessionReplaced), so each process takes its own.
+    static uint32_t logon_id;
+    if (!logon_id) logon_id = arc4random() | 1;
     rs_pb_writer ip = {0};
-    rs_pb_fixed32(&ip, 1, 0);
+    rs_pb_fixed32(&ip, 1, logon_id);
     rs_pb_message(&w, 11, &ip);
     rs_pb_free(&ip);
     NSData *mid = MachineID();
