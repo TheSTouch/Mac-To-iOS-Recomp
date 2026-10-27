@@ -54,10 +54,12 @@ STUB_PROFILES = {
         "modules": ["steam_api", "steam_api64", "sdkencryptedappticket", "sdkencryptedappticket64"],
         "overrides": ["steamworks.overrides.c"],
     },
-    # Crossplay networking: fails to initialise, so games stay offline.
+    # Crossplay networking: Microsoft's iOS PlayFabParty.framework when it matches the game's
+    # Mac bundle (recomp/playfab_party.py); otherwise it fails to initialise and games stay offline.
     "playfab-party": {
         "modules": ["PlayFabPartyMacOS", "PartyXboxLiveWin32"],
         "overrides": ["playfab-party.overrides.c"],
+        "library": "playfab_party",
     },
     # Apple's Unity plug-ins in their Mac build (Game Center and friends).
     "apple-plugins": {
@@ -327,6 +329,11 @@ def prepare(game, work, unity, ios):
         hit = [m for m in prof["modules"] if m in pinvokes and any(u in game_dlls for u in pinvokes[m])]
         if hit:
             to_stub.update(hit)
+            if prof.get("library") == "playfab_party":
+                from recomp import playfab_party
+                linked = playfab_party.install(game, native, work, log)
+                if linked:
+                    overrides.append(linked)
             overrides += [os.path.join(STUBS, o) for o in swap.get(key, prof["overrides"])]
     users = sorted({u for m in to_stub for u in pinvokes[m] if u in game_dlls})
 

@@ -109,6 +109,9 @@ namespace Recomp
             plist.ReadFromFile(plistPath);
             plist.root.SetBoolean("UIFileSharingEnabled", true);
             plist.root.SetBoolean("LSSupportsOpeningDocumentsInPlace", true);
+            // Joining a server or a host on the same network (by IP, or a crossplay peer the
+            // game reaches directly) asks for local network access, which needs a reason.
+            plist.root.SetString("NSLocalNetworkUsageDescription", "Lets you join and host multiplayer games on your local network.");
             // The iPad stays landscape whatever the player settings or the runtime ask.
             var ipad = plist.root.CreateArray("UISupportedInterfaceOrientations~ipad");
             ipad.AddString("UIInterfaceOrientationLandscapeLeft");
