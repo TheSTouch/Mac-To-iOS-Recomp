@@ -149,16 +149,20 @@ static dispatch_data_t WithoutMacFlag(dispatch_data_t data) {
     return dispatch_data_create(copy, len, NULL, DISPATCH_DATA_DESTRUCTOR_FREE);
 }
 
+// A macOS metallib is loaded with its flag cleared from the first try (Stray's own
+// libraries, about a thousand a session, would each be refused once otherwise);
+// if that copy is refused, the original data is tried as it came.
 static id FixLibData(id self, SEL s, dispatch_data_t data, NSError **err) {
     double t = TimedStart();
     NSError *e = nil;
-    id lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, data, &e);
-    if (!lib && [e.domain isEqualToString:MTLLibraryErrorDomain]) {
-        dispatch_data_t fixed = WithoutMacFlag(data);
-        if (fixed) lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, fixed, &e);
+    id lib = nil;
+    dispatch_data_t fixed = WithoutMacFlag(data);
+    if (fixed) {
+        lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, fixed, &e);
         static dispatch_once_t once;
         if (lib) dispatch_once(&once, ^{ RLOG(@"metallib from older tools: loaded with the macOS flag cleared (the others are counted in the heartbeat)"); });
     }
+    if (!lib) lib = ((id (*)(id, SEL, dispatch_data_t, NSError **))oLibData)(self, s, data, &e);
     TimedEnd(1, t);
     if (!lib && err) *err = e;
     return lib;
