@@ -17,7 +17,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | Game | Engine | iPad | iPhone |
 |---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
-| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ⚠️ Plays until chapter 4, then runs out of memory |
+| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4, at 30 frames/s |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, local worlds | ✅ Playable |
 
 ### Timberborn
@@ -29,19 +29,22 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | **App size** | 2.3 GB |
 | **Screen** | Landscape |
 | **Touch** | In a game, touches drive the map directly: tap to click, drag to pan (or to draw paths and areas with a tool), two fingers to pan, pinch to zoom and twist to turn, a two-finger tap to cancel. Taps on the game's panels go straight to them. [Placement mode](docs/TECHNICAL.md#touch-controls-recomptouchmouse) lets you aim a building, then **Place**; **Rows** drags out paths and walls |
-| **Mobile UI** | A HUD laid out for touch: a Colony tab and a View tab with drawers, the tools in a column on the left, rotate, flip and Place in a rail on the right. Always on on iPhone; on iPad, **Settings › Interface › Mobile UI** (turning it on applies at once, off from the next save loaded) |
+| **Mobile UI** | A HUD laid out for touch: a Colony tab and a View tab with drawers, the tools in a column on the left, rotate, flip and Place in a rail on the right. Always on on iPhone; on iPad, **Settings › Interface › Mobile UI**. Turning it on applies at once; turning it off applies from the next save loaded, or at once with **Reload save now** below the toggle, which saves the game and loads it again (new, not yet tried on a device) |
 | **Keys** | **Esc** and **Dev** (the game's developer mode): beside the Dynamic Island on iPhone; on iPad above the tool bar, or bottom right with the Mobile UI. With the Mobile UI, developer mode adds a bug key that opens Development controls in a touch-sized window |
 | **Controller** | Not used: Timberborn is played with a mouse |
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ [Shared](docs/TECHNICAL.md#saves-across-devices) with the Mac and your other devices |
-| **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting. The port's own mod, TheSTouchscreen, brings the touch input and the Mobile UI: keep it enabled in the game's mod manager |
+| **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting. The port's own mod, TheSTouchscreen, brings the touch input and the Mobile UI; the port turns it back on at every launch, so unticking it in the mod manager cannot leave the touch input off |
+| **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
 | **Steam** | [License check](docs/TECHNICAL.md#steam-license-check) at first launch. No achievements, no Steam Cloud |
 | **Frame rate** | Not measured yet |
 
 Known limits: no hover, so no tooltips or highlight under the cursor (the tool bar's tooltips are
 removed); with the game's own HUD on iPad some buttons are small for fingers (raise the in-game UI
 scale, or turn on the Mobile UI); a mod with code needs a new port; the local HTTP API's web pages
-are off, since they compile templates at run time.
+are off, since they compile templates at run time. A mod folder left over from an older port (the
+old `Touchscreen` mod) should be deleted in the Files app: the port never deletes anything on a
+device.
 
 ### Stray
 
@@ -51,17 +54,19 @@ are off, since they compile templates at run time.
 |---|---|
 | **App size** | 8.4 GB |
 | **Screen** | Landscape |
-| **Touch** | [On-screen gamepad](docs/TECHNICAL.md#on-screen-gamepad) |
+| **Touch** | [On-screen gamepad](docs/TECHNICAL.md#on-screen-gamepad), with a D-pad on the left edge |
 | **Controller** | ✅ Bluetooth controller tested; the on-screen pad hides when one connects |
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ |
 | **Steam** | License check at first launch. No achievements, no Steam Cloud |
-| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: from 50 %, not measured |
-| **Memory** | iPhone 17: from chapter 4 (The Slums) the game needs about 5.9 GB of the 6.1 GB iOS allows, and closes |
+| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, MetalFX from 50 %; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
+| **Memory** | iPhone 17: chapter 4 (The Slums) uses about 5 GB of the 6.1 GB iOS allows, since sounds now decode as they play instead of all being unpacked when a level loads |
+| **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 
-Known limits: only the first chapters have been played; short freezes the first time a scene
-appears, while Metal compiles its shaders (cached afterwards); distant textures can load later than
-on a Mac, since the texture pool is sized to the device's memory.
+Known limits: played up to chapter 4; short freezes the first time a scene appears, while Metal
+compiles its shaders (cached afterwards), and other short freezes on the iPhone; the image looks
+soft on the iPhone at 50 %; distant textures can load later than on a Mac, since the texture pool is
+sized to the device's memory.
 
 ### Valheim
 
@@ -70,11 +75,12 @@ on a Mac, since the texture pool is sized to the device's memory.
 | | |
 |---|---|
 | **App size** | 4.6 GB, and as much free space again to install an update |
-| **Screen** | Landscape on iPad. iPhone: landscape, and portrait built but not yet tried on a device |
+| **Screen** | Landscape on iPad. iPhone: landscape, and portrait built but not yet tried on a device. A swipe from a screen edge needs a second swipe, so the iOS gestures do not interrupt play |
 | **Touch** | On-screen gamepad in play; touch acts as the mouse in menus; the iOS keyboard opens for names |
 | **Controller** | Not tried yet |
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ Local worlds and characters |
+| **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
 | **Online** | ❌ Local worlds only: no online play, crossplay or Steam Cloud |
 | **Steam** | License check at first launch |
 | **Frame rate** | Not measured yet. iPhone renders at 75 % |
@@ -94,7 +100,7 @@ one go.
   folders you add. Windows games, CrossOver bottles included, are listed as not supported, with the
   reason.
 - **Sorts them** into *Tested*, *May work out of the box*, *Needs work* and *Not supported*, with the
-  reason for each game.
+  reason for each game. A tested game shows its iPad and its iPhone status apart.
 - **Ports in one go.** Pick the iPad or iPhone, your signing team and where to keep the build. It runs
   every step with progress bars, a live log and plain hints when something needs you (unlock the iPad,
   sign in to Xcode).
@@ -187,11 +193,13 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [x] iPhone, for Unity and Unreal ports
 - [x] Portrait play on iPhone, opted into per game (Valheim)
 - [ ] Portrait confirmed on a device
-- [ ] Stray past chapter 4 on iPhone (runs out of memory there)
+- [x] Stray's chapter 4 on iPhone (it ran out of memory there until 0.4.0)
+- [ ] Stray played to the end, on iPad and iPhone
 
 ### Controls
 - [x] Touch as a mouse: tap, drag, pinch to scroll, two-finger right click, Apple Pencil
 - [x] On-screen gamepad for action games, hidden when a controller connects
+- [x] A D-pad on the on-screen gamepad (Unreal ports: Stray)
 - [x] Bluetooth controllers, keyboards and trackpads
 - [x] iOS keyboard for the game's text fields
 - [x] Placement mode for building games (Timberborn)
@@ -211,6 +219,7 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [x] Data mods, added any time through Files
 - [x] Code mods, compiled into the port
 - [x] Harmony patches, woven into the game at port time
+- [x] The port's built-in mod stays enabled, whatever the mod manager says
 - [ ] Harmony transpilers, reverse patches and patches made while the game runs
 - [ ] Mods for Unity games other than Timberborn
 
@@ -224,8 +233,11 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 ### Performance
 - [x] Texture memory sized from the device's RAM (Unreal)
 - [x] Per-game render settings, such as Stray's MetalFX upscaling
+- [x] Stray on iPhone: sounds decoded as they play (1.5 GB less memory), 30 fps against overheating
+- [x] A log line every 10 s: frame rate, GPU time, CPU per thread, memory left and thermal state
 - [ ] Frame rates measured for every tested game
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
+- [ ] Stray on iPhone: no short freezes, a sharper image
 
 ## More
 

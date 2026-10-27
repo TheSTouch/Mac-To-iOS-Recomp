@@ -1,7 +1,7 @@
 {
   "name": "Timberborn",
   "tested": "playable on iPad (1.1.2, Steam).",
-  "tested_iphone": "runs on iPhone 17 (1.1.2, Steam): a save plays, but the bottom tool bar sits under the iOS home gesture and is hard to use.",
+  "tested_iphone": "playable on iPhone 17 (1.1.2, Steam), with the Mobile UI laid out for the phone.",
   "steam_app_id": 1062090,
   "saves": {
     "mac": "~/Documents/Timberborn",

@@ -167,8 +167,9 @@ to bind to the shim, and `patches` replaces byte strings in the executable (hex,
 Debugging: shipping builds log almost nothing, but Mac game binaries usually keep their symbol table.
 
 - the shim logs lines starting with `[recomp]`: unimplemented AppKit methods (they return zero instead
-  of crashing), a backtrace when the game calls `exit`/`abort` with an error, and every 10 s the frame
-  rate and the memory left;
+  of crashing), a backtrace when the game calls `exit`/`abort` with an error, and every 10 s a heartbeat: frame
+  rate, GPU time per frame, CPU for the busiest threads, the longest wait between frames, memory left
+  and the thermal state;
 - copy an empty file named `recomp-screenshot` into the app's `Documents` (`devicectl device copy to
   --domain-type appDataContainer`) to get `recomp-screen.png` back from the same folder;
 - `xcrun lldb` can attach to the game on the device (`device select <UDID>`, `device process attach
@@ -191,6 +192,7 @@ cursor (in play); in menus touches act as the mouse, and a quick tap off the pad
 | top corners | LB, LT (left), RB, RT (right) |
 | top left | Menu, View |
 | bottom left / near the face buttons | L3 / R3 |
+| left edge, between LT and L3 | D-pad (Unreal ports): up, down, left, right; two arms held give a diagonal |
 
 The key buttons (Unity ports) stay on screen with or without a controller.
 
