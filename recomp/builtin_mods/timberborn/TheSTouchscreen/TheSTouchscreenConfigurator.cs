@@ -22,6 +22,7 @@ namespace Recomp.TheSTouchscreen
             containerDefinition.Bind<DevControls>().AsSingleton();
             containerDefinition.Bind<KeyRow>().AsSingleton();
             containerDefinition.Bind<BarTooltips>().AsSingleton();
+            containerDefinition.Bind<ReloadSave>().AsSingleton();
         }
     }
 }

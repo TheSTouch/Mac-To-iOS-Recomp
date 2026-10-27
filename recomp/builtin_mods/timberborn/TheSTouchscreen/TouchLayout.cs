@@ -66,7 +66,8 @@ namespace Recomp.TheSTouchscreen
 
     // The game builds its settings box once per scene (SettingsBox.Load, from
     // Views/Options/SettingsBox.uxml): a Mobile UI toggle goes after Interface's UI scale, styled
-    // like the game's own toggles, with a line saying when a change applies. iPad only.
+    // like the game's own toggles, with a line saying when a change applies, and under it, in a
+    // game turned off, "Reload save now" (ReloadSave). iPad only.
     [HarmonyPatch(typeof(VisualElementLoader), nameof(VisualElementLoader.LoadVisualElement), typeof(string))]
     static class SettingsTogglePatch
     {
@@ -80,7 +81,12 @@ namespace Recomp.TheSTouchscreen
             toggle.AddToClassList("settings-toggle");
             toggle.AddToClassList("settings-text");
             toggle.SetValueWithoutNotify(TouchLayout.Chosen);
-            toggle.RegisterValueChangedCallback(e => TouchLayout.Choose(e.newValue));
+            var reload = ReloadSave.CreateButton();
+            toggle.RegisterValueChangedCallback(e =>
+            {
+                TouchLayout.Choose(e.newValue);
+                ReloadSave.Update(reload);
+            });
             var note = new Label("Turning it on applies at once; off, the next time a save is loaded.");
             note.AddToClassList("settings-text");
             note.style.fontSize = 13f;
@@ -89,6 +95,7 @@ namespace Recomp.TheSTouchscreen
             var parent = after.parent;
             parent.Insert(parent.IndexOf(after) + 1, toggle);
             parent.Insert(parent.IndexOf(toggle) + 1, note);
+            parent.Insert(parent.IndexOf(note) + 1, reload);
         }
     }
 }
