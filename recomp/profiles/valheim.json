@@ -5,6 +5,7 @@
   "steam_app_id": 892970,
   "when_assembly": "assembly_valheim.dll",
   "touch_gamepad": true,
+  "steam_networking": true,
   "iphone": {
     "render_scale": 0.75,
     "portrait": true,

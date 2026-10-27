@@ -340,10 +340,17 @@ def prepare(game, work, unity, ios):
     for n in game_dlls:
         if n not in users:
             shutil.copy2(os.path.join(game.managed, n), os.path.join(plugins, n))
+    gns = None
     if users:
         cmd = [ASMTOOL, "internalize", "--out", plugins, "--stub", os.path.join(native, "recomp_native_stubs.c")]
         if any(m in STUB_PROFILES["steamworks"]["modules"] for m in to_stub):
             overrides.append(write_steam_exports(os.path.join(work, "recomp_steam_exports.c")))
+            # Steam networking on GameNetworkingSockets, for a game whose profile asks for it.
+            if (game_profile(game) or {}).get("steam_networking"):
+                from recomp import gamenetworkingsockets
+                gns = gamenetworkingsockets.install(native, work, log)
+                if gns:
+                    overrides.append(gns)
         for o in overrides:
             cmd += ["--overrides", o]
         for m in sorted(to_stub):
@@ -376,6 +383,8 @@ def prepare(game, work, unity, ios):
         if not n.endswith(".h"):
             with open(os.path.join(native, n + ".meta"), "w") as f:
                 f.write(native_meta(n, "-fobjc-arc" if n.endswith((".m", ".mm")) else ""))
+    if gns:
+        gamenetworkingsockets.enable(native)
 
     # Preserve every game assembly from the managed linker: reflection-driven
     # code (dependency injection, serializers) would otherwise lose types. Engine
