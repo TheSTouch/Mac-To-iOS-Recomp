@@ -81,7 +81,7 @@ static const double kBackgroundGrace = 5 * 60;   // in the background this long:
 
 static void SetPlaying(BOOL on)
 {
-    uint32_t app = RecompSteam_AppID();
+    uint32_t app = RecompSteam_AppID() ?: RS_GameAppID();
     if (!app) return;
     RecompSteam_GamesPlayed(on ? &app : NULL, on ? 1 : 0);
 }
@@ -91,7 +91,9 @@ static void Watch(void)
     if (gWatching) return;
     gWatching = YES;
     RecompSteam_AddStateObserver(^(RecompSteamState s) {
-        if (s == RecompSteamLoggedOn) FetchTicket();
+        if (s != RecompSteamLoggedOn) return;
+        FetchTicket();
+        if (gPlaying) SetPlaying(YES);   // the session may have started after the game did
     });
     atexit_b(^{ SetPlaying(NO); });
 #if TARGET_OS_IPHONE

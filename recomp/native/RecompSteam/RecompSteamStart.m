@@ -7,6 +7,7 @@
 #import <UIKit/UIKit.h>
 #endif
 #include "RecompSteamAuth.h"
+#include "RecompSteamFlat.h"
 #include "RecompSteamInternal.h"
 
 // iOS: Info.plist "RecompSteamAppId". macOS: $SteamAppId, then steam_appid.txt beside the
@@ -46,14 +47,23 @@ static NSString *MachineName(void)
 
 static BOOL gTried;
 
+uint32_t RS_GameAppID(void)
+{
+    static uint32_t app;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ app = FindAppID(); });
+    return app;
+}
+
 bool RecompSteam_StartStored(void)
 {
     static dispatch_once_t once;
     static bool found;
     dispatch_once(&once, ^{
         gTried = YES;
-        uint32_t app = FindAppID();
+        uint32_t app = RS_GameAppID();
         if (!app) return;
+        RS_SetAppID(app);
         char *token = RecompSteamAuth_StoredToken(app);
         if (!token) {
             RecompSteam_Log("no Steam sign-in stored for app %u", app);
@@ -62,6 +72,7 @@ bool RecompSteam_StartStored(void)
         found = true;
         RecompSteam_Start(token, app, MachineName().UTF8String);
         free(token);
+        RS_PresenceStart();   // playing from launch, as when Steam starts a game
     });
     return found;
 }
@@ -71,6 +82,6 @@ __attribute__((constructor)) static void RecompSteamAutoStart(void)
 {
     if (getenv("RECOMP_STEAM_NO_AUTOSTART")) return;
     @autoreleasepool {
-        if (FindAppID()) RecompSteam_StartStored();
+        if (RS_GameAppID()) RecompSteam_StartStored();
     }
 }

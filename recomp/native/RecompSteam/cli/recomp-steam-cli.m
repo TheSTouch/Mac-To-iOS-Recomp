@@ -7,6 +7,8 @@
 //   owns <appid>     whether the account owns (or borrows) the app: its ownership ticket
 //   ticket <appid>   play the app and make an auth session ticket, activated with Steam
 //   ufs <appid>      list the app's Steam Cloud files
+//   playing          what Steam says the account plays on another device (presence check)
+//   schema <appid>   save the app's stats schema (binary KeyValues) and the player's stats to $TMPDIR
 //   token            print the stored token (for scripts/steam-mac-clone.py)
 #import <Foundation/Foundation.h>
 #import <CoreImage/CoreImage.h>
@@ -123,6 +125,31 @@ int main(int argc, char **argv)
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), RecompSteam_Queue(), ^{ Exit(0); });
                 });
             });
+        } else if ([cmd isEqual:@"playing"]) {
+            WithLogon(app, ^{
+                // ClientPlayingSessionState arrives just after the logon.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), RecompSteam_Queue(), ^{
+                    uint32_t other = 0;
+                    bool blocked = RecompSteam_PlayingBlocked(&other);
+                    Out(blocked ? @"playing app %u on another device" : @"not playing anywhere else (%u)", other);
+                    RecompSteam_Stop();
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), RecompSteam_Queue(), ^{ Exit(0); });
+                });
+            });
+        } else if ([cmd isEqual:@"schema"] && app) {
+            WithLogon(app, ^{
+                rs_pb_writer w = {0};
+                rs_pb_fixed64(&w, 1, app);
+                rs_pb_varint(&w, 3, (uint64_t)(int64_t)-1);
+                rs_pb_fixed64(&w, 4, RecompSteam_SteamID());
+                RecompSteam_SendJob(818, w.data, w.length, 0, 20, ^(const RecompSteamMessage *m) {
+                    NSString *path = [NSTemporaryDirectory() stringByAppendingFormat:@"recomp-steam-stats-%u.bin", app];
+                    [[NSData dataWithBytes:m->body length:m->length] writeToFile:path atomically:YES];
+                    Out(@"EResult %llu, %zu bytes -> %@", rs_pb_get_varint(m->body, m->length, 2, 2), m->length, path);
+                    Exit(0);
+                });
+                rs_pb_free(&w);
+            });
         } else if ([cmd isEqual:@"owns"] && app) {
             WithLogon(app, ^{
                 RecompSteam_AppOwnershipTicket(app, ^(int32_t er, const uint8_t *t, size_t n) {
@@ -175,7 +202,7 @@ int main(int argc, char **argv)
                 rs_pb_free(&w);
             });
         } else {
-            fprintf(stderr, "usage: recomp-steam-cli login | logon | owns <appid> | ticket <appid> | ufs <appid> | token\n");
+            fprintf(stderr, "usage: recomp-steam-cli login | logon | playing | owns <appid> | ticket <appid> | ufs <appid> | token\n");
             return 2;
         }
         dispatch_main();

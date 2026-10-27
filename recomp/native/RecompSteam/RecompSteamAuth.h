@@ -21,8 +21,9 @@ extern "C" {
 // Only a token from a SteamClient sign-in counts: an older MobileApp one cannot log on.
 //   iOS: the Keychain item RecompLicense.m keeps (service "Recomp Steam license",
 //        account "<app id>", JSON with "refresh").
-//   macOS: $RECOMP_STEAM_TOKEN, else the Keychain item recomp-steam-cli stores (service
-//        "Recomp Steam", account "refresh-token"), one for every game.
+//   macOS: $RECOMP_STEAM_TOKEN, else the Keychain item recomp-steam-cli stores through
+//        /usr/bin/security (service "Recomp Steam", account "steam-client-token"), one for
+//        every game.
 char *RecompSteamAuth_StoredToken(uint32_t app_id);
 // macOS: keeps token as the Keychain item above (recomp-steam-cli login). False on failure.
 bool RecompSteamAuth_StoreToken(const char *refresh_token);

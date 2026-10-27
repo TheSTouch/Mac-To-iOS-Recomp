@@ -172,6 +172,9 @@ def build_shims(work):
     sources = sorted(os.path.join(src, n) for n in os.listdir(src) if n.endswith((".m", ".c")))
     sources.append(os.path.join(NATIVE_SRC, "RecompSaves.m"))  # shared with the Unity route
     sources.append(os.path.join(NATIVE_SRC, "RecompLicense.m"))  # likewise
+    # The Steam runtime the license check signs in with (recomp/native/RecompSteam).
+    runtime = os.path.join(NATIVE_SRC, "RecompSteam")
+    sources += sorted(os.path.join(runtime, n) for n in os.listdir(runtime) if n.endswith((".c", ".m", ".mm")))
     aliases = []
     for c in SHIM_CLASSES:
         for kind in ("CLASS", "METACLASS"):
@@ -180,7 +183,7 @@ def build_shims(work):
         aliases += ["-Wl,-alias", f"-Wl,_Recomp{k}", f"-Wl,_{k}"]
     fw = [x for f in SHIM_FRAMEWORKS for x in ("-framework", f)]
     shim = os.path.join(out, SHIM_NAME)
-    clang(["-dynamiclib", "-fobjc-arc", "-fmodules", "-Wno-unused-parameter", "-install_name", SHIM_INSTALL,
+    clang(["-dynamiclib", "-fobjc-arc", "-fmodules", "-Wno-unused-parameter", "-I", runtime, "-lc++", "-install_name", SHIM_INSTALL,
            "-current_version", "1.0", "-compatibility_version", "1.0", *aliases, *fw, *sources], shim)
     steam = os.path.join(out, "libsteam_api.dylib")
     clang(["-dynamiclib", "-install_name", "@rpath/libsteam_api.dylib", "-current_version", "1.0",

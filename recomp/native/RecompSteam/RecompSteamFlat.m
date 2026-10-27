@@ -13,8 +13,10 @@
 // Runtime code posts them from any thread with RS_PostCallback / RS_PostCallResult.
 // Structs follow the SDK's packing on macOS and iOS: #pragma pack(4).
 #import <Foundation/Foundation.h>
+#include <dlfcn.h>
 #include <os/lock.h>
 #include "RecompSteamFlat.h"
+#include "RecompSteamInternal.h"
 
 #define RLOG(...) RecompSteam_Log(__VA_ARGS__)
 #define EXPORT __attribute__((used, visibility("default")))
@@ -127,20 +129,39 @@ EXPORT int32_t SteamAPI_ISteamClient_ConnectToGlobalUser(void *self, int32_t pip
 // --- init and shutdown ------------------------------------------------------------------------
 
 static bool gInited;
+bool RS_CppGame;
 static double gStartedAt;
 
 EXPORT bool SteamAPI_Init(void)
 {
     if (gInited) return true;
-    if (!RecompSteam_StartStored() && RecompSteam_State() == RecompSteamOffline && !RecompSteam_SteamID()) {
-        // No sign-in on this device: the game runs as if Steam were not there.
-        RLOG("SteamAPI_Init: no Steam sign-in stored, reporting no Steam");
+    // Steam Cloud's launch pass (cloud_launch.m) finishes before the game reads its saves:
+    // games with Auto-Cloud read their files directly, and this is the hook that runs
+    // first. Looked up by name so this file does not depend on the cloud files.
+    static void (*waitForCloud)(void);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ waitForCloud = (void (*)(void))dlsym(RTLD_DEFAULT, "RSCloudWaitForLaunch"); });
+    if (waitForCloud) waitForCloud();
+    RS_PresenceStart();
+    // A C++ game (Unreal's Steam subsystem) calls the interfaces through their vtables:
+    // until RecompSteamCpp.mm provides them, it is told there is no Steam, while the
+    // session still signs in and shows the game as played.
+    if (RS_CppGame && !RS_Interfaces[RS_IUser]) {
+        RecompSteam_StartStored();
+        RLOG("SteamAPI_Init: C++ interfaces not offered, reporting no Steam (the session runs)");
+        return false;
+    }
+    // A port of a Steam game: Steam is "running" whether or not the player has signed in yet.
+    // The license check covers the game until they have, and the session logs on behind it
+    // (or stays offline within the grace period). Games such as Valheim quit without Steam.
+    RecompSteam_StartStored();
+    if (!RS_GameAppID() && !RecompSteam_AppID()) {
+        RLOG("SteamAPI_Init: no Steam app id, reporting no Steam");
         return false;
     }
     gInited = true;
     gStartedAt = CFAbsoluteTimeGetCurrent();
     RLOG("SteamAPI_Init: app %u", RecompSteam_AppID());
-    RS_PresenceStart();
     return true;
 }
 EXPORT bool SteamAPI_InitSafe(void) { return SteamAPI_Init(); }

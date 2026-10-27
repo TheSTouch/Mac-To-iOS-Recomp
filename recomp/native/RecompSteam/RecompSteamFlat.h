@@ -41,6 +41,9 @@ void RS_Frame(void);
 // Set by RecompSteamCpp.mm: runs the CCallbackBase objects registered for a callback.
 extern void (*RS_RunRegisteredCallback)(int ident, void *data, size_t size, uint64_t call);
 
+// Set (before SteamAPI_Init) by the libsteam_api of a C++ game (recomp/unreal_ios.py).
+extern bool RS_CppGame;
+
 // The player's SteamID, also before the first logon (from the stored token).
 uint64_t RS_SteamID(void);
 // Whether the account owns (or borrows) app: the game itself, or a DLC in its ownership ticket.

@@ -28,6 +28,29 @@ static NSData *KeychainRead(NSString *service, NSString *account)
     return CFBridgingRelease(out);
 }
 
+#if !TARGET_OS_IPHONE
+// macOS: the item is made and read by /usr/bin/security, which the item's access list then
+// trusts. recomp-steam-cli and the clones are signed ad hoc and change at every build, so an
+// item they made themselves would ask for the login password each time a new build read it.
+static NSString *const kMacService = @"Recomp Steam", *const kMacAccount = @"steam-client-token";
+
+static NSString *Security(NSArray<NSString *> *args, int *status)
+{
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/security"];
+    task.arguments = args;
+    NSPipe *out = [NSPipe pipe];
+    task.standardOutput = out;
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+    if (![task launchAndReturnError:nil]) return nil;
+    NSData *d = [out.fileHandleForReading readDataToEndOfFile];
+    [task waitUntilExit];
+    if (status) *status = task.terminationStatus;
+    return [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+#endif
+
 char *RecompSteamAuth_StoredToken(uint32_t app_id)
 {
     NSString *token = nil;
@@ -37,11 +60,13 @@ char *RecompSteamAuth_StoredToken(uint32_t app_id)
     if ([state isKindOfClass:NSDictionary.class] && [state[@"refresh"] isKindOfClass:NSString.class])
         token = state[@"refresh"];
 #else
+    (void)app_id;
     const char *env = getenv("RECOMP_STEAM_TOKEN");
     if (env && *env) token = @(env);
     if (!token) {
-        NSData *d = KeychainRead(@"Recomp Steam", @"refresh-token");
-        if (d) token = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        int status = 1;
+        NSString *t = Security(@[@"find-generic-password", @"-s", kMacService, @"-a", kMacAccount, @"-w"], &status);
+        if (status == 0) token = t;
     }
 #endif
     if (!token.length || !RecompSteamAuth_IsClientToken(token.UTF8String)) return NULL;
@@ -54,13 +79,10 @@ bool RecompSteamAuth_StoreToken(const char *refresh_token)
     (void)refresh_token;
     return false;   // RecompLicense.m keeps the sign-in on iOS
 #else
-    NSDictionary *q = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                        (__bridge id)kSecAttrService: @"Recomp Steam", (__bridge id)kSecAttrAccount: @"refresh-token"};
-    SecItemDelete((__bridge CFDictionaryRef)q);
-    NSMutableDictionary *add = [q mutableCopy];
-    add[(__bridge id)kSecValueData] = [@(refresh_token) dataUsingEncoding:NSUTF8StringEncoding];
-    add[(__bridge id)kSecAttrLabel] = @"Recomp Steam sign-in";
-    return SecItemAdd((__bridge CFDictionaryRef)add, NULL) == errSecSuccess;
+    int status = 1;
+    Security(@[@"add-generic-password", @"-U", @"-s", kMacService, @"-a", kMacAccount, @"-l", @"Recomp Steam sign-in",
+               @"-T", @"/usr/bin/security", @"-w", @(refresh_token)], &status);
+    return status == 0;
 #endif
 }
 

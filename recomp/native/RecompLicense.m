@@ -7,20 +7,23 @@
 // name. Without an app id this file does nothing.
 //
 // The first launch covers the game with a sign-in screen. The player signs in to
-// Steam with a QR code scanned in the Steam Mobile app, or with account name,
-// password and Steam Guard. Everything goes straight to api.steampowered.com:
-//   - IAuthenticationService (the service Steam's own apps sign in with) gives a
-//     refresh token for this device; the password is RSA-encrypted with the key
-//     Steam hands out for it;
-//   - IPlayerService/GetOwnedGames, called with the account's own access token,
-//     says whether the account owns the app.
+// Steam as a Steam client would, with a QR code scanned in the Steam Mobile app or
+// with account name, password and Steam Guard (RecompSteam/RecompSteamAuth.h, over a
+// connection to Steam's connection managers). That one sign-in is the port's Steam
+// session (RecompSteam/RecompSteamSession.h), which also carries saves, achievements
+// and online play. The license is the session's: logged on, and Steam signs an
+// ownership ticket for the app (it does for a game the account owns or borrows
+// through Steam Family Sharing, and refuses one otherwise).
+//
 // An account that owns the game lifts the cover. The refresh token, the Steam ID
 // and the time of the last check are kept in the Keychain, on this device only
 // (they do not travel in backups or with a copy of the app). Each launch checks
 // again behind a "Checking your Steam license" screen, which lifts after kLaunchWait
 // at most while the last successful check is under kGrace old (the check goes on in
 // the background); past that, the game stays covered until it can check again. A refunded
-// game or a sign-in revoked in Steam brings the cover back.
+// game or a sign-in revoked in Steam brings the cover back. A sign-in kept by an older
+// port (a Steam Mobile app token, which cannot log on as a client) asks once to sign in
+// again, saying why.
 //
 // Documents/Recomp Steam license.txt says which account was checked and when;
 // deleting it signs out (the next launch asks to sign in again). Steam lists the
@@ -32,6 +35,9 @@
 #import <UIKit/UIKit.h>
 #import <CoreImage/CoreImage.h>
 #import <Security/Security.h>
+#include <os/log.h>
+#include "RecompSteamAuth.h"
+#include "RecompSteamSession.h"
 
 #if __has_feature(objc_arc)
 #define RL_AUTORELEASE(x) (x)
@@ -41,141 +47,36 @@
 #define RL_RETAIN(x) [(x) retain]
 #endif
 
-#define LLOG(fmt, ...) NSLog(@"[recomp] license: " fmt, ##__VA_ARGS__)
+// os_log, public: NSLog's arguments show as <private> in a device's log.
+#define LLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[recomp] license: %{public}s", \
+                              [NSString stringWithFormat:fmt, ##__VA_ARGS__].UTF8String)
 
 static const NSTimeInterval kGrace = 30 * 86400;
 static const NSTimeInterval kLaunchWait = 6;   // within the grace period, the check holds the game this long at most
-static NSString *const kAPI = @"https://api.steampowered.com/";
+static const double kLogonWait = 25;           // how long a check waits for the session to log on
 static NSString *const kService = @"Recomp Steam license";
 
-// EResult values Steam answers with (x-eresult header).
+// EResult values Steam answers with.
 enum {
-    kOK = 1, kInvalidPassword = 5, kInvalidParam = 8, kFileNotFound = 9, kAccessDenied = 15, kRevoked = 26,
-    kExpired = 27, kDuplicateRequest = 29, kInvalidLoginAuthCode = 65, kRateLimitExceeded = 84,
+    kOK = 1, kInvalidPassword = 5, kInvalidParam = 8, kFileNotFound = 9, kTimeout = 16, kAccessDenied = 15,
+    kRevoked = 26, kExpired = 27, kDuplicateRequest = 29, kInvalidLoginAuthCode = 65, kRateLimitExceeded = 84,
     kTwoFactorCodeMismatch = 88,
 };
 // EAuthSessionGuardType
 enum { kGuardNone = 1, kGuardEmailCode = 2, kGuardDeviceCode = 3, kGuardDeviceConfirmation = 4, kGuardEmailConfirmation = 5 };
-static const int kPlatformMobileApp = 3;
 
 static uint32_t gAppId;
 static NSString *gGame, *gContainer;
 
-// --- Steam Web API ------------------------------------------------------------------
-
-typedef void (^SteamReply)(NSInteger http, NSInteger eresult, NSDictionary *response, NSError *error);
-
-static NSString *Escape(id value) {
-    static NSCharacterSet *allowed;
-    if (!allowed) allowed = RL_RETAIN([NSCharacterSet characterSetWithCharactersInString:
-        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"]);
-    return [[value description] stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-}
-
-// reply runs on the main queue; http is 0 and error set when Steam was not reached.
-static void Steam(NSString *method, NSDictionary *params, BOOL post, SteamReply reply) {
-    NSMutableArray *pairs = [NSMutableArray array];
-    for (NSString *k in params) [pairs addObject:[NSString stringWithFormat:@"%@=%@", Escape(k), Escape(params[k])]];
-    NSString *query = [pairs componentsJoinedByString:@"&"];
-    NSString *url = [kAPI stringByAppendingString:method];
-    if (!post) url = [url stringByAppendingFormat:@"?%@", query];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]
-                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
-                                                   timeoutInterval:20];
-    if (post) {
-        req.HTTPMethod = @"POST";
-        [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
-        req.HTTPBody = [query dataUsingEncoding:NSUTF8StringEncoding];
-    }
-    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp,
-                                                                              NSError *error) {
-        NSHTTPURLResponse *h = [resp isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)resp : nil;
-        NSInteger eresult = [[h valueForHTTPHeaderField:@"x-eresult"] integerValue];
-        NSDictionary *response = nil;
-        if (data.length) {
-            id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-            if ([json isKindOfClass:NSDictionary.class] && [json[@"response"] isKindOfClass:NSDictionary.class])
-                response = json[@"response"];
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{ reply(h.statusCode, eresult, response, error); });
-    }] resume];
-}
-
 static NSString *Str(id v) { return [v isKindOfClass:NSString.class] && [v length] ? v : nil; }
 
-static NSString *Why(NSInteger http, NSInteger eresult, NSError *error) {
-    if (error) return error.localizedDescription;
-    if (http != 200) return [NSString stringWithFormat:@"Steam answered HTTP %ld", (long)http];
+static NSString *Why(NSInteger eresult) {
+    if (eresult == kTimeout) return @"Steam did not answer";
     return [NSString stringWithFormat:@"Steam answered error %ld", (long)eresult];
 }
 
-// The Steam ID a token was issued to: the "sub" claim of the JWT.
-static NSString *TokenSteamID(NSString *jwt) {
-    NSArray *parts = [jwt componentsSeparatedByString:@"."];
-    if (parts.count < 2) return nil;
-    NSMutableString *b64 = [NSMutableString stringWithString:parts[1]];
-    [b64 replaceOccurrencesOfString:@"-" withString:@"+" options:0 range:NSMakeRange(0, b64.length)];
-    [b64 replaceOccurrencesOfString:@"_" withString:@"/" options:0 range:NSMakeRange(0, b64.length)];
-    while (b64.length % 4) [b64 appendString:@"="];
-    NSData *d = RL_AUTORELEASE([[NSData alloc] initWithBase64EncodedString:b64 options:0]);
-    id claims = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
-    return [claims isKindOfClass:NSDictionary.class] ? Str(claims[@"sub"]) : nil;
-}
-
-// --- password encryption: RSA PKCS#1 v1.5 with the key Steam gives for the account ---
-
-static NSData *HexData(NSString *hex) {
-    NSMutableData *d = [NSMutableData data];
-    if (hex.length % 2) hex = [@"0" stringByAppendingString:hex];
-    for (NSUInteger i = 0; i + 1 < hex.length; i += 2) {
-        unsigned v = 0;
-        [[NSScanner scannerWithString:[hex substringWithRange:NSMakeRange(i, 2)]] scanHexInt:&v];
-        uint8_t byte = (uint8_t)v;
-        [d appendBytes:&byte length:1];
-    }
-    return d;
-}
-
-static void DerLength(NSMutableData *d, NSUInteger n) {
-    uint8_t b[3];
-    if (n < 0x80) { b[0] = (uint8_t)n; [d appendBytes:b length:1]; }
-    else if (n < 0x100) { b[0] = 0x81; b[1] = (uint8_t)n; [d appendBytes:b length:2]; }
-    else { b[0] = 0x82; b[1] = (uint8_t)(n >> 8); b[2] = (uint8_t)n; [d appendBytes:b length:3]; }
-}
-
-static void DerInteger(NSMutableData *d, NSData *bytes) {
-    const uint8_t *p = bytes.bytes;
-    NSUInteger n = bytes.length;
-    while (n > 1 && !p[0]) { p++; n--; }
-    BOOL pad = n && (p[0] & 0x80);
-    uint8_t tag = 0x02, zero = 0;
-    [d appendBytes:&tag length:1];
-    DerLength(d, n + pad);
-    if (pad) [d appendBytes:&zero length:1];
-    [d appendBytes:p length:n];
-}
-
-static NSString *EncryptPassword(NSString *password, NSString *modHex, NSString *expHex) {
-    NSData *mod = HexData(modHex);
-    NSMutableData *ints = [NSMutableData data];
-    DerInteger(ints, mod);
-    DerInteger(ints, HexData(expHex));
-    NSMutableData *der = [NSMutableData data];
-    uint8_t seq = 0x30;
-    [der appendBytes:&seq length:1];
-    DerLength(der, ints.length);
-    [der appendData:ints];
-    NSDictionary *attrs = @{(__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeRSA,
-                            (__bridge id)kSecAttrKeyClass: (__bridge id)kSecAttrKeyClassPublic};
-    SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)der, (__bridge CFDictionaryRef)attrs, NULL);
-    if (!key) return nil;
-    CFDataRef enc = SecKeyCreateEncryptedData(key, kSecKeyAlgorithmRSAEncryptionPKCS1,
-                                              (__bridge CFDataRef)[password dataUsingEncoding:NSUTF8StringEncoding], NULL);
-    CFRelease(key);
-    if (!enc) return nil;
-    NSData *out = CFBridgingRelease(enc);
-    return [out base64EncodedStringWithOptions:0];
-}
+// Runs block on the main queue (the runtime's callbacks come on its own queue).
+static void Main(dispatch_block_t block) { dispatch_async(dispatch_get_main_queue(), block); }
 
 // --- what is remembered: Keychain (this device only) and the status file -------------
 
@@ -267,7 +168,7 @@ static UIWindow *GameWindow(void) {
 
 // --- the cover ------------------------------------------------------------------------
 
-typedef NS_ENUM(NSInteger, RLMode) { RLChecking, RLQR, RLPassword, RLGuard, RLNotOwned, RLOffline };
+typedef NS_ENUM(NSInteger, RLMode) { RLChecking, RLQR, RLPassword, RLGuard, RLNotOwned, RLOffline, RLElsewhere };
 
 @interface RecompLicenseController : UIViewController
 @property (nonatomic, strong) UIScrollView *scroll;
@@ -303,12 +204,12 @@ typedef NS_ENUM(NSInteger, RLMode) { RLChecking, RLQR, RLPassword, RLGuard, RLNo
 @property (nonatomic, strong) UIImageView *qrView;
 @property (nonatomic, strong) UITextField *accountField, *passwordField, *codeField;
 @property (nonatomic, strong) UIButton *signInButton, *codeButton, *switchButton, *retryButton, *otherButton, *storeButton;
+@property (nonatomic, strong) UIButton *hereButton, *awayButton;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
-@property (nonatomic, strong) NSString *clientId, *requestId, *steamId;
 @property (nonatomic, strong) NSDictionary *pending;   // tokens signed in with, until the license is checked
 @property (nonatomic) RLMode mode;
 @property (nonatomic) NSInteger gen;                   // bumped by every new flow: stale replies are dropped
-@property (nonatomic) NSTimeInterval interval;
+@property (nonatomic) int flow;                        // the sign-in flow in progress (RecompSteamAuth), 0 for none
 @property (nonatomic) int codeType;
 @property (nonatomic) BOOL launchCheck;                // the launch check within the grace period is on screen
 @end
@@ -334,6 +235,14 @@ static RecompLicenseGate *gGate;
     NSTimeInterval age = NSDate.date.timeIntervalSince1970 - [state[@"verified"] doubleValue];
     BOOL fresh = age > -86400 && age < kGrace;  // a clock set back by more than a day does not count
     LLOG(@"app %u, %@, last checked %.1f days ago", gAppId, state[@"account"], age / 86400);
+    if (!RecompSteamAuth_IsClientToken([state[@"refresh"] UTF8String])) {
+        // Kept by an older port: a Steam Mobile app sign-in, which cannot log on as a client.
+        LLOG(@"the stored sign-in is not a Steam client one: asking again");
+        [self cover];
+        [self beginQR:@"One Steam sign-in now covers saves, achievements and online play. Sign in again once to "
+                      @"keep playing."];
+        return;
+    }
     [self cover];
     [self show:RLChecking status:nil];
     if ([state[@"account"] length])
@@ -346,33 +255,7 @@ static RecompLicenseGate *gGate;
             if (self.launchCheck) [self uncover];
         });
     }
-    [self verify:state quiet:fresh];
-}
-
-// A stored sign-in: a new access token from the refresh token, then ownership. quiet: within
-// the grace period, so only a definite "no" keeps the game covered.
-- (void)verify:(NSDictionary *)state quiet:(BOOL)quiet {
-    NSInteger gen = ++self.gen;
-    Steam(@"IAuthenticationService/GenerateAccessTokenForApp/v1/",
-          @{@"refresh_token": state[@"refresh"], @"steamid": state[@"steamid"]}, YES,
-          ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
-        if (gen != self.gen) return;
-        NSString *token = Str(resp[@"access_token"]);
-        if (er == kOK && token) {
-            NSDictionary *tokens = @{@"refresh": state[@"refresh"], @"access": token, @"steamid": state[@"steamid"],
-                                     @"account": state[@"account"] ?: @""};
-            [self checkLicense:tokens quiet:quiet];
-            return;
-        }
-        if (!error && http == 200 && (er == kAccessDenied || er == kRevoked || er == kExpired || er == kInvalidParam)) {
-            LLOG(@"the stored sign-in was refused (error %ld)", (long)er);
-            Forget();
-            [self cover];
-            [self beginQR:@"Your Steam sign-in on this device has ended. Sign in again."];
-            return;
-        }
-        [self unreachable:Why(http, er, error) quiet:quiet];
-    });
+    [self checkLicense:state quiet:fresh];
 }
 
 - (void)unreachable:(NSString *)why quiet:(BOOL)quiet {
@@ -393,116 +276,144 @@ static RecompLicenseGate *gGate;
     [self show:RLOffline status:status];
 }
 
-// tokens: {refresh, access, steamid, account}
+// tokens: {refresh, steamid, account}. The session logs on with the token, then Steam
+// signs (or refuses) the app's ownership ticket. quiet: within the grace period, so only
+// a definite "no" keeps the game covered.
 - (void)checkLicense:(NSDictionary *)tokens quiet:(BOOL)quiet {
     NSInteger gen = ++self.gen;
-    Steam(@"IPlayerService/GetOwnedGames/v1/",
-          @{@"access_token": tokens[@"access"], @"steamid": tokens[@"steamid"], @"include_played_free_games": @1,
-            @"include_free_sub": @1, @"skip_unvetted_apps": @0, @"appids_filter[0]": @(gAppId)}, NO,
-          ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
-        if (gen != self.gen) return;
-        if (error || http != 200 || !resp || (er && er != kOK)) {
-            self.pending = quiet ? nil : tokens;
-            [self unreachable:Why(http, er, error) quiet:quiet];
+    RecompSteam_Start([tokens[@"refresh"] UTF8String], gAppId, DeviceName().UTF8String);
+    RecompSteam_WhenLoggedOn(kLogonWait, ^(bool loggedOn) {
+        if (!loggedOn) {
+            BOOL refused = RecompSteam_State() == RecompSteamDenied;
+            Main(^{
+                if (gen != self.gen) return;
+                if (refused) {
+                    LLOG(@"Steam refused the stored sign-in");
+                    Forget();
+                    self.pending = nil;
+                    [self cover];
+                    [self beginQR:@"Your Steam sign-in on this device has ended. Sign in again."];
+                } else {
+                    self.pending = quiet ? nil : tokens;
+                    [self unreachable:@"Steam did not answer" quiet:quiet];
+                }
+            });
             return;
         }
-        BOOL owned = NO;
-        id games = resp[@"games"];
-        if ([games isKindOfClass:NSArray.class])
-            for (id g in games)
-                if ([g isKindOfClass:NSDictionary.class] && [g[@"appid"] longLongValue] == gAppId) owned = YES;
-        self.pending = nil;
-        if (!owned) {
-            LLOG(@"%@ does not own app %u", tokens[@"account"], gAppId);
-            Forget();
-            [self cover];
-            [self show:RLNotOwned status:nil];
-            self.bodyLabel.text = [NSString stringWithFormat:
-                @"The Steam account %@ does not own %@. This port plays only with a Steam account that owns the "
-                @"game, so its developers are paid for it.", tokens[@"account"], gGame];
-            return;
-        }
-        LLOG(@"%@ owns app %u", tokens[@"account"], gAppId);
-        SaveState(@{@"refresh": tokens[@"refresh"], @"steamid": tokens[@"steamid"], @"account": tokens[@"account"],
-                    @"verified": @(NSDate.date.timeIntervalSince1970)});
-        [self uncover];
+        RecompSteam_AppOwnershipTicket(gAppId, ^(int32_t er, const uint8_t *ticket, size_t length) {
+            uint32_t elsewhere = 0;
+            BOOL blocked = RecompSteam_PlayingBlocked(&elsewhere);
+            Main(^{
+                if (gen != self.gen) return;
+                if (er == kTimeout) {
+                    self.pending = quiet ? nil : tokens;
+                    [self unreachable:Why(er) quiet:quiet];
+                    return;
+                }
+                self.pending = nil;
+                if (er != kOK) {
+                    LLOG(@"%@ does not own app %u (error %d)", tokens[@"account"], gAppId, er);
+                    Forget();
+                    [self cover];
+                    [self show:RLNotOwned status:nil];
+                    self.bodyLabel.text = [NSString stringWithFormat:
+                        @"The Steam account %@ does not own %@. This port plays only with a Steam account that owns the "
+                        @"game, so its developers are paid for it.", tokens[@"account"], gGame];
+                    return;
+                }
+                LLOG(@"%@ owns app %u", tokens[@"account"], gAppId);
+                SaveState(@{@"refresh": tokens[@"refresh"], @"steamid": tokens[@"steamid"], @"account": tokens[@"account"],
+                            @"verified": @(NSDate.date.timeIntervalSince1970)});
+                if (blocked) [self elsewhere:elsewhere];
+                else [self uncover];
+            });
+        });
     });
 }
 
-// --- sign-in: QR code ---
+// Steam plays one game per account at a time: the account plays on another device.
+- (void)elsewhere:(uint32_t)app {
+    LLOG(@"the account is playing app %u on another device", app);
+    [self cover];
+    [self show:RLElsewhere status:nil];
+    self.titleLabel.text = @"Your Steam account is playing on another device";
+    self.bodyLabel.text = [NSString stringWithFormat:
+        @"Steam plays one game per account at a time. Play here to end the game on the other device; or play "
+        @"%@ without Steam for now (no online play, achievements or cloud saves until you choose Play here).", gGame];
+}
+
+- (void)tapHere {
+    RecompSteam_KickPlayingSession();
+    [self uncover];
+}
+
+- (void)tapAway {
+    [self uncover];
+}
+
+// --- sign-in ---
+
+- (void)endFlow {
+    if (self.flow) RecompSteamAuth_Cancel(self.flow);
+    self.flow = 0;
+    ++self.gen;
+}
 
 - (void)beginQR:(NSString *)status {
-    NSInteger gen = ++self.gen;
+    [self endFlow];
+    NSInteger gen = self.gen;
     [self show:RLQR status:status];
     self.qrView.image = nil;
     [self.spinner startAnimating];
-    Steam(@"IAuthenticationService/BeginAuthSessionViaQR/v1/",
-          @{@"device_friendly_name": DeviceName(), @"platform_type": @(kPlatformMobileApp)}, YES,
-          ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
-        if (gen != self.gen) return;
-        [self.spinner stopAnimating];
-        NSString *url = Str(resp[@"challenge_url"]);
-        if (er != kOK || !url || !Str(resp[@"client_id"]) || !Str(resp[@"request_id"])) {
-            self.statusLabel.text = [NSString stringWithFormat:@"Cannot reach Steam: %@.", Why(http, er, error)];
-            self.statusLabel.hidden = NO;
-            self.retryButton.hidden = NO;
-            return;
-        }
-        self.clientId = resp[@"client_id"];
-        self.requestId = resp[@"request_id"];
-        self.interval = MAX(1, [resp[@"interval"] doubleValue] ?: 5);
-        self.qrView.image = QRImage(url);
-        [self poll:gen];
-    });
-}
-
-// Shared by both sign-ins: Steam answers with tokens once the player approved.
-- (void)poll:(NSInteger)gen {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.interval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (gen != self.gen) return;
-        Steam(@"IAuthenticationService/PollAuthSessionStatus/v1/",
-              @{@"client_id": self.clientId, @"request_id": self.requestId}, YES,
-              ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
+    __block BOOL shown = NO;
+    self.flow = RecompSteamAuth_BeginQR(DeviceName().UTF8String, 0, ^(const char *url) {
+        NSString *u = @(url);
+        Main(^{
             if (gen != self.gen) return;
-            if (er == kOK && resp) {
-                if (Str(resp[@"new_challenge_url"])) {
-                    if (Str(resp[@"new_client_id"])) self.clientId = resp[@"new_client_id"];
-                    self.qrView.image = QRImage(resp[@"new_challenge_url"]);
-                }
-                NSString *refresh = Str(resp[@"refresh_token"]), *access = Str(resp[@"access_token"]);
-                if (refresh && access) {
-                    NSString *steamid = TokenSteamID(refresh) ?: self.steamId;
-                    [self signedIn:@{@"refresh": refresh, @"access": access, @"steamid": steamid ?: @"",
-                                     @"account": Str(resp[@"account_name"]) ?: @""}];
-                    return;
-                }
-                if ([resp[@"had_remote_interaction"] boolValue] && self.mode == RLQR) {
-                    self.statusLabel.text = @"Approve the sign-in in the Steam Mobile app.";
-                    self.statusLabel.hidden = NO;
-                }
-                [self poll:gen];
-            } else if (!error && http == 200 && (er == kFileNotFound || er == kExpired)) {
-                if (self.mode == RLQR) [self beginQR:nil];  // the code timed out: a new one
-                else [self show:RLPassword status:@"The sign-in timed out. Sign in again."];
-            } else if (error || http != 200) {
-                [self poll:gen];  // a network hiccup: keep waiting
+            shown = YES;
+            [self.spinner stopAnimating];
+            self.qrView.image = QRImage(u);
+        });
+    }, ^{
+        Main(^{
+            if (gen != self.gen || self.mode != RLQR) return;
+            self.statusLabel.text = @"Approve the sign-in in the Steam Mobile app.";
+            self.statusLabel.hidden = NO;
+        });
+    }, ^(int32_t er, const char *refresh, const char *access, const char *account) {
+        NSDictionary *tokens = er == kOK ? @{@"refresh": @(refresh), @"account": @(account ?: "")} : nil;
+        Main(^{
+            if (gen != self.gen) return;
+            self.flow = 0;
+            [self.spinner stopAnimating];
+            if (tokens) {
+                [self signedIn:tokens];
+            } else if (er == kTimeout && !shown) {
+                self.statusLabel.text = [NSString stringWithFormat:@"Cannot reach Steam: %@.", Why(er)];
+                self.statusLabel.hidden = NO;
+                self.retryButton.hidden = NO;
+            } else if (er == kTimeout) {
+                [self beginQR:nil];   // waited too long: a new code
             } else {
-                [self show:self.mode == RLQR ? RLQR : RLPassword
-                    status:[NSString stringWithFormat:@"Steam refused the sign-in (error %ld).", (long)er]];
-                self.retryButton.hidden = self.mode != RLQR;
+                self.statusLabel.text = [NSString stringWithFormat:@"Steam refused the sign-in (error %d).", er];
+                self.statusLabel.hidden = NO;
+                self.retryButton.hidden = NO;
             }
         });
     });
 }
 
 - (void)signedIn:(NSDictionary *)tokens {
-    if (![tokens[@"steamid"] length]) {
+    uint64_t steamid = RecompSteamAuth_TokenSteamID([tokens[@"refresh"] UTF8String]);
+    if (!steamid) {
         [self show:RLQR status:@"Steam did not say which account signed in. Try again."];
         return;
     }
+    NSMutableDictionary *t = [NSMutableDictionary dictionaryWithDictionary:tokens];
+    t[@"steamid"] = [NSString stringWithFormat:@"%llu", steamid];
     LLOG(@"signed in as %@", tokens[@"account"]);
     [self show:RLChecking status:nil];
-    [self checkLicense:tokens quiet:NO];
+    [self checkLicense:t quiet:NO];
 }
 
 // --- sign-in: account name and password ---
@@ -516,58 +427,49 @@ static RecompLicenseGate *gGate;
         return;
     }
     [self.window endEditing:YES];
-    NSInteger gen = ++self.gen;
+    [self endFlow];
+    NSInteger gen = self.gen;
     [self busy:YES];
-    Steam(@"IAuthenticationService/GetPasswordRSAPublicKey/v1/", @{@"account_name": account}, NO,
-          ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
-        if (gen != self.gen) return;
-        NSString *mod = Str(resp[@"publickey_mod"]), *exp = Str(resp[@"publickey_exp"]);
-        NSString *encrypted = mod && exp ? EncryptPassword(password, mod, exp) : nil;
-        if (er != kOK || !encrypted || !resp[@"timestamp"]) {
-            [self busy:NO];
-            [self show:RLPassword status:[NSString stringWithFormat:@"Cannot reach Steam: %@.", Why(http, er, error)]];
-            return;
-        }
-        Steam(@"IAuthenticationService/BeginAuthSessionViaCredentials/v1/",
-              @{@"account_name": account, @"encrypted_password": encrypted, @"encryption_timestamp": resp[@"timestamp"],
-                @"remember_login": @"true", @"persistence": @1, @"platform_type": @(kPlatformMobileApp),
-                @"website_id": @"Mobile", @"device_friendly_name": DeviceName()}, YES,
-              ^(NSInteger http2, NSInteger er2, NSDictionary *r, NSError *error2) {
+    self.flow = RecompSteamAuth_BeginPassword(DeviceName().UTF8String, account.UTF8String, password.UTF8String,
+                                              ^(const int *types, int count, const char *domain) {
+        NSMutableArray *list = [NSMutableArray array];
+        for (int i = 0; i < count; i++) [list addObject:@(types[i])];
+        NSString *email = domain && *domain ? @(domain) : nil;
+        Main(^{
             if (gen != self.gen) return;
             [self busy:NO];
-            if (er2 != kOK || !Str(r[@"client_id"]) || !Str(r[@"request_id"])) {
-                NSString *why = er2 == kInvalidPassword ? @"Wrong account name or password."
-                              : er2 == kRateLimitExceeded ? @"Too many sign-in attempts. Wait a while, then try again."
-                              : [NSString stringWithFormat:@"Steam refused the sign-in: %@.", Why(http2, er2, error2)];
-                [self show:RLPassword status:why];
+            self.passwordField.text = @"";
+            [self guard:list email:email];
+        });
+    }, ^(int32_t er, const char *refresh, const char *access, const char *acct) {
+        NSDictionary *tokens = er == kOK ? @{@"refresh": @(refresh), @"account": @(acct ?: "")} : nil;
+        Main(^{
+            if (gen != self.gen) return;
+            self.flow = 0;
+            [self busy:NO];
+            if (tokens) {
+                [self signedIn:tokens];
                 return;
             }
-            self.passwordField.text = @"";
-            self.clientId = r[@"client_id"];
-            self.requestId = r[@"request_id"];
-            self.steamId = Str(r[@"steamid"]) ?: [r[@"steamid"] description];
-            self.interval = MAX(1, [r[@"interval"] doubleValue] ?: 5);
-            [self guard:r[@"allowed_confirmations"]];
-            [self poll:gen];
+            NSString *why = er == kInvalidPassword ? @"Wrong account name or password."
+                          : er == kRateLimitExceeded ? @"Too many sign-in attempts. Wait a while, then try again."
+                          : er == kFileNotFound || er == kExpired ? @"The sign-in timed out. Sign in again."
+                          : [NSString stringWithFormat:@"Steam refused the sign-in: %@.", Why(er)];
+            [self show:RLPassword status:why];
         });
     });
 }
 
 // What Steam Guard asks for, from the session's allowed confirmations.
-- (void)guard:(id)confirmations {
+- (void)guard:(NSArray *)confirmations email:(NSString *)email {
     NSMutableArray *lines = [NSMutableArray array];
     self.codeType = 0;
-    NSString *email = nil;
-    for (id c in [confirmations isKindOfClass:NSArray.class] ? confirmations : @[]) {
-        if (![c isKindOfClass:NSDictionary.class]) continue;
-        int type = [c[@"confirmation_type"] intValue];
+    for (NSNumber *c in confirmations) {
+        int type = c.intValue;
         if (type == kGuardDeviceConfirmation) [lines addObject:@"Approve the sign-in in the Steam Mobile app"];
         if (type == kGuardEmailConfirmation) [lines addObject:@"Confirm the sign-in from the email Steam sent you"];
         if (type == kGuardDeviceCode) self.codeType = kGuardDeviceCode;
-        if (type == kGuardEmailCode && self.codeType != kGuardDeviceCode) {
-            self.codeType = kGuardEmailCode;
-            email = Str(c[@"associated_message"]);
-        }
+        if (type == kGuardEmailCode && self.codeType != kGuardDeviceCode) self.codeType = kGuardEmailCode;
     }
     if (self.codeType == kGuardDeviceCode) [lines addObject:@"enter the Steam Guard code from the Steam Mobile app"];
     if (self.codeType == kGuardEmailCode)
@@ -586,23 +488,23 @@ static RecompLicenseGate *gGate;
 
 - (void)submitCode {
     NSString *code = [self.codeField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    if (!code.length || !self.clientId) return;
+    if (!code.length || !self.flow) return;
     NSInteger gen = self.gen;
     self.codeButton.enabled = NO;
-    Steam(@"IAuthenticationService/UpdateAuthSessionWithSteamGuardCode/v1/",
-          @{@"client_id": self.clientId, @"steamid": self.steamId ?: @"", @"code": code, @"code_type": @(self.codeType)},
-          YES, ^(NSInteger http, NSInteger er, NSDictionary *resp, NSError *error) {
-        if (gen != self.gen) return;
-        self.codeButton.enabled = YES;
-        if (er == kOK || er == kDuplicateRequest) {
-            self.statusLabel.text = @"Code accepted, signing in…";
-        } else if (er == kInvalidLoginAuthCode || er == kTwoFactorCodeMismatch) {
-            self.statusLabel.text = @"That code is not right. Check it and try again.";
-            self.codeField.text = @"";
-        } else {
-            self.statusLabel.text = [NSString stringWithFormat:@"The code was not sent: %@.", Why(http, er, error)];
-        }
-        self.statusLabel.hidden = NO;
+    RecompSteamAuth_SubmitCode(self.flow, code.UTF8String, self.codeType, ^(int32_t er) {
+        Main(^{
+            if (gen != self.gen) return;
+            self.codeButton.enabled = YES;
+            if (er == kOK || er == kDuplicateRequest) {
+                self.statusLabel.text = @"Code accepted, signing in…";
+            } else if (er == kInvalidLoginAuthCode || er == kTwoFactorCodeMismatch) {
+                self.statusLabel.text = @"That code is not right. Check it and try again.";
+                self.codeField.text = @"";
+            } else {
+                self.statusLabel.text = [NSString stringWithFormat:@"The code was not sent: %@.", Why(er)];
+            }
+            self.statusLabel.hidden = NO;
+        });
     });
 }
 
@@ -610,7 +512,7 @@ static RecompLicenseGate *gGate;
 
 - (void)tapSwitch {
     if (self.mode == RLQR) {
-        ++self.gen;  // stop polling the QR session
+        [self endFlow];  // stop polling the QR session
         [self show:RLPassword status:nil];
         [self.accountField becomeFirstResponder];
     } else {
@@ -627,7 +529,7 @@ static RecompLicenseGate *gGate;
     NSDictionary *state = LoadState();
     if (state && self.mode == RLOffline) {
         [self show:RLChecking status:nil];
-        [self verify:state quiet:NO];
+        [self checkLicense:state quiet:NO];
     } else {
         [self beginQR:nil];
     }
@@ -679,6 +581,7 @@ static RecompLicenseGate *gGate;
     [self.switchButton setTitle:mode == RLQR ? @"Sign in with account name and password instead"
                                              : @"Sign in with a QR code instead" forState:UIControlStateNormal];
     self.retryButton.hidden = mode != RLOffline;
+    self.hereButton.hidden = self.awayButton.hidden = mode != RLElsewhere;
     self.otherButton.hidden = mode != RLNotOwned && mode != RLOffline;
     self.storeButton.hidden = mode != RLNotOwned;
     self.statusLabel.text = status;
@@ -819,10 +722,13 @@ static UILabel *Label(CGFloat size, UIFontWeight weight, UIColor *color) {
     self.storeButton = [self button:@"Open the Steam store page" action:@selector(tapStore) primary:YES];
     self.otherButton = [self button:@"Sign in with another Steam account" action:@selector(tapOther) primary:NO];
     self.switchButton = [self button:@"" action:@selector(tapSwitch) primary:NO];
+    self.hereButton = [self button:@"Play here" action:@selector(tapHere) primary:YES];
+    self.awayButton = [self button:@"Play without Steam for now" action:@selector(tapAway) primary:NO];
 
     for (UIView *v in @[self.titleLabel, self.bodyLabel, self.qrBox, self.qrHint, self.accountField, self.passwordField,
                         self.signInButton, self.guardLabel, self.codeField, self.codeButton, self.spinner,
-                        self.statusLabel, self.retryButton, self.storeButton, self.otherButton, self.switchButton])
+                        self.statusLabel, self.retryButton, self.hereButton, self.awayButton, self.storeButton,
+                        self.otherButton, self.switchButton])
         [stack addArrangedSubview:v];
     [stack setCustomSpacing:22 afterView:self.bodyLabel];
 }

@@ -12,6 +12,7 @@
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonDigest.h>
 #include <os/lock.h>
+#include <os/log.h>
 #include <stdarg.h>
 #include <sys/sysctl.h>
 #include "RecompSteamInternal.h"
@@ -22,7 +23,11 @@ void RecompSteam_Log(const char *format, ...)
     va_start(ap, format);
     NSString *s = [[NSString alloc] initWithFormat:@(format) arguments:ap];
     va_end(ap);
-    NSLog(@"[recomp] steam: %@", s);
+    // os_log, public: NSLog's arguments show as <private> in a device's log.
+    os_log(OS_LOG_DEFAULT, "[recomp] steam: %{public}s", s.UTF8String);
+#if !TARGET_OS_IPHONE
+    fprintf(stderr, "[recomp] steam: %s\n", s.UTF8String);   // the Mac clone's run.log, recomp-steam-cli
+#endif
 }
 #define RLOG(...) RecompSteam_Log(__VA_ARGS__)
 
@@ -950,7 +955,16 @@ static void HandleTicketMessage(const RecompSteamMessage *msg)
     } else if (msg->emsg == RS_ClientTicketAuthComplete) {
         uint32_t crc = (uint32_t)rs_pb_get_varint(msg->body, msg->length, 6, 0);
         uint32_t response = (uint32_t)rs_pb_get_varint(msg->body, msg->length, 4, 0);
+        uint64_t owner = rs_pb_get_varint(msg->body, msg->length, 8, 0);
         RLOG("ticket %08x: auth state %llu, response %u", crc, rs_pb_get_varint(msg->body, msg->length, 3, 0), response);
+        NSUInteger i = [gActiveTickets indexOfObjectPassingTest:^BOOL(NSDictionary *t, NSUInteger k, BOOL *stop) {
+            return [t[@"crc"] unsignedIntValue] == crc;
+        }];
+        if (i == NSNotFound) return;
+        NSDictionary *t = gActiveTickets[i];
+        void (^done)(uint32_t, uint64_t) = t[@"done"];
+        if (response != 0) [gActiveTickets removeObjectAtIndex:i];   // anything but OK ends it
+        if (done) done(response, owner);
     }
 }
 
@@ -1089,4 +1103,82 @@ void RecompSteam_CancelTicket(uint32_t handle)
         [gActiveTickets removeObjectAtIndex:i];
         if (RecompSteam_State() == RecompSteamLoggedOn) RS_SendAuthList(app, nil);
     });
+}
+
+uint32_t RS_AuthSessionTicketNow(uint32_t app, uint8_t *out, size_t max, uint32_t *length,
+                                 void (^activated)(int32_t eresult, uint32_t handle))
+{
+    __block uint32_t handle = 0;
+    void (^a)(int32_t, uint32_t) = [activated copy];
+    dispatch_sync(Q, ^{
+        if (RecompSteam_State() != RecompSteamLoggedOn) return;
+        NSData *ticket = BuildTicket(app);
+        if (!ticket || ticket.length > max) return;
+        memcpy(out, ticket.bytes, ticket.length);
+        *length = (uint32_t)ticket.length;
+        uint32_t h = gNextHandle++;
+        uint32_t gclen = LE32(ticket.bytes);
+        NSData *auth = [ticket subdataWithRange:NSMakeRange(0, 4 + gclen + 4 + 24)];
+        if (!gActiveTickets) gActiveTickets = [NSMutableArray array];
+        [gActiveTickets addObject:@{@"handle": @(h), @"app": @(app), @"estate": @0, @"steamid": @0,
+                                    @"crc": @(rs_crc32(auth.bytes, auth.length)), @"ticket": auth}];
+        handle = h;
+        RS_SendAuthList(0, ^{ if (a) a(RecompSteamResultOK, h); });
+    });
+    if (!handle && a) dispatch_async(Q, ^{ a(RecompSteamResultNoConnection, 0); });
+    // Running low on GC tokens, or no ownership ticket yet: fetch for the next one.
+    RecompSteam_AppOwnershipTicket(app, ^(int32_t er, const uint8_t *t, size_t n) {});
+    return handle;
+}
+
+int RS_BeginAuthSession(uint32_t app, const uint8_t *ticket, size_t length, uint64_t steamid,
+                        void (^done)(uint32_t response, uint64_t owner))
+{
+    // GC token length (20), token, session header length (24), header, then the ownership ticket.
+    if (length < 52 + 4 || LE32(ticket) != 20 || LE32(ticket + 24) != 24) return 1;   // invalid ticket
+    if (LE32(ticket + 52) + 52 + 4 > length) return 1;
+    const uint8_t *own = ticket + 56;
+    if (length >= 56 + 20 && LE32(own + 16) != app) return 4;                         // game mismatch
+    NSData *auth = [NSData dataWithBytes:ticket length:52];
+    void (^d)(uint32_t, uint64_t) = [done copy];
+    __block int result = 0;
+    dispatch_sync(Q, ^{
+        uint32_t crc = rs_crc32(auth.bytes, auth.length);
+        for (NSDictionary *t in gActiveTickets)
+            if ([t[@"steamid"] unsignedLongLongValue] == steamid && [t[@"crc"] unsignedIntValue] == crc) {
+                result = 2;   // duplicate request
+                return;
+            }
+        NSIndexSet *old = [gActiveTickets indexesOfObjectsPassingTest:^BOOL(NSDictionary *t, NSUInteger k, BOOL *stop) {
+            return [t[@"steamid"] unsignedLongLongValue] == steamid && [t[@"app"] unsignedIntValue] == app;
+        }];
+        [gActiveTickets removeObjectsAtIndexes:old];
+        if (!gActiveTickets) gActiveTickets = [NSMutableArray array];
+        NSMutableDictionary *entry = [@{@"handle": @0, @"app": @(app), @"estate": @1, @"steamid": @(steamid),
+                                        @"crc": @(crc), @"ticket": auth} mutableCopy];
+        if (d) entry[@"done"] = d;
+        [gActiveTickets addObject:entry];
+        if (RecompSteam_State() == RecompSteamLoggedOn) RS_SendAuthList(0, nil);
+    });
+    return result;
+}
+
+void RS_EndAuthSession(uint64_t steamid)
+{
+    dispatch_async(Q, ^{
+        NSIndexSet *gone = [gActiveTickets indexesOfObjectsPassingTest:^BOOL(NSDictionary *t, NSUInteger k, BOOL *stop) {
+            return steamid && [t[@"steamid"] unsignedLongLongValue] == steamid;
+        }];
+        if (!gone.count) return;
+        uint32_t app = [gActiveTickets[gone.firstIndex][@"app"] unsignedIntValue];
+        [gActiveTickets removeObjectsAtIndexes:gone];
+        if (RecompSteam_State() == RecompSteamLoggedOn) RS_SendAuthList(app, nil);
+    });
+}
+
+void RS_SetAppID(uint32_t app)
+{
+    os_unfair_lock_lock(&gLock);
+    if (!gAppID) gAppID = app;
+    os_unfair_lock_unlock(&gLock);
 }

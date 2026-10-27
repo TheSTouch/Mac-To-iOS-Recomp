@@ -36,6 +36,22 @@ uint64_t rs_token_steamid(const char *jwt);
 // Whether the token's "aud" claim lists audience ("client": a Steam client sign-in).
 bool rs_token_has_audience(const char *jwt, const char *audience);
 
+// ISteamUser::GetAuthSessionTicket needs the ticket at once: built from the cached
+// ownership ticket and a GC token. Fills out (*length) and returns its handle, or 0 when
+// the pieces are not at hand (offline). activated runs once Steam acknowledged it. Not
+// from the session queue.
+uint32_t RS_AuthSessionTicketNow(uint32_t app, uint8_t *out, size_t max, uint32_t *length,
+                                 void (^activated)(int32_t eresult, uint32_t handle));
+// ISteamUser::BeginAuthSession: another player's ticket, checked with Steam. Returns an
+// EBeginAuthSessionResult (0 OK); done(EAuthSessionResponse, owner SteamID) runs when Steam answers.
+int RS_BeginAuthSession(uint32_t app, const uint8_t *ticket, size_t length, uint64_t steamid,
+                        void (^done)(uint32_t response, uint64_t owner));
+void RS_EndAuthSession(uint64_t steamid);
+
+// The game's app id before any logon (Info.plist, $SteamAppId, steam_appid.txt; 0 when none).
+uint32_t RS_GameAppID(void);
+void RS_SetAppID(uint32_t app);
+
 #ifdef __cplusplus
 }
 #endif

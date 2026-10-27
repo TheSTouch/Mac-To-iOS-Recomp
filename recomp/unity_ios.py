@@ -16,6 +16,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 from recomp import events, paths, storage
@@ -257,11 +258,8 @@ PluginImporter:
 """
 
 
-# Function definitions in the runtime's sources whose names a game reaches through
-# P/Invoke: at the start of a line, after any __attribute__((...)) and the return type.
-STEAM_EXPORT = re.compile(r"^(?!static\b)(?:__attribute__\(\(.*?\)\)\s*)*[A-Za-z_][\w\s\*]*?\b"
-                          r"((?:SteamAPI|SteamInternal|SteamGameServer|SteamClient|SteamEncryptedAppTicket)\w*)"
-                          r"\s*\([^;{]*\)\s*\{", re.M)
+# Names a game reaches in the Steam runtime through P/Invoke.
+STEAM_EXPORT = re.compile(r"^_((?:SteamAPI|SteamInternal|SteamGameServer|SteamClient|SteamEncryptedAppTicket)\w*)$")
 
 
 def steam_runtime_files():
@@ -272,16 +270,20 @@ def steam_runtime_files():
 
 def steam_runtime_exports():
     """Every Steamworks function the runtime defines, so asmtool's generated stubs leave
-    them out (a stub and a definition of one name would not link)."""
+    them out (a stub and a definition of one name would not link). Read from the objects
+    the compiler makes for iOS, so code under #if counts only when it is built."""
+    from recomp import iossdk
     names = set()
-    for n in steam_runtime_files():
-        if n.endswith(".h"):
-            continue
-        with open(os.path.join(STEAM_RUNTIME, n), errors="replace") as f:
-            text = f.read()
-        names.update(STEAM_EXPORT.findall(text))
-        # RecompSteamFlat.m makes the ISteamClient getters with a macro: GETTER(User, RS_IUser).
-        names.update("SteamAPI_ISteamClient_GetISteam" + g for g in re.findall(r"^GETTER\((\w+),", text, re.M))
+    with tempfile.TemporaryDirectory() as tmp:
+        for n in steam_runtime_files():
+            if n.endswith(".h"):
+                continue
+            obj = os.path.join(tmp, n + ".o")
+            subprocess.run(["xcrun", "-sdk", "iphoneos", "clang", "-arch", "arm64", "-mios-version-min=13.0",
+                            "-isysroot", iossdk.sdk_path(), "-fobjc-arc", "-fmodules", "-w", "-c",
+                            os.path.join(STEAM_RUNTIME, n), "-o", obj], check=True)
+            out = subprocess.run(["nm", "-gUj", obj], capture_output=True, text=True, check=True).stdout
+            names.update(m.group(1) for m in map(STEAM_EXPORT.match, out.split()) if m)
     return sorted(names)
 
 

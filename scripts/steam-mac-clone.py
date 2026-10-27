@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A Mac test clone of a Steam game that runs on the RecompSteam runtime instead of Steam.
 
-    scripts/steam-mac-clone.py <Game.app> [--no-run] [--wait] [-- game arguments]
+    scripts/steam-mac-clone.py <Game.app> [--name <suffix>] [--no-run] [--wait] [-- game arguments]
     scripts/steam-mac-clone.py --build-only
 
 Makes an APFS clone of the game under build/<Game>-steamclone/ (instant, and it takes
@@ -107,9 +107,9 @@ def steam_app_id(app):
     return None
 
 
-def clone(app, appid):
+def clone(app, appid, suffix=None):
     name = os.path.splitext(os.path.basename(app))[0]
-    folder = os.path.join(ROOT, "build", f"{name}-steamclone")
+    folder = os.path.join(ROOT, "build", f"{name}-steamclone" + (f"-{suffix}" if suffix else ""))
     dest = os.path.join(folder, os.path.basename(app))
     if os.path.exists(dest):
         shutil.rmtree(dest)
@@ -185,6 +185,7 @@ def main():
     ap.add_argument("--build-only", action="store_true", help="only build the runtime and recomp-steam-cli")
     ap.add_argument("--no-run", action="store_true", help="make the clone but do not start it")
     ap.add_argument("--wait", action="store_true", help="wait for the game to quit")
+    ap.add_argument("--name", help="a clone of its own: build/<Game>-steamclone-<name> (sessions working at once)")
     ap.add_argument("args", nargs="*", help="arguments for the game (after --)")
     a = ap.parse_args()
     build_cli()
@@ -197,7 +198,7 @@ def main():
         sys.exit(f"{app}: not in a Steam library (no app id)")
     originals = glob.glob(os.path.join(app, "**", "libsteam_api.dylib"), recursive=True)
     dylib = build_runtime(originals[0] if originals else None)
-    folder, dest = clone(app, appid)
+    folder, dest = clone(app, appid, a.name)
     log(f"cloned {os.path.basename(app)} (app {appid}) to {os.path.relpath(dest, ROOT)}")
     replace_steam_api(dest, dylib)
     update_plist(app, dest, appid)
