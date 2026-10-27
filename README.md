@@ -16,7 +16,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 
 | Game | Engine | iPad | iPhone |
 |---|---|---|---|
-| [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ⚠️ Runs; the HUD is being reworked for the phone |
+| [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
 | [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ⚠️ Plays until chapter 4, then runs out of memory |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, local worlds | ✅ Playable |
 
@@ -28,17 +28,20 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 |---|---|
 | **App size** | 2.3 GB |
 | **Screen** | Landscape |
-| **Touch** | Touch acts as the mouse; [placement mode](docs/TECHNICAL.md#touch-controls-recomptouchmouse) lets you aim a building before placing it. A **Dev** key above Esc toggles the game's developer mode |
+| **Touch** | In a game, touches drive the map directly: tap to click, drag to pan (or to draw paths and areas with a tool), two fingers to pan, pinch to zoom and twist to turn, a two-finger tap to cancel. Taps on the game's panels go straight to them. [Placement mode](docs/TECHNICAL.md#touch-controls-recomptouchmouse) lets you aim a building, then **Place**; **Rows** drags out paths and walls |
+| **Mobile UI** | A HUD laid out for touch: a Colony tab and a View tab with drawers, the tools in a column on the left, rotate, flip and Place in a rail on the right. Always on on iPhone; on iPad, **Settings › Interface › Mobile UI** (turning it on applies at once, off from the next save loaded) |
+| **Keys** | **Esc** and **Dev** (the game's developer mode): beside the Dynamic Island on iPhone; on iPad above the tool bar, or bottom right with the Mobile UI. With the Mobile UI, developer mode adds a bug key that opens Development controls in a touch-sized window |
 | **Controller** | Not used: Timberborn is played with a mouse |
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ [Shared](docs/TECHNICAL.md#saves-across-devices) with the Mac and your other devices |
-| **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting |
+| **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting. The port's own mod, TheSTouchscreen, brings the touch input and the Mobile UI: keep it enabled in the game's mod manager |
 | **Steam** | [License check](docs/TECHNICAL.md#steam-license-check) at first launch. No achievements, no Steam Cloud |
 | **Frame rate** | Not measured yet |
 
-Known limits: no hover, so no tooltips or highlight under the cursor; some buttons are small for
-fingers (raise the in-game UI scale); a mod with code needs a new port; the local HTTP API's web
-pages are off, since they compile templates at run time.
+Known limits: no hover, so no tooltips or highlight under the cursor (the tool bar's tooltips are
+removed); with the game's own HUD on iPad some buttons are small for fingers (raise the in-game UI
+scale, or turn on the Mobile UI); a mod with code needs a new port; the local HTTP API's web pages
+are off, since they compile templates at run time.
 
 ### Stray
 
@@ -192,7 +195,8 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [x] Bluetooth controllers, keyboards and trackpads
 - [x] iOS keyboard for the game's text fields
 - [x] Placement mode for building games (Timberborn)
-- [ ] Timberborn's HUD laid out for iPhone (in progress)
+- [x] Timberborn: touches drive the map directly (pan, pinch, twist, tap), through its built-in mod
+- [x] Timberborn's Mobile UI: the HUD laid out for touch, always on iPhone, a setting on iPad
 - [ ] Tooltips and hover highlights in mouse games
 - [ ] On-screen gamepad that keeps clear of the game's HUD (Valheim)
 
