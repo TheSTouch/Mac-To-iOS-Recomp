@@ -9,12 +9,23 @@
 //   ufs <appid>      list the app's Steam Cloud files
 //   playing          what Steam says the account plays on another device (presence check)
 //   schema <appid>   save the app's stats schema (binary KeyValues) and the player's stats to $TMPDIR
+//   achievements <appid> [unlock <name>]
+//                    list the app's achievements and the player's, through the runtime's
+//                    ISteamUserStats; unlock sets one and stores it on Steam (for real)
 //   token            print the stored token (for scripts/steam-mac-clone.py)
 #import <Foundation/Foundation.h>
 #import <CoreImage/CoreImage.h>
 #import <ImageIO/ImageIO.h>
 #include "../RecompSteamAuth.h"
 #include "../RecompSteamInternal.h"
+
+bool SteamAPI_ISteamUserStats_RequestCurrentStats(void *self);
+uint32_t SteamAPI_ISteamUserStats_GetNumAchievements(void *self);
+const char *SteamAPI_ISteamUserStats_GetAchievementName(void *self, uint32_t index);
+const char *SteamAPI_ISteamUserStats_GetAchievementDisplayAttribute(void *self, const char *name, const char *key);
+bool SteamAPI_ISteamUserStats_GetAchievementAndUnlockTime(void *self, const char *name, bool *achieved, uint32_t *time);
+bool SteamAPI_ISteamUserStats_SetAchievement(void *self, const char *name);
+bool SteamAPI_ISteamUserStats_StoreStats(void *self);
 
 static void Out(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void Out(NSString *fmt, ...)
@@ -149,6 +160,36 @@ int main(int argc, char **argv)
                     Exit(0);
                 });
                 rs_pb_free(&w);
+            });
+        } else if ([cmd isEqual:@"achievements"] && app) {
+            NSString *unlock = argc > 4 && !strcmp(argv[3], "unlock") ? @(argv[4]) : nil;
+            WithLogon(app, ^{
+                SteamAPI_ISteamUserStats_RequestCurrentStats(NULL);
+                __block int tries = 0;
+                __block void (^wait)(void);   // re-armed until the stats arrive, then cleared
+                wait = ^{
+                    if (!SteamAPI_ISteamUserStats_GetNumAchievements(NULL) && ++tries < 40) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), RecompSteam_Queue(), wait);
+                        return;
+                    }
+                    uint32_t n = SteamAPI_ISteamUserStats_GetNumAchievements(NULL);
+                    for (uint32_t i = 0; i < n; i++) {
+                        const char *name = SteamAPI_ISteamUserStats_GetAchievementName(NULL, i);
+                        bool on = false;
+                        uint32_t when = 0;
+                        SteamAPI_ISteamUserStats_GetAchievementAndUnlockTime(NULL, name, &on, &when);
+                        Out(@"%s %-24s %s", on ? "X" : " ", name,
+                            SteamAPI_ISteamUserStats_GetAchievementDisplayAttribute(NULL, name, "name"));
+                    }
+                    wait = nil;
+                    if (!unlock) Exit(0);
+                    bool set = SteamAPI_ISteamUserStats_SetAchievement(NULL, unlock.UTF8String);
+                    bool stored = set && SteamAPI_ISteamUserStats_StoreStats(NULL);
+                    Out(@"unlock %@: %s", unlock, stored ? "sent" : "unknown achievement");
+                    // "stats stored: EResult ..." follows in the log.
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), RecompSteam_Queue(), ^{ Exit(0); });
+                };
+                wait();
             });
         } else if ([cmd isEqual:@"owns"] && app) {
             WithLogon(app, ^{

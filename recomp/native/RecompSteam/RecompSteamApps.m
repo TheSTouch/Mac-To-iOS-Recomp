@@ -76,8 +76,10 @@ uint64_t RS_AppOwner(void) { return RS_SteamID(); }
 // --- presence -------------------------------------------------------------------------------------
 
 static BOOL gPlaying, gWatching;
+#if TARGET_OS_IPHONE
 static uint64_t gBackgroundGen;
 static const double kBackgroundGrace = 5 * 60;   // in the background this long: no longer "playing"
+#endif
 
 static void SetPlaying(BOOL on)
 {
