@@ -67,4 +67,8 @@ void RSCloudWriteOffline(NSString *why);
 // down. SteamAPI_Init and ISteamRemoteStorage call it, from the game's threads; a no-op outside
 // steam mode and once the pass is done.
 void RSCloudWaitForLaunch(void);
+// Non-blocking: runs done once the first sync of this run (the launch's, or the one after the
+// first sign-in) is done, at once outside steam mode, after 60 s at most. RecompLicense.m keeps
+// its cover over the game until then (found with dlsym).
+void RSCloudWhenSynced(void (^done)(void));
 NSString *RSCloudBackupShown(void);

@@ -7,8 +7,11 @@
 //   - this device's changes go up right after, every kPeriod while it plays, when it
 //     goes to the background and when it quits;
 //   - while the game runs, Steam Cloud's changes wait for the next launch; when the
-//     launch could not sync (no network yet, the first sign-in), the first sync that
-//     brings files down asks the player to reopen the game so it reads them;
+//     launch could not sync (no network yet, the first sign-in), the first sync of the
+//     run still brings Steam Cloud down. RSCloudWhenSynced tells when that sync is done:
+//     the sign-in cover (RecompLicense.m) stays over the game, with the engine paused,
+//     until then. Only when nothing held the game does that sync ask the player to
+//     reopen it, so it reads the files;
 //   - a save changed both here and in Steam Cloud stays as it is until the player
 //     chooses, Steam-style: "Steam Cloud" (then the game closes, to read it at the next
 //     launch) or "This iPad" (it goes up). The version not chosen goes to the
@@ -32,7 +35,8 @@ static const NSTimeInterval kPeriod = 300;
 static dispatch_queue_t gQueue;                 // every pass runs here, one at a time
 static dispatch_source_t gTimer;
 static NSString *gGame, *gDevice;
-static BOOL gLaunchSynced, gAsking, gQuitting, gGaveUp;
+static BOOL gLaunchSynced, gAsking, gQuitting, gGaveUp, gHeld;
+static NSMutableArray *gWhenSynced;             // RSCloudWhenSynced's blocks, run once the first sync of the run is done
 static dispatch_group_t gLaunch;               // the launch pass, which the game's first Steam calls wait for
 static CFAbsoluteTime gLaunchDeadline;
 
@@ -85,9 +89,11 @@ static void Alert(NSString *title, NSString *message, NSArray<UIAlertAction *> *
 static void AskToReopen(NSString *why) {
     gQuitting = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *msg = [NSString stringWithFormat:@"%@ %@ closes now so it reads them; open it again to play.", why, gGame];
-        Alert(@"Steam Cloud saves", msg, @[[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
-                                                                   handler:^(UIAlertAction *x) { exit(0); }]], 0);
+        NSString *msg = [NSString stringWithFormat:@"%@\n\n%@ closes now so it loads them. Open it again from the "
+                                                   @"Home Screen to play with your Steam Cloud saves.", why, gGame];
+        Alert(@"Steam Cloud saves", msg, @[[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Close %@", gGame]
+                                                                   style:UIAlertActionStyleDefault
+                                                                 handler:^(UIAlertAction *x) { exit(0); }]], 0);
     });
 }
 
@@ -170,6 +176,13 @@ static void After(RSCloudReport *r) {
     if (r.conflicts.count) AskConflict(r.conflicts);
 }
 
+// On the queue: the first sync of the run is done (or could not run): release who waits for it.
+static void Synced(void) {
+    NSArray *waiting = gWhenSynced;
+    gWhenSynced = nil;
+    for (void (^done)(void) in waiting) done();
+}
+
 // On the queue: a pass with what this moment allows.
 static RSCloudReport *Pass(NSString *why, BOOL settle, NSTimeInterval budget) {
     if (gQuitting) return nil;
@@ -183,7 +196,9 @@ static RSCloudReport *Pass(NSString *why, BOOL settle, NSTimeInterval budget) {
     RSCloudReport *r = RSCloudSync(why, late, settle, budget);
     if (late && !r.offline) {
         gLaunchSynced = YES;
-        if (r.downloaded + r.deletedHere > 0) AskToReopen(@"Your saves from Steam Cloud were copied to this device.");
+        if (r.downloaded + r.deletedHere > 0 && !gHeld)
+            AskToReopen([NSString stringWithFormat:@"Your saves from Steam Cloud were copied to this %@.", gDevice]);
+        Synced();
     }
     After(r);
     return r;
@@ -234,6 +249,38 @@ static void AtExit(void) { PassAndWait(@"quit", 10); }
 #endif
 
 // --- start-up ------------------------------------------------------------------------------
+
+// Runs done (on this file's queue) once the first sync of this run is done: the launch's or,
+// when the launch could not sync, the one after the sign-in; at once outside steam mode or when
+// it is done; after kHoldWait at most. A caller holding the game until then (the sign-in cover)
+// saves the player the "reopen" prompt.
+static const NSTimeInterval kHoldWait = 60;
+void RSCloudWhenSynced(void (^done)(void)) {
+    if (!done) return;
+    if (!gQueue) {
+        done();
+        return;
+    }
+    __block BOOL ran = NO;
+    void (^once)(void) = ^{
+        if (ran) return;
+        ran = YES;
+        done();
+    };
+    dispatch_async(gQueue, ^{
+        if (gLaunchSynced) {
+            once();
+            return;
+        }
+        gHeld = YES;
+        if (!gWhenSynced) gWhenSynced = [NSMutableArray array];
+        [gWhenSynced addObject:once];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kHoldWait * NSEC_PER_SEC)), gQueue, ^{
+            if (!ran) CLOG(@"the first sync is not done after %.0f s: the game goes on", kHoldWait);
+            once();
+        });
+    });
+}
 
 // From the game's threads only (never the session's queue or this file's).
 void RSCloudWaitForLaunch(void) {
@@ -288,9 +335,10 @@ __attribute__((constructor)) static void RecompSteamCloudInit(void) {
                         RSCloudWriteOffline(stored ? @"Steam did not answer in time" : @"not signed in to Steam yet");
                     }
                     dispatch_group_leave(gLaunch);
+                    if (gLaunchSynced) Synced();
                     // The game went on without these files: it reads them at the next launch.
                     if (gGaveUp && launch.downloaded + launch.deletedHere > 0)
-                        AskToReopen(@"Your saves from Steam Cloud came after the game had started.");
+                        AskToReopen([NSString stringWithFormat:@"Your saves from Steam Cloud arrived after %@ had started.", gGame]);
                     // Conflicts are asked once the game's window is up; this device's changes go up now.
                     if (launch) After(launch);
                     if (gLaunchSynced) Pass(@"after launch", NO, 120);
