@@ -277,7 +277,7 @@ static BOOL ChangedHere(RSLocal *l, NSDictionary *s, NSString **sha) {
     return ![*sha isEqualToString:s[@"sha"]];
 }
 
-RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL settle, NSTimeInterval budget) {
+RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL upload, BOOL settle, NSTimeInterval budget) {
     RSCloudReport *r = [[RSCloudReport alloc] init];
     r.errors = [NSMutableArray array];
     if (!gSteamID) {
@@ -386,6 +386,8 @@ RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL settle, NSTimeInte
                     [files removeObjectForKey:name];
                     r.deletedHere++;
                 }
+            } else if (!upload) {
+                continue; // the next pass takes it up
             } else if (l) {
                 uploads[name] = l.path;
                 times[name] = @((uint64_t)l.mtime);

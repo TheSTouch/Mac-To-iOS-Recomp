@@ -54,9 +54,10 @@ uint64_t RSCloudQuota(void);
 // The account's {64BitSteamID}; the sync does nothing before it is known.
 void RSCloudSetAccount(uint64_t steamid);
 // One pass. With download, cloud changes come here (only while the game has not read its
-// saves: at launch); without, only this device's changes go up. Conflicts are reported,
-// never resolved here. settle skips files changed in the last seconds (half written).
-RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL settle, NSTimeInterval budget);
+// saves: at launch); with upload, this device's changes go up (the launch leaves them to the
+// next pass, so the game does not wait for them). Conflicts are reported, never resolved
+// here. settle skips files changed in the last seconds (half written).
+RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL upload, BOOL settle, NSTimeInterval budget);
 // The player's answer to a conflict: YES keeps Steam Cloud's version, NO this device's. The
 // version not kept goes to the backup folder first.
 RSCloudReport *RSCloudResolve(NSArray<RSCloudConflict *> *conflicts, BOOL keepCloud);

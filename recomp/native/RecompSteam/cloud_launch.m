@@ -193,7 +193,7 @@ static RSCloudReport *Pass(NSString *why, BOOL settle, NSTimeInterval budget) {
     RSCloudSetAccount(RecompSteam_SteamID());
     // A launch that could not sync: the first pass brings Steam Cloud down, then asks to reopen.
     BOOL late = !gLaunchSynced;
-    RSCloudReport *r = RSCloudSync(why, late, settle, budget);
+    RSCloudReport *r = RSCloudSync(why, late, YES, settle, budget);
     if (late && !r.offline) {
         gLaunchSynced = YES;
         if (r.downloaded + r.deletedHere > 0 && !gHeld)
@@ -244,9 +244,13 @@ static void Passes(void) {
     });
 }
 
-#if !TARGET_OS_IPHONE
-static void AtExit(void) { PassAndWait(@"quit", 10); }
-#endif
+// A game quitting from its own menu calls exit(): no notification on iOS, so atexit on both.
+static BOOL gQuitPassed;
+static void AtExit(void) {
+    if (gQuitPassed || !gQueue) return;
+    gQuitPassed = YES;
+    PassAndWait(@"quit", TARGET_OS_IPHONE ? 4.5 : 10);
+}
 
 // --- start-up ------------------------------------------------------------------------------
 
@@ -329,7 +333,7 @@ __attribute__((constructor)) static void RecompSteamCloudInit(void) {
                     RSCloudReport *launch = nil;
                     if (loggedOn) {
                         RSCloudSetAccount(RecompSteam_SteamID());
-                        launch = RSCloudSync(@"launch", YES, NO, MAX(gLaunchDeadline - CFAbsoluteTimeGetCurrent(), 5));
+                        launch = RSCloudSync(@"launch", YES, NO, NO, MAX(gLaunchDeadline - CFAbsoluteTimeGetCurrent(), 5));
                         gLaunchSynced = !launch.offline;
                     } else {
                         RSCloudWriteOffline(stored ? @"Steam did not answer in time" : @"not signed in to Steam yet");
@@ -352,10 +356,9 @@ __attribute__((constructor)) static void RecompSteamCloudInit(void) {
         [nc addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue
                     usingBlock:^(NSNotification *n) { Background(@"background", 25); }];
         [nc addObserverForName:UIApplicationWillTerminateNotification object:nil queue:NSOperationQueue.mainQueue
-                    usingBlock:^(NSNotification *n) { PassAndWait(@"quit", 4.5); }];
-#else
-        atexit(AtExit);
+                    usingBlock:^(NSNotification *n) { AtExit(); }];
 #endif
+        atexit(AtExit);
         CLOG(@"%@: app %u, %@", gGame, RSCloudAppID(), stored ? @"signed in" : @"not signed in yet");
     }
 }
