@@ -4,9 +4,10 @@
 // their button prompts stay on the gamepad glyphs.
 //
 // Layout: touch the left half to get a floating move stick, the right half
-// for a floating camera stick; A/B/X/Y bottom right, shoulders and triggers
-// along the top edges, Menu and View top left. Hidden while a physical
-// controller is connected. Pointer devices (trackpad, mouse) pass through.
+// for a floating camera stick; A/B/X/Y bottom right, a D-pad on the left edge
+// above L3, shoulders and triggers along the top edges, Menu and View top left.
+// Hidden while a physical controller is connected. Pointer devices (trackpad,
+// mouse) pass through.
 //
 // Positions and sizes are for an iPad's screen height; a shorter screen (a phone
 // in landscape) scales them down, never below thumb size, and keeps them clear
@@ -23,7 +24,9 @@ static GCController *gPad;
 @property CGFloat radius;   // at scale 1 (an iPad)
 @property (strong) CAShapeLayer *layer;
 @property (strong) CATextLayer *label;
-@property (copy) GCControllerButtonInput * (^input)(GCExtendedGamepad *);
+@property (copy) GCControllerButtonInput * (^input)(GCExtendedGamepad *); // nil for a D-pad arm
+@property CGVector dpad;    // a D-pad arm's direction, y up
+@property BOOL down;
 @end
 @implementation RecompPadButton
 @end
@@ -71,6 +74,15 @@ static const CGFloat kDeadZone = 0.1;
 static const CGFloat kDesignHeight = 600; // screens at least this tall use scale 1
 static const CGFloat kMinScale = 0.7;     // A/B/X/Y stay 44 points wide
 static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
+static const CGPoint kDPad = {84, 200};   // D-pad centre, between L3 and LT
+static const CGFloat kDPadArm = 44;       // centre to each arm
+
+- (RecompPadButton *)arm:(NSString *)name label:(NSString *)label dx:(CGFloat)dx dy:(CGFloat)dy {
+    RecompPadButton *b = [self button:name at:CGPointMake(kDPad.x + dx * kDPadArm, kDPad.y + dy * kDPadArm) radius:20 input:nil];
+    b.dpad = CGVectorMake(dx, dy);
+    b.label.string = label;
+    return b;
+}
 
 - (RecompStick *)stick:(GCControllerDirectionPad * (^)(GCExtendedGamepad *))input curve:(CGFloat)curve {
     RecompStick *s = [RecompStick new];
@@ -107,6 +119,10 @@ static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
             [self button:@"View" at:CGPointMake(108, -34) radius:22 input:^(GCExtendedGamepad *g) { return g.buttonOptions; }],
             [self button:@"L3" at:CGPointMake(56, 60) radius:22 input:^(GCExtendedGamepad *g) { return g.leftThumbstickButton; }],
             [self button:@"R3" at:CGPointMake(-260, 50) radius:22 input:^(GCExtendedGamepad *g) { return g.rightThumbstickButton; }],
+            [self arm:@"Up" label:@"\u2191" dx:0 dy:1],
+            [self arm:@"Down" label:@"\u2193" dx:0 dy:-1],
+            [self arm:@"Left" label:@"\u2190" dx:-1 dy:0],
+            [self arm:@"Right" label:@"\u2192" dx:1 dy:0],
         ];
         _left = [self stick:^(GCExtendedGamepad *g) { return g.leftThumbstick; } curve:1.3];
         _right = [self stick:^(GCExtendedGamepad *g) { return g.rightThumbstick; } curve:1.8]; // camera
@@ -132,7 +148,7 @@ static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
         CGPoint c = [self place:b.center];
         CGFloat r = [self radius:b];
         b.layer.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r)].CGPath;
-        b.label.fontSize = round((b.radius > 26 ? 20 : 13) * MAX(_scale, 0.85));
+        b.label.fontSize = round((b.radius > 26 || b.input == nil ? 20 : 13) * MAX(_scale, 0.85));
         CGFloat h = b.label.fontSize + 4;
         b.label.frame = CGRectMake(c.x - r, c.y - h / 2, 2 * r, h);
     }
@@ -149,10 +165,26 @@ static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
     [self setNeedsLayout];
 }
 
+// The D-pad's arms share one disc, split by direction from its centre: no
+// touch on it, not even between the arms, starts the move stick.
+- (RecompPadButton *)armAt:(CGPoint)p {
+    CGPoint d = [self place:kDPad];
+    CGFloat dx = p.x - d.x, dy = d.y - p.y, best = -INFINITY;
+    RecompPadButton *arm = nil;
+    for (RecompPadButton *b in _buttons) {
+        if (b.input || hypot(dx, dy) > kDPadArm * _scale + [self radius:b] + 12 * _scale) continue;
+        CGFloat dot = dx * b.dpad.dx + dy * b.dpad.dy;
+        if (dot > best) { best = dot; arm = b; }
+    }
+    return arm;
+}
+
 - (RecompPadButton *)buttonAt:(CGPoint)p {
+    RecompPadButton *arm = [self armAt:p];
+    if (arm) return arm;
     for (RecompPadButton *b in _buttons) {
         CGPoint c = [self place:b.center];
-        if (hypot(p.x - c.x, p.y - c.y) <= [self radius:b] + 12 * _scale) return b;
+        if (b.input && hypot(p.x - c.x, p.y - c.y) <= [self radius:b] + 12 * _scale) return b;
     }
     return nil;
 }
@@ -164,8 +196,15 @@ static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
 }
 
 - (void)press:(RecompPadButton *)b down:(BOOL)down {
-    [b.input(gPad.extendedGamepad) setValue:down ? 1 : 0];
+    b.down = down;
     b.layer.fillColor = Ink(down ? 0.4 : 0.12).CGColor;
+    if (b.input) { [b.input(gPad.extendedGamepad) setValue:down ? 1 : 0]; return; }
+    // A D-pad arm: the pad's axes from every arm held, set the way
+    // RecompPadScript sets them, which also presses its up/down/left/right.
+    CGFloat x = 0, y = 0;
+    for (RecompPadButton *a in _buttons)
+        if (!a.input && a.down) { x += a.dpad.dx; y += a.dpad.dy; }
+    [gPad.extendedGamepad.dpad setValueForXAxis:x yAxis:y];
 }
 
 - (void)moveStick:(RecompStick *)s to:(CGPoint)p {
@@ -219,6 +258,13 @@ static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
         if (t.type == UITouchTypeIndirectPointer) { [pointer addObject:t]; continue; }
         id o = [_owners objectForKey:t];
         if ([o isKindOfClass:[RecompStick class]]) [self moveStick:o to:[t locationInView:self]];
+        // A thumb rolled from one D-pad arm to the next presses the new one.
+        RecompPadButton *arm = [o isKindOfClass:[RecompPadButton class]] && ![o input] ? [self armAt:[t locationInView:self]] : nil;
+        if (arm && arm != o) {
+            [_owners setObject:arm forKey:t];
+            [self press:o down:NO];
+            [self press:arm down:YES];
+        }
     }
     if (pointer.count) [RecompRoot() touchesMoved:pointer withEvent:e];
 }
@@ -296,8 +342,9 @@ void RecompPadScript(NSArray<NSString *> *steps) {
     GCExtendedGamepad *g = gPad.extendedGamepad;
     NSDictionary *dirs = @{@"up": @[@0, @1], @"down": @[@0, @-1], @"left": @[@-1, @0], @"right": @[@1, @0]};
     void (^release)(void) = nil;
-    if (dirs[step]) {
-        [g.dpad setValueForXAxis:[dirs[step][0] floatValue] yAxis:[dirs[step][1] floatValue]];
+    NSArray *dir = dirs[step.lowercaseString]; // before the on-screen arms, named Up, Down...
+    if (dir) {
+        [g.dpad setValueForXAxis:[dir[0] floatValue] yAxis:[dir[1] floatValue]];
         release = ^{ [g.dpad setValueForXAxis:0 yAxis:0]; };
     } else if ([gTouchPad buttonNamed:step]) {
         RecompPadButton *b = [gTouchPad buttonNamed:step];
