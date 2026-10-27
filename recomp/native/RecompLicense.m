@@ -35,6 +35,7 @@
 #import <UIKit/UIKit.h>
 #import <CoreImage/CoreImage.h>
 #import <Security/Security.h>
+#include <dlfcn.h>
 #include <os/log.h>
 #include "RecompSteamAuth.h"
 #include "RecompSteamSession.h"
@@ -325,10 +326,50 @@ static RecompLicenseGate *gGate;
                 SaveState(@{@"refresh": tokens[@"refresh"], @"steamid": tokens[@"steamid"], @"account": tokens[@"account"],
                             @"verified": @(NSDate.date.timeIntervalSince1970)});
                 if (blocked) [self elsewhere:elsewhere];
-                else [self uncover];
+                else [self afterCloudSync];
             });
         });
     });
+}
+
+// While the player signs in, a Unity game is paused (UnityPause, which the trampoline uses
+// for the background): the game would otherwise read its saves under the cover, before the
+// sync after the sign-in brings them (Valheim lists its characters as its menu starts). It
+// resumes when the cover lifts. Unreal ports have no such switch and run on.
+static void PauseGame(BOOL pause) {
+    static BOOL paused;
+    typedef void (*UnityPauseFn)(int);
+    static UnityPauseFn unityPause;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ unityPause = (UnityPauseFn)dlsym(RTLD_DEFAULT, "UnityPause"); });
+    if (!unityPause || paused == pause) return;
+    paused = pause;
+    LLOG(@"%@ the game while the player signs in", pause ? @"pausing" : @"resuming");
+    unityPause(pause ? 1 : 0);
+}
+
+// With Steam Cloud saves (RecompSteam/cloud*.m), the cover stays until the sync that follows
+// the sign-in is done, so the game finds the player's saves without a restart. Looked up by
+// name: ports without the cloud files lift it at once.
+- (void)afterCloudSync {
+    typedef void (*WhenSynced)(void (^)(void));
+    WhenSynced whenSynced = (WhenSynced)dlsym(RTLD_DEFAULT, "RSCloudWhenSynced");
+    if (!whenSynced || !self.window) {
+        [self uncover];
+        return;
+    }
+    NSInteger gen = self.gen;
+    [self show:RLChecking status:nil];
+    self.titleLabel.text = @"Getting your saves from Steam Cloud…";
+    __block BOOL done = NO;
+    void (^lift)(void) = ^{
+        if (done || gen != self.gen) return;
+        done = YES;
+        [self uncover];
+    };
+    whenSynced(^{ Main(lift); });
+    // The sync gives up on its own; this is only a backstop.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), lift);
 }
 
 // Steam plays one game per account at a time: the account plays on another device.
@@ -360,6 +401,7 @@ static RecompLicenseGate *gGate;
 }
 
 - (void)beginQR:(NSString *)status {
+    PauseGame(YES);
     [self endFlow];
     NSInteger gen = self.gen;
     [self show:RLQR status:status];
@@ -751,6 +793,7 @@ static UILabel *Label(CGFloat size, UIFontWeight weight, UIColor *color) {
 
 - (void)uncover {
     self.launchCheck = NO;
+    PauseGame(NO);
     if (!self.window) return;
     [self.window endEditing:YES];
     self.window.hidden = YES;
