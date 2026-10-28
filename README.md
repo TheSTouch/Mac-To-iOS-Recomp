@@ -10,6 +10,27 @@ on your device.
 
 [Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md)
 
+## Steam in your ports
+
+A port of a Steam game carries its own Steam client, so it is on Steam the way the Mac game is.
+You sign in once, with the Steam Mobile app's QR scanner or with your password and Steam Guard, and
+that one sign-in covers the following:
+
+- **License:** the game plays for an account that owns it or borrows it through Family Sharing,
+  and plays offline for 30 days after the last check.
+- **Online status:** your friends see you playing the game, until you leave it.
+- **Steam Cloud saves:** the same saves as the game on your Mac or PC. They download when the game
+  starts and upload when you leave it, and a prompt lets you choose when two devices changed the
+  same save. You choose Steam Cloud or iCloud Drive when porting.
+- **Achievements and stats:** they unlock on your Steam account.
+- **DLC:** the port sees the DLC your account owns.
+- **Online play** in supported games (Valheim): Steam servers, the server list, crossplay servers
+  and join codes, and hosting your own world.
+
+Not there yet: joining a friend's game through Steam's relay, the friends list and invites, the
+Steam overlay and the Workshop. Unreal games (Stray) get the license and online status only, for
+now. [How it works](docs/TECHNICAL.md#steam-runtime)
+
 ## Tested games
 
 Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
@@ -18,7 +39,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 |---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
 | [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4, at 30 frames/s |
-| [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, local worlds | ✅ Playable |
+| [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, online play | ✅ Playable |
 
 ### Timberborn
 
@@ -36,7 +57,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | **Saves on iCloud Drive** | ✅ [Shared](docs/TECHNICAL.md#saves-across-devices) with the Mac and your other devices |
 | **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting. The port's own mod, TheSTouchscreen, brings the touch input and the Mobile UI; the port turns it back on at every launch, so unticking it in the mod manager cannot leave the touch input off |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
-| **Steam** | [License check](docs/TECHNICAL.md#steam-license-check) at first launch. No achievements, no Steam Cloud |
+| **Steam** | [Sign-in and license check](docs/TECHNICAL.md#steam-runtime). Achievements, online status and Steam Cloud are built into new ports, not yet tested with Timberborn |
 | **Frame rate** | Not measured yet |
 
 Known limits: no hover, so no tooltips or highlight under the cursor (the tool bar's tooltips are
@@ -58,7 +79,7 @@ device.
 | **Controller** | ✅ Bluetooth controller tested; the on-screen pad hides when one connects |
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ |
-| **Steam** | License check at first launch. No achievements, no Steam Cloud |
+| **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
 | **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, MetalFX from 50 %; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
 | **Memory** | iPhone 17: chapter 4 (The Slums) uses about 5 GB of the 6.1 GB iOS allows, since sounds now decode as they play instead of all being unpacked when a level loads |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
@@ -79,14 +100,15 @@ sized to the device's memory.
 | **Touch** | On-screen gamepad in play; touch acts as the mouse in menus; the iOS keyboard opens for names |
 | **Controller** | Not tried yet |
 | **Keyboard, trackpad** | ✅ |
-| **Saves on iCloud Drive** | ✅ Local worlds and characters |
+| **Saves** | ✅ Steam Cloud, shared with the game on your Mac or PC, conflict prompt included; or iCloud Drive, chosen when porting |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
-| **Online** | ❌ Local worlds only: no online play, crossplay or Steam Cloud |
-| **Steam** | License check at first launch |
+| **Online** | ✅ Steam servers by IP (with password) and from the server list, crossplay servers by join code, hosting a world with crossplay. Not yet: joining a friend's game through Steam |
+| **Steam** | One sign-in for the license, online status, achievements, Steam Cloud and online play |
 | **Frame rate** | Not measured yet. iPhone renders at 75 % |
 
 Known limits: the on-screen gamepad covers parts of the HUD (hotbar slot 1, the minimap corner,
-food and health); worlds and characters kept in Steam Cloud must be moved to local storage in
+food and health); online play and Steam Cloud are tested on the iPad, not yet on the iPhone; with
+iCloud Drive saves, worlds and characters kept in Steam Cloud must be moved to local storage in
 Valheim's menus on the Mac first.
 
 ## Recomp Helper, the Mac app
@@ -106,7 +128,7 @@ one go.
   sign in to Xcode).
 - **Installs on another device** after a port, and checks the device has room first.
 - **Mods:** tick which of the Mac's mods go into the port.
-- **Saves:** turn on iCloud Drive save sync for a game.
+- **Saves:** Steam Cloud or iCloud Drive for each game.
 
 Download the notarized DMG from [Releases](../../releases), or build it yourself
 ([Building the app](docs/TECHNICAL.md#building-the-app)).
@@ -140,6 +162,7 @@ python3 recomp.py unreal /path/to/Game.app --team <TEAMID> --device "<iPad name>
 
 python3 recomp.py mods  /path/to/Game.app           # which mods go into the next port
 python3 recomp.py saves /path/to/Game.app --enable  # share saves through iCloud Drive
+# saves go to Steam Cloud by default when the game has it: --saves steam|icloud|off when porting
 ```
 
 Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another disk.
@@ -162,8 +185,8 @@ Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another dis
 **Needs work first** (a game profile, a stub or a patch):
 
 - Unity versions older than 6: the IL2CPP patches are written against Unity 6;
-- native plug-ins without a stub (Steamworks, PlayFab Party and Apple's Mac plug-ins are already
-  stubbed);
+- native plug-ins without a stub or an iOS build (Steamworks is the port's own Steam client,
+  PlayFab Party is Microsoft's iOS framework, Apple's Mac plug-ins are stubbed);
 - libraries that generate code while the game runs (Harmony, MonoMod): iOS forbids it;
 - Unity's old input system: taps act as clicks, but pinch and multi-finger gestures need the Input
   System package;
@@ -208,12 +231,17 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [ ] Tooltips and hover highlights in mouse games
 - [ ] On-screen gamepad that keeps clear of the game's HUD (Valheim)
 
-### Saves and accounts
+### Steam and saves
+- [x] One Steam sign-in per port: QR code, or password and Steam Guard
+- [x] Steam license check, Family Sharing included, 30 days offline
+- [x] Online status: friends see you playing
+- [x] Steam Cloud saves, shared with the Mac and PC game (Valheim)
+- [x] Steam achievements and stats (Unity games)
+- [x] Online play (Valheim): Steam servers, the server list, crossplay, hosting
 - [x] Saves shared between Mac, iPad and iPhone through iCloud Drive
-- [x] Steam license check: QR code, or password and Steam Guard
-- [ ] Steam Cloud saves
-- [ ] Steam achievements
-- [ ] Online play (Valheim)
+- [ ] Joining a friend's game through Steam's relay (Valheim)
+- [ ] Achievements in Unreal games (Stray)
+- [ ] Friends list, invites, Steam overlay, Workshop
 
 ### Mods
 - [x] Data mods, added any time through Files
@@ -242,7 +270,7 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 ## More
 
 - **[How it works](docs/TECHNICAL.md):** the Unity and Unreal routes, game profiles, touch controls in
-  detail, mods, save sync rules, the Steam license check, debugging on the device and building the app.
+  detail, mods, save sync rules, the Steam runtime, debugging on the device and building the app.
 - **Contributing:** this repository is public. Never commit game files or personal details; see
   [Contributing](docs/TECHNICAL.md#contributing) for the commit guard.
 - **License:** [PolyForm Noncommercial 1.0.0](LICENSE): free for personal, hobby, research and other

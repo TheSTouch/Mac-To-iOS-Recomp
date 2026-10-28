@@ -1,7 +1,7 @@
 # How it works
 
 The [README](../README.md) says what the ports do and how to run them. This file covers how each route turns a
-Mac game into an iOS app, and the details behind controls, mods, saves and the Steam license check.
+Mac game into an iOS app, and the details behind controls, mods, saves and the Steam runtime.
 
 ## Routes
 
@@ -50,8 +50,9 @@ Stages (run all, or name some): `prepare player inject xcode install`.
    assembly as an iOS-only plugin (engine and class-library assemblies come from Unity's
    iOS player instead). P/Invokes into libraries iOS lacks (Steamworks, PlayFab Party, Apple's
    Mac plug-ins, a game's own Mac helpers: `STUB_PROFILES` in `recomp/unity_ios.py`) are
-   redirected to `__Internal` and a generated C stub (`stubs/*.overrides.c` for functions where 0
-   is the wrong answer). Managed shims from `recomp/shims` are added (touch controls), and the
+   redirected to `__Internal`: Steamworks to the [Steam runtime](#steam-runtime), built into the
+   port, and the rest to a generated C stub (`stubs/*.overrides.c` for functions where 0 is the
+   wrong answer). Managed shims from `recomp/shims` are added (touch controls), and the
    selected mods' DLLs, with their Harmony patches woven in ([Mods](#mods-unity-ports)).
 2. **player**: the matching editor builds the shell for iOS in batchmode, which runs IL2CPP
    over all of it and writes an Xcode project.
@@ -93,10 +94,11 @@ Two kinds of fixes apply on top of the generic pipeline:
   |---|---|
   | `returns` | `{"<Assembly>.dll": {"Type::Method": value}}`: the method only returns that string, bool or int (e.g. a platform check with no iOS answer) |
   | `responders` | `{"<Assembly>.dll": ["Namespace.Type"]}`: Steamworks.NET matchmaking responders whose native vtable of instance delegates IL2CPP cannot marshal get static `[MonoPInvokeCallback]` trampolines that find the instance by its native address (`asmtool responders`) |
-  | `stub_overrides` | swaps a stub profile's override files, e.g. Steamworks that signs in offline instead of reporting "no Steam" |
+  | `stub_overrides` | swaps a stub profile's override files (`stubs/`) for this game |
+  | `steam_networking` | `true` for online play: links GameNetworkingSockets and PlayFab Party's iOS framework ([Online play](#online-play-valheim)) |
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
-  | `steam_app_id` | the game's Steam app id, for the [Steam license check](#steam-license-check) (found from the Steam library otherwise) |
+  | `steam_app_id` | the game's Steam app id, for the [Steam runtime](#steam-runtime) (found from the Steam library otherwise) |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
   | `iphone` | settings applied only on an iPhone, over the generic phone defaults: `render_scale`, `target_frame_rate`, `quality_level`, `player_prefs`, `static_fields`, `portrait`, `portrait_horizontal_fov` (listed in `PHONE_DEFAULTS`, `recomp/unity_ios.py`) |
@@ -111,8 +113,10 @@ Two kinds of fixes apply on top of the generic pipeline:
 
 Debugging on the device: launch with
 `xcrun devicectl device process launch --console --terminate-existing --device <UDID> <bundle id>`
-(iPad unlocked). The shims log lines starting with `[recomp]`. Games that write their own logs or
-error reports put them under the app's `Documents`, visible in the Files app.
+(iPad unlocked). The shims log lines starting with `[recomp]`. Unity ports also keep everything
+they print in `Library/Logs/recomp.log` ([Debugging the runtime](#debugging-the-runtime)). Games
+that write their own logs or error reports put them under the app's `Documents`, visible in the
+Files app.
 
 ## Unreal route
 
@@ -126,7 +130,7 @@ Stages (run all, or name some): `prepare xcode install`. Recomp Helper runs the 
    becomes iOS, framework paths take their iOS form, and the main executable's imports are rebound
    library by library. Symbols iOS does not export (or that the route intercepts, listed in
    `INTERCEPT` in `recomp/unreal_ios.py`) bind to `RecompAppKit.dylib`, built from
-   `recomp/native/appkit`; `libsteam_api.dylib` is replaced by a stub that reports Steam as not running.
+   `recomp/native/appkit`; `libsteam_api.dylib` is replaced by the [Steam runtime](#steam-runtime).
    The engine's two `Contents/UE4/` path strings are patched to the bundle's `MacFiles/` folder.
 2. **xcode**: a small generated Xcode project builds a placeholder app; its script phase puts the
    game's executable, the shim and APFS clones of the game data (instant on the same disk) into the
@@ -299,23 +303,31 @@ What happens during the port (`recomp/mods.py`):
 Mods for other Unity games need a `mods` block in the game's profile, and that game's mod loader
 has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
-## Steam license check
+## Steam runtime
 
-On iOS, Steamworks is replaced by a stub, which would also remove the license check Steam
-does on the Mac. So a port of a Steam game checks the license itself: at the first launch it
-covers the game with a sign-in screen, and the game plays once a Steam account that owns it has
-signed in. The check is made in good faith, not as DRM: the source is public and anyone can
-remove it, but a port built with the released tool, or shared with someone else, does not play
-without the game's license.
+iOS has no Steam app, so a port of a Steam game carries its own Steam client,
+`recomp/native/RecompSteam`. It connects to Steam's servers over the same WebSocket connection the
+Steam client uses, logs on as the player and serves the Steamworks API the game calls
+(`SteamAPI_*`), so the game's own Steam code runs unchanged. Everything goes straight to Steam,
+never through a server of this project. `SteamAPI_Init` succeeds in every port, signed in or not:
+games such as Valheim quit without Steam.
+
+### Sign-in and license check
+
+At the first launch a sign-in screen covers the game (a Unity game is paused under it), and the
+game plays once a Steam account that owns it has signed in. The check is made in good faith, not as
+DRM: the source is public and anyone can remove it, but a port built with the released tool, or
+shared with someone else, does not play without the game's license.
 
 - **Signing in**: scan the QR code with the Steam Mobile app (Steam Guard, QR scanner), or enter
   the account name and password, then approve in the Steam Mobile app or type the Steam Guard
-  code. Everything goes straight to Steam (`api.steampowered.com`), through the service Steam's
-  own apps sign in with; the password is encrypted with the key Steam gives for it. Nothing goes
-  through a server of this project.
-- **The check**: Steam's `IPlayerService/GetOwnedGames`, asked with the account's own token,
-  must list the game's app id. Family Sharing does not count, since the game is not in the
-  borrower's library.
+  code. The port signs in as a Steam client, through the service Steam's own apps sign in with;
+  the password is encrypted with the key Steam gives for it. That one sign-in serves the license,
+  Steam Cloud, achievements and online play. A port that holds a sign-in from before the runtime
+  asks once to sign in again.
+- **The check**: the session logs on and asks Steam to sign the game's ownership ticket, which
+  Steam does for a game the account owns or borrows through Steam Family Sharing, and refuses
+  otherwise.
 - **What stays on the device**: the sign-in (a refresh token), the Steam ID and the date of
   the last check, in the Keychain for this device only; they are not in backups and do not travel
   with a copy of the app. `Documents/Recomp Steam license.txt` says which account was checked
@@ -324,15 +336,86 @@ without the game's license.
   second. Offline or with Steam slow to answer, the game starts after a few seconds anyway, for
   30 days after the last successful check; past that it asks to go online. A refunded game or a
   sign-in removed in Steam brings the sign-in screen back at the next launch.
+- **Playing on another device**: Steam lets an account play one game at a time. When it already
+  plays elsewhere, the cover offers *Play here* (which ends the other session) or *Play without
+  Steam for now*; the port never takes over silently.
 - **Signing out**: delete `Recomp Steam license.txt` (Files, *On My iPad*, the game's folder);
-  the next launch asks to sign in again. Steam lists the sign-in as "Recomp: *game* on *device*"
-  under Settings > Security > Authorized devices, where it can be removed.
+  the session ends and the next launch asks to sign in again. Steam lists the sign-in as
+  "Recomp: *game* on *device*" under Settings > Security > Authorized devices, where it can be
+  removed.
 
 When porting, the game's app id comes from its profile's `steam_app_id`, or from the
 `appmanifest_<id>.acf` of the Steam library it is installed in. A game that ships Steamworks
 but has neither (copied out of its Steam library, or not a Steam copy) is refused. Games
 without Steamworks (GOG, itch and other DRM-free builds) get no check. The Mac side is
 `recomp/steam_license.py`, the iOS side `recomp/native/RecompLicense.m` (both routes).
+
+### What the game gets
+
+| Steam feature | In the port |
+|---|---|
+| **Online status** | Steam shows the player in the game from `SteamAPI_Init`. Leaving the app clears it at once (iOS suspends a backgrounded app within seconds), coming back sets it again, quitting clears it |
+| **Steam Cloud** | The game's cloud files, both the ones it writes through `ISteamRemoteStorage` (Valheim) and Auto-Cloud folders, on the device. Download at launch: the game's first Steam call waits for it (15 s at most), and after a first sign-in the cover stays up until it is done ("Getting your saves from Steam Cloud…", 90 s at most). Upload right after launch, when the app goes to the background and when the game quits. A save changed on both sides brings up a "Steam Cloud conflict" prompt; the version not kept goes to `Documents/Recomp Steam Cloud backup/` first, and `Documents/Recomp Steam Cloud.txt` shows the last sync. Offline, the game plays on its local files |
+| **Achievements and stats** | `ISteamUserStats` for the player: the game's schema, stats and unlock times from Steam; `StoreStats` sends changes. `ResetAllStats` is refused, so a port never wipes the player's stats |
+| **DLC** | Ownership from the ownership ticket, the DLC list and names from Steam's product info (kept for offline launches) |
+| **Auth tickets** | `GetAuthSessionTicket` for servers and services that check the player (PlayFab's `LoginWithSteam`), `BeginAuthSession` to check other players when hosting |
+| **Networking** | `ISteamNetworkingSockets` on Valve's open-source GameNetworkingSockets, with a networking certificate Steam signs for the player (profile key `steam_networking`) |
+| **Server browser** | `ISteamMatchmakingServers`: the internet list from Steam's master server (up to 5000 servers) and A2S pings |
+| **Persona** | The player's own name and online state |
+
+The save system is picked when porting: `recomp.py unity|unreal --saves steam|icloud|off`.
+`steam` is the default for a game with Steam Cloud (its cloud rules must be in the Mac Steam
+app's cache), else `icloud` when the profile has a `saves` block ([Saves across
+devices](#saves-across-devices)), else `off`. Recomp Helper has the same choice per game, and
+`recomp.py saves <Game.app> --status` says which one the last port used.
+
+Not there yet: the friends list, lobbies and invites, Steam's relay network (SDR) and FakeIP, so
+no joining a friend's game through Steam and no hosting without crossplay; the overlay, the
+Workshop, Steam Input and voice. Unreal games call Steam through C++ interface objects, which the
+runtime does not offer yet: in Stray the session signs in, checks the license and shows the
+player in the game, while the game itself is told Steam is not running (no achievements).
+
+Tested: Valheim on the iPad (sign-in, license, online status, Steam Cloud both ways with the Mac
+Steam game, conflict prompt included, online play below) and Stray on the iPad (sign-in, license,
+online status). Achievements: Valheim's and Stray's are read as Steam has them, and an unlock
+through the runtime (`recomp-steam-cli achievements`, the same functions the game calls) reached
+Steam; an unlock from play on a device is not seen yet. Timberborn has not run on the runtime yet.
+
+### Online play (Valheim)
+
+- **Steam servers**: *Join IP* (with the server's password) and the *Community* list, over Valve's
+  UDP protocol (GameNetworkingSockets). The server checks the player's auth ticket as it does for
+  the Mac game.
+- **Crossplay**: PlayFab Party, from Microsoft's iOS framework (`recomp/playfab_party.py` fetches
+  v1.10.5 when porting, the only iOS release whose headers match Valheim's Mac bundle). Joining a
+  crossplay server by join code and hosting a world with *Crossplay* on both work; PlayFab logs in
+  with the Steam auth ticket.
+- **Not yet**: joining a friend's game through Steam, and hosting without crossplay (both need
+  Steam's relay network). A ping that answers has not been seen yet: the only server pinged was
+  an old one that no longer answers.
+- iOS asks for local network access the first time the game talks to the LAN (a server or a Party
+  peer on the same network).
+
+Steamworks.NET's server-list and ping callbacks are C++ objects made of instance delegates, which
+IL2CPP cannot marshal; the profile key `responders` gives them static trampolines (`asmtool
+responders`). `scripts/valheim-test-servers.sh up|status|logs|down` starts a throwaway Steam
+server and a crossplay server in Docker (colima) on the Mac, reachable from the LAN.
+
+### Debugging the runtime
+
+- **Log file**: Unity ports write stdout and stderr, the game's own log included, to
+  `Library/Logs/recomp.log` in the app's container (the previous run in `recomp.log.1`), one line
+  at a time with a time stamp, so a crash keeps every line before it. Runtime lines start with
+  `[recomp] steam:`, license lines with `[recomp] license:`. Read it from the Mac:
+  `xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer
+  --domain-identifier <bundle id> --source Library/Logs/recomp.log --destination <folder>`.
+- **`recomp-steam-cli`** (`recomp/native/RecompSteam/cli/build.sh`): the runtime from Terminal,
+  built from the same sources: `login` (QR, token in the Keychain), `logon`, `owns`, `ticket`,
+  `ufs`, `playing`, `schema`, `achievements <appid> [unlock <name>]` (a real unlock).
+- **Mac test clone**: `scripts/steam-mac-clone.py <Game.app>` makes an APFS clone of a Steam game
+  whose `libsteam_api.dylib` is the runtime built for macOS, and starts it signed in with the
+  CLI's token. It runs the runtime's code on the Mac, debuggable, without the Steam app. One
+  account plays one game at a time: the clone and the Mac Steam game cannot run together.
 
 ## Saves across devices
 
@@ -369,9 +452,9 @@ Limits:
 
 - saves only move while the game is not running on the Mac, and while the port runs or is in the
   background on iOS;
-- saves kept only through Steam Cloud's API are not covered, since Steam is stubbed on iOS.
-  Valheim's Steam Cloud worlds and characters are an example: move them to local storage in
-  Valheim's menus on the Mac first;
+- saves kept only through Steam Cloud's API are not covered. Valheim's Steam Cloud worlds and
+  characters are an example: port with `--saves steam` instead ([Steam runtime](#steam-runtime)),
+  or move them to local storage in Valheim's menus on the Mac first;
 - saves that need mods load only when the port has the same mods ([Mods](#mods-unity-ports));
 - local (ad-hoc signed) builds of Recomp Helper are a new app to macOS each time, so it asks for
   folder access again after each rebuild. A Developer ID build does not.
@@ -400,18 +483,20 @@ stays on your machine.
 
 - `recomp.py`: CLI
 - `app/`: Recomp Helper, the SwiftUI front end (talks to `recomp.py` through `RECOMP_EVENTS=1` progress lines)
-- `scripts/`: app build, signing, notarization and icon
+- `scripts/`: app build, signing, notarization and icon; `steam-mac-clone.py`, `valheim-test-servers.sh`
 - `recomp/discover.py`: game scanning and environment checks; `recomp/windows_games.py`: Windows installs; `recomp/compat.py`: tested / untested / needs-work checks; `recomp/events.py`: progress events and failure hints
 - `recomp/unity_ios.py`, `recomp/toolchain.py`, `recomp/unity_editor/`: Unity route
 - `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
-- `recomp/native/appkit/`: the shim for retargeted Mac binaries; `recomp/native/steam_api_stub.c`
+- `recomp/native/appkit/`: the shim for retargeted Mac binaries
 - `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
-  native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, and `RecompLicense.m`, the
-  iOS side of the Steam license check
+  native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, `RecompLicense.m`, the
+  iOS side of the Steam license check, `RecompLog.m`, the log file; `recomp/native/RecompSteam/`:
+  the Steam runtime (session, sign-in, Steamworks API, Steam Cloud, networking, matchmaking, `cli/`)
 - `recomp/steam_license.py`: the Mac side of the Steam license check (the app id a port checks)
-- `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`)
+- `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`); `recomp/steam_cloud.py`: the save mode and Steam Cloud keys
+- `recomp/gamenetworkingsockets.py`, `recomp/playfab_party.py`: build GameNetworkingSockets, fetch PlayFab Party's iOS framework (when porting, not in git)
 - `recomp/mods.py`: mods compiled into Unity ports (`recomp.py mods`)
 - `recomp/shims/`: managed shims injected into games; `recomp/shims/RecompHarmony`: the Harmony stand-in
 - `docs/images/`: screenshots for the README (one per tested game, `<game>-ipad.jpg`, and `recomp-helper.png`)
