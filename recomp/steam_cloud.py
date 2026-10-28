@@ -1,7 +1,6 @@
 """Port-time side of Steam Cloud saves (the device side is recomp/native/RecompSteam/cloud*.m).
 
-A port's saves follow the player in one of three ways, chosen when porting
-(`recomp.py unity|unreal --saves steam|icloud|off`, or Recomp Helper's port panel):
+A port's saves follow the player in one of three ways:
 
   steam   the port syncs with the player's Steam Cloud like the Steam client:
           the game's Auto-Cloud folders (its app info's "ufs" rules) and the
@@ -9,9 +8,12 @@ A port's saves follow the player in one of three ways, chosen when porting
   icloud  the iCloud Drive sync of recomp/native/RecompSaves.m and recomp/saves.py
   off     no sync
 
-The default is steam for a game that ships Steamworks and has Steam Cloud (a
-"ufs" section in its Steam app info), else icloud when its profile has a saves
-block, else off.
+A Steam game (it ships Steamworks and its app id is known) has no choice: its
+port runs the Steam runtime, so it syncs with Steam Cloud when the game has it (a
+"ufs" section in its Steam app info) and keeps its saves on the device when it
+has none. iCloud Drive is for games without Steam: icloud when the profile has a
+saves block, else off; `--saves icloud|off` (or Recomp Helper's port panel)
+picks between those two.
 
 The ufs rules come from the Steam app's own cache on this Mac
 (~/Library/Application Support/Steam/appcache/appinfo.vdf), so no sign-in is
@@ -218,12 +220,38 @@ def rules(appid, u, saves, platform="ios", log=print):
 
 # --- the mode and the plist keys ------------------------------------------------
 
-def default_mode(app, profile, log=print):
+def steam_game(app, profile):
+    """The app id of a Steam game (it ships Steamworks and its app id is known), else None."""
     from recomp import steam_license
     appid = (profile or {}).get("steam_app_id") or steam_license.manifest_app_id(app)
-    if appid and steam_license.ships_steamworks(app) and has_cloud(ufs(int(appid))):
-        return "steam"
+    return int(appid) if appid and steam_license.ships_steamworks(app) else None
+
+
+def default_mode(app, profile, log=print):
+    appid = steam_game(app, profile)
+    if appid:
+        return "steam" if has_cloud(ufs(appid)) else "off"
     return "icloud" if (profile or {}).get("saves") else "off"
+
+
+def port_mode(app, profile, chosen=None, log=print):
+    """The port's save sync: a Steam game's is fixed (default_mode), --saves picks only for
+    other games."""
+    mode = default_mode(app, profile, log)
+    appid = steam_game(app, profile)
+    if appid and mode == "off":
+        log(f"saves: no Steam Cloud settings for app {appid} in Steam's app cache on this Mac ({APPINFO}); "
+            "the game has no Steam Cloud, or Steam has not run here since it was installed: the port keeps "
+            "its saves on the device")
+    if chosen and chosen != mode:
+        if appid:
+            raise SystemExit(f"--saves {chosen}: a Steam game's port syncs through its Steam client "
+                             f"({'Steam Cloud' if mode == 'steam' else 'no Steam Cloud for this game'}); "
+                             "iCloud Drive sync is only for games without Steam")
+        if chosen == "steam":
+            raise SystemExit("--saves steam: not a Steam game (no Steamworks, or its Steam app id is not known)")
+        return chosen
+    return mode
 
 
 def plist_keys(app, profile, mode=None, platform="ios", log=print):

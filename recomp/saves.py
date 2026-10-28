@@ -26,8 +26,9 @@ iCloud Drive once the player allows it. Only files that changed are copied.
   --status   per entry: last change here and in iCloud Drive, last sync
   --sync     one sync now (refused while the game runs)
 
-A port can sync its saves with Steam Cloud instead (recomp/steam_cloud.py): then the
-Mac game's own Steam client is the Mac side, and this module leaves the game alone.
+A Steam game's port syncs its saves with Steam Cloud instead, through its Steam
+client (recomp/steam_cloud.py): the Mac game's own Steam client is the Mac side, and
+this module leaves the game alone (--enable and --sync refuse it, --sync-all skips it).
 The mode each game's last port was made with is kept in save-sync/modes.json;
 --status reports it ("port_mode") with the one the next port would get by default.
 
@@ -359,10 +360,18 @@ def synced_games():
     return load(games_file(), {})
 
 
+def steam_game(game):
+    from recomp import steam_cloud
+    try:
+        return bool(steam_cloud.steam_game(game.app, game.profile))
+    except (SystemExit, Exception):
+        return False
+
+
 def steam_mode(game):
-    if port_mode(game) == "steam":
-        sys.exit(f"{game.name}: its port syncs saves with Steam Cloud, like the Mac game does through Steam; "
-                 "iCloud Drive sync is not used. Port it with --saves icloud to use iCloud Drive instead.")
+    if steam_game(game) or port_mode(game) == "steam":
+        sys.exit(f"{game.name}: a Steam game's port syncs its saves with Steam Cloud through its Steam client, "
+                 "like the Mac game does through Steam; iCloud Drive sync is only for games without Steam.")
 
 
 def enable(game):
@@ -406,7 +415,7 @@ def sync_all():
     for name, app in sorted(synced_games().items()):
         try:
             game = Game(app)
-            if game.saves and port_mode(game) != "steam" and not running(game):
+            if game.saves and port_mode(game) != "steam" and not steam_game(game) and not running(game):
                 sync(game, "background")
         except (SystemExit, Exception) as e:
             log(f"{name}: {e}")

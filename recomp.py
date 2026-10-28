@@ -19,10 +19,10 @@
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
-         --saves steam|icloud|off   how the port's saves follow the player: Steam Cloud (like the
-                                    Steam client), iCloud Drive (recomp.py saves), or not at all.
-                                    Default: steam for a Steam game with Steam Cloud, else icloud
-                                    when its profile has a saves block, else off.
+         --saves icloud|off         for a game without Steam: its saves sync through iCloud Drive
+                                    (recomp.py saves; the default when its profile has a saves
+                                    block) or stay on the device. A Steam game's port syncs with
+                                    Steam Cloud through its Steam client, with no choice.
 The bundle ID defaults to Recomp Helper's, recomp.<team>.<game>, so a port installs over the last one.
 
 Large files (Unity editors, build output) go under $RECOMP_HOME, default this folder.
@@ -72,6 +72,7 @@ def cmd_scan(rest):
     for g in games:
         g["saves"] = g.get("status") != "missing" and saves.has_saves(g["app"])
         g["steamCloud"] = g.get("status") != "missing" and g.get("route") in ("unity", "unreal") and steam_cloud(g["app"])
+        g["steam"] = g.get("status") != "missing" and g.get("route") in ("unity", "unreal") and steam_game(g["app"])
         g["mods"] = g.get("status") != "missing" and g.get("route") == "unity" and has_mods(g["app"])
     if a.json:
         print(json.dumps(games))
@@ -82,7 +83,7 @@ def cmd_scan(rest):
 
 
 def steam_cloud(app):
-    """Whether the game's port would sync with Steam Cloud by default (recomp/steam_cloud.py)."""
+    """Whether the game's port syncs with Steam Cloud (recomp/steam_cloud.py)."""
     from recomp import saves
     try:
         return saves.default_mode(saves.Game(app)) == "steam"
@@ -90,11 +91,20 @@ def steam_cloud(app):
         return False
 
 
+def steam_game(app):
+    """Whether the game is a Steam game: its port runs the Steam runtime, and its saves have no choice."""
+    from recomp import saves
+    try:
+        return saves.steam_game(saves.Game(app))
+    except (SystemExit, Exception):
+        return False
+
+
 def saves_mode(game, profile, chosen, log):
-    """The port's save sync (--saves, else the game's default), kept on the game for the
-    Info.plist writers and recorded for `recomp.py saves --status` and Recomp Helper."""
+    """The port's save sync (a Steam game's is fixed; --saves, else the default, for others), kept
+    on the game for the Info.plist writers and recorded for `recomp.py saves --status` and Recomp Helper."""
     from recomp import saves, steam_cloud
-    game.saves_mode = chosen or steam_cloud.default_mode(game.app, profile)
+    game.saves_mode = steam_cloud.port_mode(game.app, profile, chosen, log)
     saves.record_mode(game.name, game.saves_mode)
     log(f"saves: {saves.MODE_NAMES[game.saves_mode]}" + ("" if chosen else " (the default for this game)"))
 

@@ -363,10 +363,10 @@ without Steamworks (GOG, itch and other DRM-free builds) get no check. The Mac s
 | **Server browser** | `ISteamMatchmakingServers`: the internet list from Steam's master server (up to 5000 servers) and A2S pings |
 | **Persona** | The player's own name and online state |
 
-The save system is picked when porting: `recomp.py unity|unreal --saves steam|icloud|off`.
-`steam` is the default for a game with Steam Cloud (its cloud rules must be in the Mac Steam
-app's cache), else `icloud` when the profile has a `saves` block ([Saves across
-devices](#saves-across-devices)), else `off`. Recomp Helper has the same choice per game, and
+A Steam game's saves always go through the Steam runtime, with no choice: Steam Cloud when the
+game has it (its cloud rules must be in the Mac Steam app's cache), else the device only. iCloud
+Drive ([Saves across devices](#saves-across-devices)) is for games without Steam, and `--saves
+icloud|off` (Recomp Helper's port panel) only picks between those two for them.
 `recomp.py saves <Game.app> --status` says which one the last port used.
 
 Not there yet: the friends list, lobbies and invites, Steam's relay network (SDR) and FakeIP, so
@@ -419,8 +419,8 @@ server and a crossplay server in Docker (colima) on the Mac, reachable from the 
 
 ## Saves across devices
 
-Games whose profile has a `saves` block (Timberborn, Stray, Valheim) share their saves through
-iCloud Drive, in `iCloud Drive/Recomp Saves/<Game>/`, which Files and Finder both show. No Apple ID
+Games without Steam whose profile has a `saves` block share their saves through iCloud Drive
+(a Steam game's port syncs with Steam Cloud instead: [Steam runtime](#steam-runtime)), in `iCloud Drive/Recomp Saves/<Game>/`, which Files and Finder both show. No Apple ID
 setup or iCloud entitlement is needed; it works with any developer account.
 
 - **iPad / iPhone**: at the first launch the port asks "Sync saves with your other devices through
@@ -452,9 +452,6 @@ Limits:
 
 - saves only move while the game is not running on the Mac, and while the port runs or is in the
   background on iOS;
-- saves kept only through Steam Cloud's API are not covered. Valheim's Steam Cloud worlds and
-  characters are an example: port with `--saves steam` instead ([Steam runtime](#steam-runtime)),
-  or move them to local storage in Valheim's menus on the Mac first;
 - saves that need mods load only when the port has the same mods ([Mods](#mods-unity-ports));
 - local (ad-hoc signed) builds of Recomp Helper are a new app to macOS each time, so it asks for
   folder access again after each rebuild. A Developer ID build does not.

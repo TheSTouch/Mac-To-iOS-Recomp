@@ -21,7 +21,7 @@ that one sign-in covers the following:
 - **Online status:** your friends see you playing the game, until you leave it.
 - **Steam Cloud saves:** the same saves as the game on your Mac or PC. They download when the game
   starts and upload when you leave it, and a prompt lets you choose when two devices changed the
-  same save. You choose Steam Cloud or iCloud Drive when porting.
+  same save. iCloud Drive sync is for games without Steam.
 - **Achievements and stats:** they unlock on your Steam account.
 - **DLC:** the port sees the DLC your account owns.
 - **Online play** in supported games (Valheim): Steam servers, the server list, crossplay servers
@@ -100,16 +100,14 @@ sized to the device's memory.
 | **Touch** | On-screen gamepad in play; touch acts as the mouse in menus; the iOS keyboard opens for names |
 | **Controller** | Not tried yet |
 | **Keyboard, trackpad** | ✅ |
-| **Saves** | ✅ Steam Cloud, shared with the game on your Mac or PC, conflict prompt included; or iCloud Drive, chosen when porting |
+| **Saves** | ✅ Steam Cloud, shared with the game on your Mac or PC, conflict prompt included |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
 | **Online** | ✅ Steam servers by IP (with password) and from the server list, crossplay servers by join code, hosting a world with crossplay. Not yet: joining a friend's game through Steam |
 | **Steam** | One sign-in for the license, online status, achievements, Steam Cloud and online play |
 | **Frame rate** | Not measured yet. iPhone renders at 75 % |
 
 Known limits: the on-screen gamepad covers parts of the HUD (hotbar slot 1, the minimap corner,
-food and health); online play and Steam Cloud are tested on the iPad, not yet on the iPhone; with
-iCloud Drive saves, worlds and characters kept in Steam Cloud must be moved to local storage in
-Valheim's menus on the Mac first.
+food and health); online play and Steam Cloud are tested on the iPad, not yet on the iPhone.
 
 ## Recomp Helper, the Mac app
 
@@ -128,7 +126,7 @@ one go.
   sign in to Xcode).
 - **Installs on another device** after a port, and checks the device has room first.
 - **Mods:** tick which of the Mac's mods go into the port.
-- **Saves:** Steam Cloud or iCloud Drive for each game.
+- **Saves:** Steam games sync with Steam Cloud; other games can sync through iCloud Drive.
 
 Download the notarized DMG from [Releases](../../releases), or build it yourself
 ([Building the app](docs/TECHNICAL.md#building-the-app)).
@@ -161,8 +159,7 @@ python3 recomp.py unity  /path/to/Game.app --team <TEAMID> --device "<iPad name>
 python3 recomp.py unreal /path/to/Game.app --team <TEAMID> --device "<iPad name>"
 
 python3 recomp.py mods  /path/to/Game.app           # which mods go into the next port
-python3 recomp.py saves /path/to/Game.app --enable  # share saves through iCloud Drive
-# saves go to Steam Cloud by default when the game has it: --saves steam|icloud|off when porting
+python3 recomp.py saves /path/to/Game.app --enable  # games without Steam: share saves through iCloud Drive
 ```
 
 Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another disk.
@@ -238,7 +235,7 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [x] Steam Cloud saves, shared with the Mac and PC game (Valheim)
 - [x] Steam achievements and stats (Unity games)
 - [x] Online play (Valheim): Steam servers, the server list, crossplay, hosting
-- [x] Saves shared between Mac, iPad and iPhone through iCloud Drive
+- [x] Saves shared between Mac, iPad and iPhone through iCloud Drive, for games without Steam
 - [ ] Joining a friend's game through Steam's relay (Valheim)
 - [ ] Achievements in Unreal games (Stray)
 - [ ] Friends list, invites, Steam overlay, Workshop

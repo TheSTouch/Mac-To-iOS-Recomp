@@ -159,7 +159,7 @@ struct GameDetail: View {
                     row("Found in", game.source)
                     row("Location", game.app)
                 }
-                if game.saves == true || game.steamCloud == true {
+                if game.saves == true || game.steamCloud == true || game.steam == true {
                     SaveSyncBox(game: game).id(game.id)
                 }
                 if game.mods == true {
@@ -206,11 +206,14 @@ struct SaveSyncBox: View {
 
     var body: some View {
         GroupBox("Saves") {
-            if status?.portMode == "steam" || (status?.portMode == nil && game.saves != true) {
+            if game.steam == true && game.steamCloud != true {
+                Label("This Steam game has no Steam Cloud: its port keeps its saves on the device.", systemImage: "icloud.slash")
+                    .font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+            } else if game.steam == true || status?.portMode == "steam" {
                 VStack(alignment: .leading, spacing: 8) {
                     Label(status?.portMode == "steam" ? "Saves: Steam Cloud" : "Saves: Steam Cloud from the next port",
                           systemImage: "icloud").font(.callout)
-                    Text("The port syncs its saves with Steam Cloud, like the Steam client: they come down when it starts and go up while it plays and when it goes to the background. On this Mac, Steam syncs the game as usual. Choose another way when porting.")
+                    Text("The port's Steam client syncs its saves with Steam Cloud: they come down when it starts and go up while it plays and when it goes to the background. On this Mac, Steam syncs the game as usual.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -433,10 +436,13 @@ struct PortSetup: View {
                     ForEach(state.environment?.teams ?? []) { Text($0.identity).tag($0.id) }
                 }
                 TextField("Bundle ID", text: $bundleId)
-                Picker("Saves", selection: $saves) {
-                    if game.steamCloud == true { Text("Steam Cloud").tag("steam") }
-                    if game.saves == true { Text("iCloud Drive").tag("icloud") }
-                    Text("Do not sync").tag("off")
+                if game.steam == true {
+                    LabeledContent("Saves", value: game.steamCloud == true ? "Steam Cloud" : "On the device")
+                } else {
+                    Picker("Saves", selection: $saves) {
+                        if game.saves == true { Text("iCloud Drive").tag("icloud") }
+                        Text("Do not sync").tag("off")
+                    }
                 }
                 Text(savesNote).font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Workspace") {
@@ -502,9 +508,9 @@ struct PortSetup: View {
 
     private var savesNote: String {
         switch saves {
-        case "steam": return "Like the Steam client: the port signs in to Steam and syncs with Steam Cloud, so its saves are the Mac game's."
+        case "steam": return "Through the port's Steam client, which signs in to Steam and syncs with Steam Cloud, so its saves are the Mac game's."
         case "icloud": return "Through iCloud Drive/Recomp Saves/\(game.name); turn on the Mac side in the game's Saves box."
-        default: return "The port keeps its saves on the device only."
+        default: return game.steam == true ? "The game has no Steam Cloud: the port keeps its saves on the device." : "The port keeps its saves on the device only."
         }
     }
 }
