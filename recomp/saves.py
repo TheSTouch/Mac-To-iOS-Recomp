@@ -193,9 +193,10 @@ def load(path, default):
 
 def save(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".tmp", "w") as f:
+    tmp = f"{path}.{os.getpid()}.tmp"   # two ports at once each write their own
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
-    os.replace(path + ".tmp", path)
+    os.replace(tmp, path)
 
 
 def games_file():
