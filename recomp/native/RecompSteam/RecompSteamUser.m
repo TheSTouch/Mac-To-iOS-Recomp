@@ -35,6 +35,7 @@ EXPORT uint32_t SteamAPI_ISteamUser_GetAuthSessionTicket(void *self, void *ticke
     uint32_t handle = RS_AuthSessionTicketNow(RecompSteam_AppID(), ticket, max > 0 ? (size_t)max : 0, &n,
                                               ^(int32_t er, uint32_t h) {
         GetAuthSessionTicketResponse_t r = {h, er};
+        RLOG("GetAuthSessionTicketResponse (163) posted: ticket %u, EResult %d", h, er);
         RS_PostCallback(k_iGetAuthSessionTicketResponse, &r, sizeof r);
     });
     if (length) *length = handle ? n : 0;
