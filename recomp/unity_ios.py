@@ -627,6 +627,11 @@ def apply_profiles(game, game_dlls, plugins):
             for m in methods:
                 cmd += ["--method", m]
             run(cmd + [os.path.join(plugins, dll)])
+        for dll, types in profile.get("responders", {}).items():
+            cmd = [ASMTOOL, "responders", "--search", game.managed]
+            for t in types:
+                cmd += ["--type", t]
+            run(cmd + [os.path.join(plugins, dll)])
         for dll, methods in profile.get("returns", {}).items():
             cmd = [ASMTOOL, "returns", "--search", game.managed]
             for m, value in methods.items():

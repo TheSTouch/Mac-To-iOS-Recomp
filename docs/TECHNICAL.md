@@ -92,6 +92,7 @@ Two kinds of fixes apply on top of the generic pipeline:
   | Key | Effect |
   |---|---|
   | `returns` | `{"<Assembly>.dll": {"Type::Method": value}}`: the method only returns that string, bool or int (e.g. a platform check with no iOS answer) |
+  | `responders` | `{"<Assembly>.dll": ["Namespace.Type"]}`: Steamworks.NET matchmaking responders whose native vtable of instance delegates IL2CPP cannot marshal get static `[MonoPInvokeCallback]` trampolines that find the instance by its native address (`asmtool responders`) |
   | `stub_overrides` | swaps a stub profile's override files, e.g. Steamworks that signs in offline instead of reporting "no Steam" |
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |

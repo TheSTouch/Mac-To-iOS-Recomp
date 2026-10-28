@@ -32,6 +32,11 @@
 //
 //   asmtool harmony --targets <dir> [--search <dir>]... <mod.dll>...
 //       Weave mods' Harmony prefixes and postfixes into the game at port time (Harmony.cs).
+//
+//   asmtool responders --type <Namespace.Type> [--type ...] [--search <dir>] <assembly.dll>
+//       Make Steamworks.NET's matchmaking responders buildable under IL2CPP: their native
+//       vtable gets static [MonoPInvokeCallback] trampolines instead of instance delegates
+//       (Responders.cs).
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -45,6 +50,7 @@ return args.Length > 0 && args[0] == "scan" ? Scan(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "returns" ? Returns(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "check" ? Check(args.Skip(1).ToArray())
      : args.Length > 0 && args[0] == "harmony" ? HarmonyWeaver.Run(args.Skip(1).ToArray())
+     : args.Length > 0 && args[0] == "responders" ? ResponderWeaver.Run(args.Skip(1).ToArray())
      : Usage();
 
 static int Usage()
