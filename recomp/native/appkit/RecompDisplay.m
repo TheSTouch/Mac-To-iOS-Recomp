@@ -28,10 +28,12 @@ static NSArray *Modes(void) {
         // Native pixels first, then the point size and steps between: windows larger
         // than the screen in points are scaled down to fit, so each one is a render resolution.
         // Render targets at full native resolution take a lot of shared memory:
-        // devices with 8 GB or less stop at 1.5x the point size, which is itself
-        // a mode (a 3x phone would otherwise go from 3x and 2.25x straight to 1x).
-        CGFloat cap = NSProcessInfo.processInfo.physicalMemory <= (8.5 * (1ULL << 30)) ? MIN(scale, 1.5) : scale;
-        for (NSNumber *f in @[@(scale), @(scale * 0.75), @(cap), @1.0, @0.75]) {
+        // devices with 8 GB or less stop at 1.5x the point size (2x on a phone,
+        // whose small screen needs fewer pixels), which is itself a mode, as is
+        // 1.5x (a 3x phone would otherwise go from 3x and 2.25x straight to 1x).
+        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+        CGFloat cap = NSProcessInfo.processInfo.physicalMemory <= (8.5 * (1ULL << 30)) ? MIN(scale, phone ? 2.0 : 1.5) : scale;
+        for (NSNumber *f in @[@(scale), @(scale * 0.75), @(cap), @1.5, @1.0, @0.75]) {
             CGFloat k = f.doubleValue;
             if (k > cap + 0.01) continue;
             RecompDisplayMode *m = [RecompDisplayMode new];
@@ -45,6 +47,11 @@ static NSArray *Modes(void) {
         modes = a;
     });
     return modes;
+}
+
+CGSize RecompLargestModeSize(void) {
+    RecompDisplayMode *m = Modes().firstObject;
+    return CGSizeMake(m.width, m.height);
 }
 
 static RecompDisplayMode *gCurrentMode;

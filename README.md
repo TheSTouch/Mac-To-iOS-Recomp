@@ -80,7 +80,7 @@ device.
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
-| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, MetalFX from 75 %, no screen-space reflections; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
+| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, 1748×804 output (2×) upscaled by MetalFX from 38 %, no screen-space reflections; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
 | **Memory** | iPhone 17: chapter 4 (The Slums) uses about 5 GB of the 6.1 GB iOS allows, since sounds now decode as they play instead of all being unpacked when a level loads |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 

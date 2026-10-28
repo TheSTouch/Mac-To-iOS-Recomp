@@ -25,6 +25,10 @@
 // UI keeps the 480 scale, has fewer than 1080 units, and menus laid out for
 // 1080 pile up (Stray's title menu became one line). Short side / 480 makes up
 // the difference.
+//
+// "auto" for ResolutionSizeX/Y and LastUserConfirmedResolutionSizeX/Y is the
+// largest display mode the shim offers on this device (RecompDisplay.m), so a
+// profile can ask for the sharpest output without knowing the screen size.
 #import "RecompAppKit.h"
 
 static NSString *Resolve(NSString *key, NSString *value) {
@@ -32,6 +36,10 @@ static NSString *Resolve(NSString *key, NSString *value) {
     if ([key isEqualToString:@"r.Streaming.PoolSize"]) {
         unsigned long long mb = NSProcessInfo.processInfo.physicalMemory >> 20;
         return [NSString stringWithFormat:@"%llu", MIN(MAX(mb * 15 / 100, 600ULL), 3000ULL)];
+    }
+    if ([key hasSuffix:@"ResolutionSizeX"] || [key hasSuffix:@"ResolutionSizeY"]) {
+        CGSize m = RecompLargestModeSize();
+        return [NSString stringWithFormat:@"%.0f", [key hasSuffix:@"X"] ? m.width : m.height];
     }
     if ([key isEqualToString:@"ApplicationScale"]) {
         CGSize s = UIScreen.mainScreen.bounds.size;

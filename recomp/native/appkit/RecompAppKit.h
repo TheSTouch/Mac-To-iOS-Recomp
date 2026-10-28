@@ -28,6 +28,7 @@ typedef CGSize NSSize;
 // Screen size in points (landscape), valid from any thread after launch.
 CGSize RecompScreenSize(void);
 CGFloat RecompScreenScale(void);
+CGSize RecompLargestModeSize(void); // the largest display mode games are offered (RecompDisplay.m)
 // Delivers an event the way AppKit does: local monitors, then -[NSApp sendEvent:].
 void RecompDispatchEvent(RNSEvent *event);
 // Root view, main thread only; nil before launch.
