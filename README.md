@@ -80,13 +80,15 @@ device.
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
-| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, 1748×804 output (2×) upscaled by MetalFX from 38 %, no screen-space reflections; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
+| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
 | **Memory** | iPhone 17: chapter 4 (The Slums) uses about 5 GB of the 6.1 GB iOS allows, since sounds now decode as they play instead of all being unpacked when a level loads |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 
 Known limits: played up to chapter 4; short freezes the first time a scene appears, while Metal
-compiles its shaders (cached afterwards), and other short freezes on the iPhone; the image looks
-soft on the iPhone at 50 %; distant textures can load later than on a Mac, since the texture pool is
+compiles its shaders (cached afterwards), and other short freezes on the iPhone; on the iPhone the
+cat looks pixelated while it moves (MetalFX shows moving objects at the render resolution), the
+phone still warms up over a long session, and the screen sometimes goes black while the game keeps
+running (relaunch it); distant textures can load later than on a Mac, since the texture pool is
 sized to the device's memory.
 
 ### Valheim
@@ -262,7 +264,8 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 - [x] A log line every 10 s: frame rate, GPU time, CPU per thread, memory left and thermal state
 - [ ] Frame rates measured for every tested game
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
-- [ ] Stray on iPhone: no short freezes, a sharper image
+- [x] Stray on iPhone: a sharper image (2× output instead of 1×, no screen-space reflections)
+- [ ] Stray on iPhone: no short freezes, no black screen, cooler over a long session
 
 ## More
 
