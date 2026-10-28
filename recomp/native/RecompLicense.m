@@ -116,8 +116,9 @@ static NSString *StatusPath(void) {
     return [gContainer stringByAppendingPathComponent:@"Documents/Recomp Steam license.txt"];
 }
 
+// Replaces the stored sign-in; the session goes on (each passed check saves the time of it).
 static void SaveState(NSDictionary *state) {
-    Forget();
+    SecItemDelete((__bridge CFDictionaryRef)KeychainQuery());
     NSMutableDictionary *q = KeychainQuery();
     q[(__bridge id)kSecValueData] = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
     q[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
