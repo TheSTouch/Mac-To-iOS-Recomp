@@ -948,6 +948,9 @@ static void RecompSendToDelegate(SEL sel, NSString *name) {
     self.window.backgroundColor = UIColor.blackColor;
     self.window.rootViewController = [RecompViewController new];
     [self.window makeKeyAndVisible];
+    // Games are often played with a controller, without touches: keep the
+    // screen awake, as iOS games do.
+    app.idleTimerDisabled = YES;
     gRoot = (RecompRootView *)self.window.rootViewController.view;
     RLOG(@"launched: screen %@ scale %.0f", NSStringFromCGSize(gScreenSize), gScreenScale);
     RecompSendToDelegate(@selector(applicationWillFinishLaunching:), @"NSApplicationWillFinishLaunchingNotification");
