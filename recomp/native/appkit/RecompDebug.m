@@ -67,6 +67,7 @@ void abort(void) {
 #import <stdatomic.h>
 #import <mach/mach.h>
 #import <Metal/Metal.h>
+#import <GameController/GameController.h>
 #import <pthread.h>
 
 double RecompGPUSeconds(void);
@@ -209,6 +210,101 @@ static void MemoryBreakdown(void) {
     RLOG(@"%@", out);
 }
 
+// --- recording and replaying the gamepad ------------------------------------------
+// A file named recomp-record in Documents starts recording the gamepad into
+// Documents/recomp-recording, 60 times a second, a line per change: seconds since
+// the start, both sticks, the d-pad, then the buttons and triggers. A second
+// recomp-record ends it. recomp-replay plays the recording back on the gamepad's
+// software controller (the on-screen one), so a heat run can repeat a player's walk
+// without the player. The game is not deterministic: hitches and physics make a
+// long replay drift away from the walk recorded.
+
+// The axes, then the buttons; NSNull for a button this gamepad lacks.
+static NSArray *PadElements(GCExtendedGamepad *g) {
+    return @[g.leftThumbstick.xAxis, g.leftThumbstick.yAxis, g.rightThumbstick.xAxis, g.rightThumbstick.yAxis,
+             g.dpad.xAxis, g.dpad.yAxis, g.buttonA, g.buttonB, g.buttonX, g.buttonY, g.leftShoulder,
+             g.rightShoulder, g.leftTrigger, g.rightTrigger, g.leftThumbstickButton ?: NSNull.null,
+             g.rightThumbstickButton ?: NSNull.null, g.buttonMenu, g.buttonOptions ?: NSNull.null];
+}
+
+static NSTimer *gPadTimer;
+
+static void StopPadTimer(NSString *what) {
+    [gPadTimer invalidate];
+    gPadTimer = nil;
+    RLOG(@"gamepad %@", what);
+}
+
+static void RecordPad(NSString *path) {
+    GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
+    if (!g) { RLOG(@"gamepad recording: no gamepad"); return; }
+    [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSFileHandle *out = [NSFileHandle fileHandleForWritingAtPath:path];
+    double start = CACurrentMediaTime();
+    __block NSString *last = nil;
+    RLOG(@"gamepad recording started");
+    gPadTimer = [NSTimer scheduledTimerWithTimeInterval:1 / 60.0 repeats:YES block:^(NSTimer *t) {
+        NSMutableArray *values = [NSMutableArray new];
+        for (id e in PadElements(g))
+            [values addObject:[NSString stringWithFormat:@"%.3f", [e isKindOfClass:[GCControllerAxisInput class]]
+                                                                     ? ((GCControllerAxisInput *)e).value
+                                                                     : e == NSNull.null ? 0
+                                                                     : ((GCControllerButtonInput *)e).value]];
+        NSString *state = [values componentsJoinedByString:@" "];
+        if ([state isEqualToString:last]) return;
+        last = state;
+        [out writeData:[[NSString stringWithFormat:@"%.3f %@\n", CACurrentMediaTime() - start, state]
+                           dataUsingEncoding:NSUTF8StringEncoding]];
+    }];
+}
+
+static void ReplayPad(NSString *path) {
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    GCExtendedGamepad *g = GCController.controllers.firstObject.extendedGamepad;
+    if (!text || !g) { RLOG(@"gamepad replay: %@", g ? @"no recording" : @"no gamepad"); return; }
+    NSArray<NSString *> *rows = [text componentsSeparatedByString:@"\n"];
+    NSArray *elements = PadElements(g);
+    double start = CACurrentMediaTime();
+    __block NSUInteger next = 0;
+    RLOG(@"gamepad replay started: %lu changes over %@ s", (unsigned long)rows.count - 1,
+         [rows[rows.count > 1 ? rows.count - 2 : 0] componentsSeparatedByString:@" "].firstObject);
+    gPadTimer = [NSTimer scheduledTimerWithTimeInterval:1 / 120.0 repeats:YES block:^(NSTimer *t) {
+        double now = CACurrentMediaTime() - start;
+        NSArray<NSString *> *v = nil;
+        for (; next < rows.count; next++) {
+            NSArray<NSString *> *row = [rows[next] componentsSeparatedByString:@" "];
+            if (row.count < elements.count + 1) continue;
+            if (row[0].doubleValue > now) break;
+            v = row;
+        }
+        if (v) {
+            [g.leftThumbstick setValueForXAxis:v[1].floatValue yAxis:v[2].floatValue];
+            [g.rightThumbstick setValueForXAxis:v[3].floatValue yAxis:v[4].floatValue];
+            [g.dpad setValueForXAxis:v[5].floatValue yAxis:v[6].floatValue];
+            for (NSUInteger i = 6; i < elements.count; i++)
+                if (elements[i] != NSNull.null) [(GCControllerButtonInput *)elements[i] setValue:v[i + 1].floatValue];
+        }
+        if (next >= rows.count) StopPadTimer(@"replay ended");
+    }];
+}
+
+static void PadRecording(void) {
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *record = [docs stringByAppendingPathComponent:@"recomp-record"],
+             *replay = [docs stringByAppendingPathComponent:@"recomp-replay"],
+             *recording = [docs stringByAppendingPathComponent:@"recomp-recording"];
+    if ([fm fileExistsAtPath:record]) {
+        [fm removeItemAtPath:record error:nil];
+        if (gPadTimer) StopPadTimer(@"recording or replay stopped");
+        else RecordPad(recording);
+    } else if ([fm fileExistsAtPath:replay]) {
+        [fm removeItemAtPath:replay error:nil];
+        if (gPadTimer) StopPadTimer(@"recording or replay stopped");
+        ReplayPad(recording);
+    }
+}
+
 static void Screenshot(void) {
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *trigger = [docs stringByAppendingPathComponent:@"recomp-screenshot"];
@@ -236,6 +332,7 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
         [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *t) {
             Screenshot();
             Press();
+            PadRecording();
             MemoryBreakdown();
             if (++ticks % 5) return;
             unsigned now = atomic_load(&gDrawables);
@@ -244,6 +341,11 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
             // A phone that runs hot slows its CPU and GPU down: frames and sound stutter.
             static const char *heat[] = {"nominal", "fair", "serious", "critical"};
             NSProcessInfoThermalState hot = NSProcessInfo.processInfo.thermalState;
+            // Battery drain per minute is a quicker gauge of power than the thermal state;
+            // a phone on its cable or at full brightness runs warmer.
+            UIDevice *device = UIDevice.currentDevice;
+            device.batteryMonitoringEnabled = YES;
+            static const char *power[] = {"?", "unplugged", "charging", "full"};
             // GPU busy near 100% (ms per frame near the frame time) means the GPU
             // limits the game; a thread near 100% of a core means that thread does.
             double time = CACurrentMediaTime(), elapsed = time - lastTime, gpuTime = RecompGPUSeconds() - lastGPU;
@@ -251,11 +353,13 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
             double metal[6];
             RecompMetalTimes(metal);
             RLOG(@"heartbeat: %.1f frames/s (longest %u ms, %u over 100 ms), %zu MB memory left (app %llu MB, of which "
-                 @"Metal %lu MB), thermal %s, GPU %.1f ms/frame (busy %.0f%%), %@; %.0f pipeline states made in %.0f ms "
+                 @"Metal %lu MB), thermal %s, battery %.0f%% %s, brightness %.0f%%, GPU %.1f ms/frame (busy %.0f%%), %@; %.0f pipeline states made in %.0f ms "
                  @"(longest %.0f), %.0f shader libraries loaded in %.0f ms (longest %.0f)",
                  frames / elapsed, atomic_exchange(&gLongestFrameMs, 0), atomic_exchange(&gSlowFrames, 0),
                  os_proc_available_memory() >> 20, Footprint(),
                  (unsigned long)(gpu.currentAllocatedSize >> 20), hot <= 3 ? heat[hot] : "?",
+                 device.batteryLevel * 100, power[device.batteryState <= 3 ? device.batteryState : 0],
+                 UIScreen.mainScreen.brightness * 100,
                  frames ? gpuTime * 1000 / frames : 0.0, gpuTime / elapsed * 100, ThreadCPU(elapsed),
                  metal[0], metal[1] * 1000, metal[2] * 1000, metal[3], metal[4] * 1000, metal[5] * 1000);
             last = now;
