@@ -25,10 +25,14 @@ void RecompSteam_Log(const char *format, ...)
     va_end(ap);
     // os_log, public: NSLog's arguments show as <private> in a device's log.
     os_log(OS_LOG_DEFAULT, "[recomp] steam: %{public}s", s.UTF8String);
-#if !TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
+    RecompLog_Line([@"[recomp] steam: " stringByAppendingString:s].UTF8String);   // the port's recomp.log
+#else
     fprintf(stderr, "[recomp] steam: %s\n", s.UTF8String);   // the Mac clone's run.log, recomp-steam-cli
 #endif
 }
+// RecompLog.m defines the real one in Unity ports; Unreal ports and the Mac tools have none.
+__attribute__((weak)) void RecompLog_Line(const char *line) { (void)line; }
 #define RLOG(...) RecompSteam_Log(__VA_ARGS__)
 
 static dispatch_queue_t gQueue;

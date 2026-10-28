@@ -49,8 +49,12 @@
 #endif
 
 // os_log, public: NSLog's arguments show as <private> in a device's log.
-#define LLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[recomp] license: %{public}s", \
-                              [NSString stringWithFormat:fmt, ##__VA_ARGS__].UTF8String)
+// Also to the port's log file (RecompLog.m), where there is one.
+#define LLOG(fmt, ...) do { \
+    const char *line_ = [NSString stringWithFormat:@"[recomp] license: " fmt, ##__VA_ARGS__].UTF8String; \
+    os_log(OS_LOG_DEFAULT, "%{public}s", line_); \
+    RecompLog_Line(line_); \
+} while (0)
 
 static const NSTimeInterval kGrace = 30 * 86400;
 static const NSTimeInterval kLaunchWait = 6;   // within the grace period, the check holds the game this long at most

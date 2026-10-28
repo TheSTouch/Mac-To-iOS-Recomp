@@ -138,8 +138,12 @@ void RecompSteam_AuthSessionTicket(uint32_t app_id,
                                    void (^done)(int32_t eresult, uint32_t handle, const uint8_t *ticket, size_t length));
 void RecompSteam_CancelTicket(uint32_t handle);
 
-// Logging: "[recomp] steam: ..." to the system log (NSLog).
+// Logging: "[recomp] steam: ..." to the system log (public os_log) and, in a Unity port on
+// iOS, to its log file; on the Mac to stderr as well.
 void RecompSteam_Log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+// A line for the port's log file only (recomp/native/RecompLog.m, Unity ports); a no-op where
+// that file is not built in.
+void RecompLog_Line(const char *line);
 
 #ifdef __cplusplus
 }
