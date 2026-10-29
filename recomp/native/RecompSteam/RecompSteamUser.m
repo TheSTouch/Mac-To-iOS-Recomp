@@ -1,4 +1,5 @@
-// ISteamUser's tickets and auth sessions, and ISteamApps' DLC, for the flat API. ARC.
+// ISteamUser's tickets (auth session and encrypted app tickets) and auth sessions, and ISteamApps' DLC,
+// for the flat API. ARC.
 //
 // GetAuthSessionTicket hands the game its ticket at once (built from the ownership ticket
 // and a GC token the session keeps) and posts GetAuthSessionTicketResponse_t once Steam
@@ -74,6 +75,97 @@ EXPORT int SteamAPI_ISteamUser_UserHasLicenseForApp(void *self, uint64_t steamid
     (void)self;
     if (steamid != RS_SteamID()) return 2;
     return RS_OwnsApp(app) ? 0 : 1;
+}
+
+// --- encrypted app tickets ------------------------------------------------------------------------
+
+// RequestEncryptedAppTicket asks Steam (ClientRequestEncryptedAppTicket) for a ticket encrypted
+// with the app's own key around the game's data, which the game's servers decrypt (Brawlhalla's
+// login). GetEncryptedAppTicket then hands out the last one as libsteam_api does: the encoded
+// EncryptedAppTicket message, as Steam sent it.
+//
+// Before the logon (on a first launch the player is still signing in under the cover) the
+// request waits for it, up to kTicketLogonWait, and then answers NoConnection.
+typedef struct { int32_t m_eResult; } EncryptedAppTicketResponse_t;   // 154
+enum { k_iEncryptedAppTicketResponse = 154 };
+static const double kTicketLogonWait = 300;
+
+static os_unfair_lock gTicketLock = OS_UNFAIR_LOCK_INIT;
+static NSData *gEncryptedTicket;
+
+static void WhenLoggedOn(double timeout, void (^done)(bool loggedOn))
+{
+    // RecompSteam_WhenLoggedOn gives up at once while the session has not started.
+    void (^d)(bool) = [done copy];
+    __block BOOL fired = NO;
+    __block int observer = 0;
+    void (^finish)(bool) = ^(bool ok) {
+        if (fired) return;
+        fired = YES;
+        d(ok);
+    };
+    observer = RecompSteam_AddStateObserver(^(RecompSteamState s) {
+        if (s == RecompSteamLoggedOn) finish(true);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)), RecompSteam_Queue(), ^{
+        RecompSteam_RemoveObserver(observer);
+        finish(false);
+    });
+}
+
+EXPORT uint64_t SteamAPI_ISteamUser_RequestEncryptedAppTicket(void *self, void *data, int length)
+{
+    (void)self;
+    uint64_t call = RS_NewCall();
+    NSData *userdata = data && length > 0 ? [NSData dataWithBytes:data length:(NSUInteger)length] : [NSData data];
+    void (^post)(int32_t) = ^(int32_t er) {
+        EncryptedAppTicketResponse_t r = {er};
+        RLOG("EncryptedAppTicketResponse (154) posted: EResult %d", er);
+        RS_PostCallResult(call, k_iEncryptedAppTicketResponse, &r, sizeof r);
+    };
+    RLOG("RequestEncryptedAppTicket: %d bytes of game data", (int)userdata.length);
+    WhenLoggedOn(kTicketLogonWait, ^(bool loggedOn) {
+        if (!loggedOn) {
+            post(RecompSteamResultNoConnection);
+            return;
+        }
+        uint32_t app = RecompSteam_AppID();
+        rs_pb_writer w = {0};
+        rs_pb_varint(&w, 1, app);
+        rs_pb_bytes(&w, 2, userdata.bytes, userdata.length);
+        RecompSteam_SendJob(RS_ClientRequestEncryptedAppTicket, w.data, w.length, 0, 20, ^(const RecompSteamMessage *m) {
+            if (m->eresult == RecompSteamResultTimeout && !m->length) {
+                post(RecompSteamResultTimeout);
+                return;
+            }
+            int32_t er = (int32_t)rs_pb_get_varint(m->body, m->length, 2, RecompSteamResultFail);
+            rs_pb_field t;
+            if (er == RecompSteamResultOK && rs_pb_get(m->body, m->length, 3, &t) && t.wire == RS_PB_BYTES && t.length) {
+                NSData *ticket = [NSData dataWithBytes:t.data length:t.length];
+                os_unfair_lock_lock(&gTicketLock);
+                gEncryptedTicket = ticket;
+                os_unfair_lock_unlock(&gTicketLock);
+                RLOG("encrypted app ticket for app %u: %zu bytes", app, t.length);
+            } else if (er == RecompSteamResultOK) {
+                er = RecompSteamResultFail;
+            }
+            post(er);
+        });
+        rs_pb_free(&w);
+    });
+    return call;
+}
+
+EXPORT bool SteamAPI_ISteamUser_GetEncryptedAppTicket(void *self, void *ticket, int max, uint32_t *length)
+{
+    (void)self;
+    os_unfair_lock_lock(&gTicketLock);
+    NSData *t = gEncryptedTicket;
+    os_unfair_lock_unlock(&gTicketLock);
+    if (length) *length = (uint32_t)t.length;
+    if (!t || !ticket || max < (int)t.length) return false;
+    memcpy(ticket, t.bytes, t.length);
+    return true;
 }
 
 // --- DLC -----------------------------------------------------------------------------------------

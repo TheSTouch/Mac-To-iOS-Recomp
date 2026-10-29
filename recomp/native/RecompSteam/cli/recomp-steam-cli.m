@@ -6,6 +6,9 @@
 //   logon            log on with the stored token and say who is signed in
 //   owns <appid>     whether the account owns (or borrows) the app: its ownership ticket
 //   ticket <appid>   play the app and make an auth session ticket, activated with Steam
+//   appticket <appid> [data]
+//                    an encrypted app ticket for the app, around data (none by default), through
+//                    the runtime's ISteamUser::RequestEncryptedAppTicket; prints its fields, not the ticket
 //   ufs <appid>      list the app's Steam Cloud files
 //   playing          what Steam says the account plays on another device (presence check)
 //   schema <appid>   save the app's stats schema (binary KeyValues) and the player's stats to $TMPDIR
@@ -26,6 +29,10 @@ const char *SteamAPI_ISteamUserStats_GetAchievementDisplayAttribute(void *self, 
 bool SteamAPI_ISteamUserStats_GetAchievementAndUnlockTime(void *self, const char *name, bool *achieved, uint32_t *time);
 bool SteamAPI_ISteamUserStats_SetAchievement(void *self, const char *name);
 bool SteamAPI_ISteamUserStats_StoreStats(void *self);
+uint64_t SteamAPI_ISteamUser_RequestEncryptedAppTicket(void *self, void *data, int length);
+bool SteamAPI_ISteamUser_GetEncryptedAppTicket(void *self, void *ticket, int max, uint32_t *length);
+bool SteamAPI_ISteamUtils_IsAPICallCompleted(void *self, uint64_t call, bool *failed);
+bool SteamAPI_ISteamUtils_GetAPICallResult(void *self, uint64_t call, void *out, int size, int expected, bool *failed);
 
 static void Out(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void Out(NSString *fmt, ...)
@@ -234,6 +241,38 @@ int main(int argc, char **argv)
                     });
                 });
             });
+        } else if ([cmd isEqual:@"appticket"] && app) {
+            NSData *data = argc > 3 ? [@(argv[3]) dataUsingEncoding:NSUTF8StringEncoding] : [NSData data];
+            WithLogon(app, ^{
+                uint64_t call = SteamAPI_ISteamUser_RequestEncryptedAppTicket(NULL, (void *)data.bytes, (int)data.length);
+                __block int tries = 0;
+                __block void (^wait)(void);   // re-armed until the call result is posted, then cleared
+                wait = ^{
+                    if (!SteamAPI_ISteamUtils_IsAPICallCompleted(NULL, call, NULL)) {
+                        if (++tries < 120) {
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), RecompSteam_Queue(), wait);
+                            return;
+                        }
+                        Out(@"no EncryptedAppTicketResponse after 30 s");
+                        Exit(1);
+                    }
+                    wait = nil;
+                    int32_t er = 0;
+                    bool failed = false;
+                    SteamAPI_ISteamUtils_GetAPICallResult(NULL, call, &er, sizeof er, 154, &failed);
+                    uint8_t ticket[2048];
+                    uint32_t n = 0;
+                    bool got = SteamAPI_ISteamUser_GetEncryptedAppTicket(NULL, ticket, sizeof ticket, &n);
+                    Out(@"app %u: EResult %d, encrypted app ticket %s, %u bytes", app, er, got ? "kept" : "none", n);
+                    if (got)
+                        Out(@"  version %llu, crc %08llx, %llu bytes of encrypted game data, %llu of ownership ticket, "
+                            @"%zu encrypted", rs_pb_get_varint(ticket, n, 1, 0), rs_pb_get_varint(ticket, n, 2, 0),
+                            rs_pb_get_varint(ticket, n, 3, 0), rs_pb_get_varint(ticket, n, 4, 0),
+                            ({ rs_pb_field f = {0}; rs_pb_get(ticket, n, 5, &f); f.length; }));
+                    Exit(er == RecompSteamResultOK && got ? 0 : 2);
+                };
+                wait();
+            });
         } else if ([cmd isEqual:@"ufs"] && app) {
             WithLogon(app, ^{
                 rs_pb_writer w = {0};
@@ -260,7 +299,7 @@ int main(int argc, char **argv)
                 rs_pb_free(&w);
             });
         } else {
-            fprintf(stderr, "usage: recomp-steam-cli login | logon | playing | owns <appid> | ticket <appid> | ufs <appid> | token\n");
+            fprintf(stderr, "usage: recomp-steam-cli login | logon | playing | owns <appid> | ticket <appid> | appticket <appid> [data] | ufs <appid> | token\n");
             return 2;
         }
         dispatch_main();
