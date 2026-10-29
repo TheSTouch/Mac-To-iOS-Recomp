@@ -22,7 +22,7 @@ struct RecompHelperApp: App {
                 .task { await state.refresh() }
         }
         Settings {
-            SettingsView().environmentObject(state).frame(width: 520, height: 360)
+            SettingsView().environmentObject(state).frame(width: 520, height: 480)
         }
     }
 }
@@ -615,6 +615,11 @@ struct PortSheet: View {
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @State private var picked: String?
+    @State private var pythonPath = ""
+    @State private var pythonStatus: (text: String, ok: Bool)?
+    @State private var automaticPython = ""
+
+    private var minimumPython: String { Engine.minimumPython.map(String.init).joined(separator: ".") }
 
     var body: some View {
         Form {
@@ -632,7 +637,50 @@ struct SettingsView: View {
                     Button("Reset") { state.workspace = AppState.defaultWorkspace }
                 }
             }
+            Section("Python (runs the engine, \(minimumPython) or newer)") {
+                TextField("Automatic: \(automaticPython)", text: $pythonPath)
+                    .onSubmit { usePython(pythonPath) }
+                if let status = pythonStatus {
+                    Text(status.text).font(.caption).foregroundStyle(status.ok ? Color.secondary : Color.red)
+                }
+                HStack {
+                    Button("Choose…") { if let path = state.choosePython() { usePython(path) } }
+                    Button("Automatic") { usePython("") }.disabled(state.python.isEmpty)
+                }
+            }
         }
         .padding()
+        .onAppear { pythonPath = state.python }
+        .task(id: state.python) { await checkPython() }
+    }
+
+    private func usePython(_ path: String) {
+        let path = path.trimmingCharacters(in: .whitespaces)
+        pythonPath = path
+        guard path != state.python else { return }
+        state.python = path
+        Task { await state.refresh() }
+    }
+
+    /// Runs the Python in use once to show its version, off the main thread.
+    private func checkPython() async {
+        let (automatic, python, version) = await Task.detached {
+            let python = Engine.python
+            return (Engine.automaticPython, python, Engine.pythonVersion(python.path))
+        }.value
+        automaticPython = automatic
+        let from = switch python.source {
+        case .settings: "chosen here"
+        case .environment: "from RECOMP_PYTHON"
+        case .automatic: "found automatically"
+        }
+        guard let version else {
+            pythonStatus = ("\(python.path) does not run (\(from)).", false)
+            return
+        }
+        let v = version.map(String.init).joined(separator: ".")
+        pythonStatus = version.lexicographicallyPrecedes(Engine.minimumPython)
+            ? ("Python \(v) at \(python.path) is too old: the engine needs \(minimumPython) or newer.", false)
+            : ("Python \(v) at \(python.path), \(from).", true)
     }
 }

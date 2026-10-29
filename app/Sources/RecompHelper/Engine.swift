@@ -5,7 +5,47 @@ import Foundation
 /// The engine ships inside the app at Contents/Resources/engine. During development
 /// it is found through RECOMP_ENGINE or by walking up from the executable.
 enum Engine {
-    static let python = "/usr/bin/python3"
+    /// The oldest Python the engine runs on (recomp.py checks it too).
+    static let minimumPython = [3, 9]
+
+    /// Where the Python running the engine came from.
+    enum PythonSource { case settings, environment, automatic }
+
+    /// The Python that runs the engine: the one chosen in Settings, else RECOMP_PYTHON, else the
+    /// newest Homebrew or python.org one, else macOS's own (3.9.6 on current macOS).
+    static var python: (path: String, source: PythonSource) {
+        if let p = UserDefaults.standard.string(forKey: "python"), !p.isEmpty { return (p, .settings) }
+        if let p = ProcessInfo.processInfo.environment["RECOMP_PYTHON"], !p.isEmpty { return (p, .environment) }
+        return (automaticPython, .automatic)
+    }
+
+    /// The newest Homebrew or python.org Python new enough, else macOS's own. macOS's own is not
+    /// probed: without Xcode, its /usr/bin/python3 shim offers to install the developer tools.
+    static let automaticPython: String = {
+        let candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+                          "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"]
+        let found = candidates.compactMap { path in pythonVersion(path).map { (path, $0) } }
+            .filter { !$0.1.lexicographicallyPrecedes(minimumPython) }
+        return found.max { $0.1.lexicographicallyPrecedes($1.1) }?.0 ?? "/usr/bin/python3"
+    }()
+
+    /// [major, minor, micro] of the Python at `path`, nil when it does not run.
+    static func pythonVersion(_ path: String) -> [Int]? {
+        guard FileManager.default.isExecutableFile(atPath: path) else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["-I", "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let parts = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ".").compactMap { Int($0) }
+        return parts.count == 3 ? parts : nil
+    }
 
     static var directory: URL? = {
         let fm = FileManager.default
@@ -38,8 +78,10 @@ enum Engine {
 
     static func makeProcess(_ args: [String], home: String) throws -> Process {
         guard let dir = directory else { throw EngineError.notFound }
+        let python = python
+        guard FileManager.default.isExecutableFile(atPath: python.path) else { throw EngineError.noPython(python.path) }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: python)
+        p.executableURL = URL(fileURLWithPath: python.path)
         p.arguments = ["-I", dir.appendingPathComponent("recomp.py").path] + args
         p.currentDirectoryURL = dir
         p.environment = environment(home: home)
@@ -102,11 +144,13 @@ enum Engine {
 
 enum EngineError: LocalizedError {
     case notFound
+    case noPython(String)
     case failed(String)
 
     var errorDescription: String? {
         switch self {
         case .notFound: return "The recomp engine was not found inside the app."
+        case .noPython(let path): return "No Python at \(path). Choose one in Settings > Python."
         case .failed(let msg): return msg.isEmpty ? "The engine failed." : msg
         }
     }
