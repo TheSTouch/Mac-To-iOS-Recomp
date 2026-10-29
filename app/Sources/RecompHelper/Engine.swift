@@ -47,6 +47,11 @@ enum Engine {
         return parts.count == 3 ? parts : nil
     }
 
+    /// Bytecode goes to the user's caches: written next to the engine inside the app, it breaks the
+    /// app's signature. macOS's own Python does this by itself; Homebrew's and python.org's do not.
+    static let pycache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("io.github.thestouch.recomphelper/pycache").path
+
     static var directory: URL? = {
         let fm = FileManager.default
         if let res = Bundle.main.resourceURL?.appendingPathComponent("engine"),
@@ -82,7 +87,7 @@ enum Engine {
         guard FileManager.default.isExecutableFile(atPath: python.path) else { throw EngineError.noPython(python.path) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: python.path)
-        p.arguments = ["-I", dir.appendingPathComponent("recomp.py").path] + args
+        p.arguments = ["-I", "-X", "pycache_prefix=\(pycache)", dir.appendingPathComponent("recomp.py").path] + args
         p.currentDirectoryURL = dir
         p.environment = environment(home: home)
         return p
