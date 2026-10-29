@@ -1,0 +1,24 @@
+{
+  "name": "OpenSCAD",
+  "bundle_id": "org.openscad.OpenSCAD",
+  "tested": "not yet run on a device",
+  "why": "OpenSCAD finds its libraries, fonts, color schemes and shaders in ../Resources next to its executable (the Mac bundle's Contents/Resources); on iOS the executable sits at the top of the app, beside MacResources/; its edge shader divides a vec3 by an int, which desktop GLSL 1.20 converts and OpenGL ES's GLSL (under gl4es) rejects, leaving the model undrawn; with edges off the same shader takes smoothstep(0, 0, x), which a Mac GPU answers and OpenGL ES turns into NaN, so meshes came out invisible",
+  "patches": [
+    {
+      "find": "2e2e2f5265736f7572636573",
+      "replace": "4d61635265736f7572636573"
+    }
+  ],
+  "resource_patches": [
+    {
+      "file": "shaders/ViewEdges.frag",
+      "find": "+ vec3(1))/2,",
+      "replace": "+ vec3(1.0))/2.0,"
+    },
+    {
+      "file": "shaders/ViewEdges.frag",
+      "find": "  vec3 d = fwidth(vBC);\n",
+      "replace": "  vec3 d = fwidth(vBC);\n  if (max(d.x, max(d.y, d.z)) == 0.0) return 1.0; // smoothstep(0, 0, x) is 0/0 on OpenGL ES\n"
+    }
+  ]
+}

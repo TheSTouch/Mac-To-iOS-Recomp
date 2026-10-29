@@ -1,0 +1,94 @@
+From 2be11bd28e6b696117eecc5affdcf378aa6a8932 Mon Sep 17 00:00:00 2001
+From: TheSTouch <347618054+TheSTouch@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 19:43:21 +0100
+Subject: [PATCH 1/2] iOS: no symbol aliases in Mach-O
+
+---
+ src/gl/directstate.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/gl/directstate.c b/src/gl/directstate.c
+index a2c7edb..a532372 100644
+--- a/src/gl/directstate.c
++++ b/src/gl/directstate.c
+@@ -366,7 +366,11 @@ void APIENTRY_GL4ES gl4es_glEnableClientStateIndexed(GLenum array, GLuint index)
+         errorShim(GL_INVALID_ENUM);
+     }
+ }
++#ifdef __APPLE__ // no aliases in Mach-O
++void APIENTRY_GL4ES gl4es_glEnableClientStatei(GLenum array, GLuint index) { gl4es_glEnableClientStateIndexed(array, index); }
++#else
+ AliasDecl(void,gl4es_glEnableClientStatei,(GLenum array, GLuint index),gl4es_glEnableClientStateIndexed);
++#endif
+ 
+ void APIENTRY_GL4ES gl4es_glDisableClientStateIndexed(GLenum array, GLuint index) {
+     DBG(printf("glDisableClientStateIndexed(%s, %d)\n", PrintEnum(array), index);)
+@@ -380,7 +384,11 @@ void APIENTRY_GL4ES gl4es_glDisableClientStateIndexed(GLenum array, GLuint index
+         errorShim(GL_INVALID_ENUM);
+     }
+ }
++#ifdef __APPLE__ // no aliases in Mach-O
++void APIENTRY_GL4ES gl4es_glDisableClientStatei(GLenum array, GLuint index) { gl4es_glDisableClientStateIndexed(array, index); }
++#else
+ AliasDecl(void,gl4es_glDisableClientStatei,(GLenum array, GLuint index),gl4es_glDisableClientStateIndexed);
++#endif
+ 
+ void APIENTRY_GL4ES gl4es_glEnableVertexArray(GLuint vaobj, GLenum array) {
+     DBG(printf("glEnableVertexArray(%d, %s)\n", vaobj, PrintEnum(array));)
+-- 
+2.50.1
+
+
+From cdeecad261d2234173940287d4d71b39741b22d3 Mon Sep 17 00:00:00 2001
+From: TheSTouch <347618054+TheSTouch@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 20:49:35 +0100
+Subject: [PATCH 2/2] Shared states: the current program (GLSL and ARB) is per
+ context
+
+---
+ src/gl/glstate.c | 14 ++++++++++++++
+ src/gl/glstate.h |  3 +++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/src/gl/glstate.c b/src/gl/glstate.c
+index 1a642e4..966b32d 100644
+--- a/src/gl/glstate.c
++++ b/src/gl/glstate.c
+@@ -606,6 +606,20 @@ void DeleteGLState(void* oldstate) {
+ void ActivateGLState(void* new_glstate) {
+     glstate_t *newstate = (new_glstate)?(glstate_t*)new_glstate:&default_glstate;
+     if(glstate == newstate) return;  // same state, nothing to do
++    // The current program belongs to each context, but shared states share all of glsl:
++    // keep the outgoing one's aside and give the incoming one back its own.
++    if(glstate && glstate->shared_cnt) {
++        glstate->own_program = glstate->glsl->program;
++        glstate->own_glprogram = glstate->glsl->glprogram;
++        glstate->own_vtx_prog = glstate->glsl->vtx_prog;
++        glstate->own_frg_prog = glstate->glsl->frg_prog;
++    }
++    if(newstate->shared_cnt) {
++        newstate->glsl->program = newstate->own_program;
++        newstate->glsl->glprogram = newstate->own_glprogram;
++        newstate->glsl->vtx_prog = newstate->own_vtx_prog;
++        newstate->glsl->frg_prog = newstate->own_frg_prog;
++    }
+     // check if viewport is correct
+ #if defined(AMIGAOS4) || defined(__EMSCRIPTEN__)
+     if(glstate || newstate!=&default_glstate) // avoid getting gles info with no context
+diff --git a/src/gl/glstate.h b/src/gl/glstate.h
+index 62c3ccf..87277c7 100644
+--- a/src/gl/glstate.h
++++ b/src/gl/glstate.h
+@@ -75,6 +75,9 @@ typedef struct glstate_s {
+     GLfloat             alpharef;
+     GLenum              logicop;
+     glsl_t              *glsl;              //shared
++    GLuint              own_program;        // this context's current program, while glsl (shared) holds another's
++    program_t           *own_glprogram;
++    oldprogram_t        *own_vtx_prog, *own_frg_prog;
+     fpe_state_t         *fpe_state;
+     fpe_fpe_t           *fpe;
+     fpestatus_t         fpe_client;
+-- 
+2.50.1
+

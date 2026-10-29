@@ -1,0 +1,604 @@
+diff --git a/qtbase-everywhere-src-6.5.5/cmake/FindWrapOpenGL.cmake b/qtbase-everywhere-src-6.5.5/cmake/FindWrapOpenGL.cmake
+index 48bc8fe2..5a3655c2 100644
+--- a/qtbase-everywhere-src-6.5.5/cmake/FindWrapOpenGL.cmake
++++ b/qtbase-everywhere-src-6.5.5/cmake/FindWrapOpenGL.cmake
+@@ -37,16 +37,8 @@ if (OpenGL_FOUND)
+             set(__opengl_fw_path "-framework OpenGL")
+         endif()
+ 
+-        find_library(WrapOpenGL_AGL NAMES AGL)
+-        if(WrapOpenGL_AGL)
+-            set(__opengl_agl_fw_path "${WrapOpenGL_AGL}")
+-        endif()
+-        if(NOT __opengl_agl_fw_path)
+-            set(__opengl_agl_fw_path "-framework AGL")
+-        endif()
+-
+         target_link_libraries(WrapOpenGL::WrapOpenGL INTERFACE ${__opengl_fw_path})
+-        target_link_libraries(WrapOpenGL::WrapOpenGL INTERFACE ${__opengl_agl_fw_path})
++        # No AGL: the macOS 26 SDK lacks it, and Qt stopped linking it in 6.6.
+     else()
+         target_link_libraries(WrapOpenGL::WrapOpenGL INTERFACE OpenGL::GL)
+     endif()
+diff --git a/qtbase-everywhere-src-6.5.5/cmake/QtAutoDetectHelpers.cmake b/qtbase-everywhere-src-6.5.5/cmake/QtAutoDetectHelpers.cmake
+index e226845f..48adc705 100644
+--- a/qtbase-everywhere-src-6.5.5/cmake/QtAutoDetectHelpers.cmake
++++ b/qtbase-everywhere-src-6.5.5/cmake/QtAutoDetectHelpers.cmake
+@@ -12,7 +12,8 @@ function(qt_internal_ensure_static_qt_config)
+         set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Qt statically or dynamically" FORCE)
+     endif()
+ 
+-    if(BUILD_SHARED_LIBS)
++    # Shared on iOS too: Mac apps' Qt frameworks are swapped for iOS builds of the same ones.
++    if(BUILD_SHARED_LIBS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+         message(FATAL_ERROR
+             "Building Qt for ${CMAKE_SYSTEM_NAME} as shared libraries is not supported.")
+     endif()
+diff --git a/qtbase-everywhere-src-6.5.5/configure.cmake b/qtbase-everywhere-src-6.5.5/configure.cmake
+index 35343163..0cf91b0d 100644
+--- a/qtbase-everywhere-src-6.5.5/configure.cmake
++++ b/qtbase-everywhere-src-6.5.5/configure.cmake
+@@ -489,7 +489,7 @@ qt_feature("android-style-assets" PRIVATE
+ )
+ qt_feature("shared" PUBLIC
+     LABEL "Building shared libraries"
+-    AUTODETECT NOT UIKIT
++    AUTODETECT 1
+     CONDITION BUILD_SHARED_LIBS
+ )
+ qt_feature_definition("shared" "QT_STATIC" NEGATE PREREQUISITE "!defined(QT_SHARED) && !defined(QT_STATIC)")
+diff --git a/qtbase-everywhere-src-6.5.5/src/corelib/configure.cmake b/qtbase-everywhere-src-6.5.5/src/corelib/configure.cmake
+index 8a4674b9..a9a7613e 100644
+--- a/qtbase-everywhere-src-6.5.5/src/corelib/configure.cmake
++++ b/qtbase-everywhere-src-6.5.5/src/corelib/configure.cmake
+@@ -765,7 +765,6 @@ qt_feature("process" PUBLIC
+     PURPOSE "Supports external process invocation."
+     CONDITION QT_FEATURE_processenvironment
+               AND (QT_FEATURE_thread OR NOT UNIX)
+-              AND NOT UIKIT
+               AND NOT INTEGRITY
+               AND NOT VXWORKS
+               AND NOT rtems
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
+index 2c0b5e24..46eb5617 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
+@@ -29,6 +29,8 @@ qt_internal_add_plugin(QIOSIntegrationPlugin
+         uistrings_p.h uistrings.cpp
+     LIBRARIES
+         ${FWAudioToolbox}
++        ${FWCoreGraphics}
++        "-framework OpenGLES"
+         ${FWFoundation}
+         ${FWMetal}
+         ${FWQuartzCore}
+@@ -66,4 +68,7 @@ qt_internal_extend_target(QIOSIntegrationPlugin CONDITION NOT TVOS
+         ${FWPhotos}
+ )
+ 
+-add_subdirectory(optional)
++# The photo picker plugin calls into this one, which only links in static builds.
++if(NOT BUILD_SHARED_LIBS)
++    add_subdirectory(optional)
++endif()
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/plugin.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/plugin.mm
+index 4fba69eb..95d9eb88 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/plugin.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/plugin.mm
+@@ -36,4 +36,6 @@ QT_END_NAMESPACE
+ // so that the plugin's static initializer is included and run.
+ extern "C" void qt_registerPlatformPlugin() {}
+ 
++#ifdef QT_STATIC
+ Q_IMPORT_PLUGIN(QIOSIntegrationPlugin)
++#endif
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.h b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.h
+index 99786951..9cc8bd00 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.h
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.h
+@@ -40,6 +40,7 @@ private Q_SLOTS:
+ private:
+     QIOSContext *m_sharedContext;
+     EAGLContext *m_eaglContext;
++    void *m_glState = nullptr; // gl4es's state for this context (desktop OpenGL builds)
+     QSurfaceFormat m_format;
+ 
+     struct FramebufferObject {
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.mm
+index 16490898..50b50496 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioscontext.mm
+@@ -12,7 +12,39 @@
+ #include <QtGui/QOpenGLContext>
+ 
+ #import <OpenGLES/EAGL.h>
++#if !QT_CONFIG(opengles2)
++// Desktop OpenGL on iOS: an OpenGL.framework that runs it on OpenGL ES (gl4es,
++// see recomp/ios_opengl.py in Mac to iOS Recomp). Every GL call made here goes
++// through it too, so it sees the window framebuffers; it keeps one state per
++// EAGL context, which these hooks create and switch.
++extern "C" {
++void *RecompGL_ContextCreated(EAGLContext *context, void *share);
++void RecompGL_MakeCurrent(void *state);
++void RecompGL_ContextDestroyed(void *state);
++void *RecompGL_GetProcAddress(const char *name);
++}
++#define GL_DEPTH24_STENCIL8_OES GL_DEPTH24_STENCIL8
++// Desktop headers declare these (GL 3.0) only as function pointer types.
++extern "C" {
++void glGenFramebuffers(GLsizei n, GLuint *framebuffers);
++void glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers);
++void glBindFramebuffer(GLenum target, GLuint framebuffer);
++void glGenRenderbuffers(GLsizei n, GLuint *renderbuffers);
++void glDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers);
++void glBindRenderbuffer(GLenum target, GLuint renderbuffer);
++void glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
++void glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint *params);
++void glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
++GLenum glCheckFramebufferStatus(GLenum target);
++}
++#ifndef GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS
++#define GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS 0x8CD9
++#endif
++#define QT_IOS_GL_STATE(state) RecompGL_MakeCurrent(state)
++#else
+ #import <OpenGLES/ES2/glext.h>
++#define QT_IOS_GL_STATE(state)
++#endif
+ #import <QuartzCore/CAEAGLLayer.h>
+ 
+ QT_BEGIN_NAMESPACE
+@@ -25,16 +57,27 @@ QIOSContext::QIOSContext(QOpenGLContext *context)
+     , m_eaglContext(0)
+     , m_format(context->format())
+ {
++#if !QT_CONFIG(opengles2)
++    m_format.setRenderableType(QSurfaceFormat::OpenGL);
++    m_format.setProfile(QSurfaceFormat::CompatibilityProfile);
++#else
+     m_format.setRenderableType(QSurfaceFormat::OpenGLES);
++#endif
+ 
+     EAGLSharegroup *shareGroup = m_sharedContext ? [m_sharedContext->m_eaglContext sharegroup] : nil;
++#if !QT_CONFIG(opengles2)
++    m_eaglContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2 sharegroup:shareGroup];
++    m_glState = m_eaglContext ? RecompGL_ContextCreated(m_eaglContext, m_sharedContext ? m_sharedContext->m_glState : nullptr) : nullptr;
++#else
+     const int preferredVersion = m_format.majorVersion() == 1 ? kEAGLRenderingAPIOpenGLES1 : kEAGLRenderingAPIOpenGLES3;
+     for (int version = preferredVersion; !m_eaglContext && version >= m_format.majorVersion(); --version)
+         m_eaglContext = [[EAGLContext alloc] initWithAPI:EAGLRenderingAPI(version) sharegroup:shareGroup];
++#endif
+ 
+     if (m_eaglContext != nil) {
+         EAGLContext *originalContext = [EAGLContext currentContext];
+         [EAGLContext setCurrentContext:m_eaglContext];
++        QT_IOS_GL_STATE(m_glState);
+         const GLubyte *s = glGetString(GL_VERSION);
+         if (s) {
+             QByteArray version = QByteArray(reinterpret_cast<const char *>(s));
+@@ -59,11 +102,15 @@ QIOSContext::QIOSContext(QOpenGLContext *context)
+ QIOSContext::~QIOSContext()
+ {
+     [EAGLContext setCurrentContext:m_eaglContext];
++    QT_IOS_GL_STATE(m_glState);
+ 
+     foreach (const FramebufferObject &framebufferObject, m_framebufferObjects)
+         deleteBuffers(framebufferObject);
+ 
+     [EAGLContext setCurrentContext:nil];
++#if !QT_CONFIG(opengles2)
++    RecompGL_ContextDestroyed(m_glState);
++#endif
+     [m_eaglContext release];
+ }
+ 
+@@ -107,6 +154,7 @@ bool QIOSContext::makeCurrent(QPlatformSurface *surface)
+         return false;
+ 
+     [EAGLContext setCurrentContext:m_eaglContext];
++    QT_IOS_GL_STATE(m_glState);
+ 
+     // For offscreen surfaces we don't prepare a default FBO
+     if (surface->surface()->surfaceClass() == QSurface::Offscreen)
+@@ -199,6 +247,7 @@ void QIOSContext::swapBuffers(QPlatformSurface *surface)
+     }
+ 
+     [EAGLContext setCurrentContext:m_eaglContext];
++    QT_IOS_GL_STATE(m_glState);
+     glBindRenderbuffer(GL_RENDERBUFFER, framebufferObject.colorRenderbuffer);
+     [m_eaglContext presentRenderbuffer:GL_RENDERBUFFER];
+ }
+@@ -312,6 +361,7 @@ void QIOSContext::windowDestroyed(QObject *object)
+ 
+     EAGLContext *originalContext = [EAGLContext currentContext];
+     [EAGLContext setCurrentContext:m_eaglContext];
++    QT_IOS_GL_STATE(m_glState);
+     deleteBuffers(m_framebufferObjects[window]);
+     m_framebufferObjects.remove(window);
+     [EAGLContext setCurrentContext:originalContext];
+@@ -319,7 +369,11 @@ void QIOSContext::windowDestroyed(QObject *object)
+ 
+ QFunctionPointer QIOSContext::getProcAddress(const char *functionName)
+ {
++#if !QT_CONFIG(opengles2)
++    return QFunctionPointer(RecompGL_GetProcAddress(functionName));
++#else
+     return QFunctionPointer(dlsym(RTLD_DEFAULT, functionName));
++#endif
+ }
+ 
+ bool QIOSContext::isValid() const
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioseventdispatcher.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioseventdispatcher.mm
+index 24d9d882..0da11c9b 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioseventdispatcher.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioseventdispatcher.mm
+@@ -20,6 +20,7 @@
+ #import <UIKit/UIApplication.h>
+ 
+ #include <setjmp.h> // Here be dragons
++#include <dlfcn.h>
+ 
+ #include <sys/mman.h>
+ 
+@@ -215,7 +216,43 @@ enum SetJumpResult
+     kJumpedFromUserMainTrampoline,
+ };
+ 
+-extern "C" int main(int argc, char *argv[]);
++// The executable's main(), looked up when it runs: in a shared build the
++// plugin is not linked into the executable.
++static int user_main(int argc, char *argv[])
++{
++    typedef int (*MainFunction)(int, char **);
++    static MainFunction mainFunction = reinterpret_cast<MainFunction>(dlsym(RTLD_MAIN_ONLY, "main"));
++    if (!mainFunction)
++        qFatal("No main() in the executable");
++    return mainFunction(argc, argv);
++}
++
++// A main() that created QApplication before UIKit was running (a Mac app's,
++// retargeted to iOS) gets UIKit started from QIOSIntegration's constructor,
++// which then carries on once the application has launched: main() stays on
++// its own stack, and QApplication::exec() runs nested in UIKit's run loop.
++namespace {
++    bool launchedFromIntegration = false;
++    jmp_buf launchedJumpPoint;
++}
++
++void qt_ios_start_uikit()
++{
++    if (setjmp(launchedJumpPoint) != 0) {
++        qCDebug(lcEventDispatcher) << "UIKit launched, back in QApplication's constructor";
++        return;
++    }
++    launchedFromIntegration = true;
++    NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
++    int argc = arguments.count;
++    char **argv = new char*[argc + 1];
++    for (int i = 0; i < argc; ++i)
++        argv[i] = strdup([[arguments objectAtIndex:i] UTF8String]);
++    argv[argc] = nullptr;
++    qCDebug(lcEventDispatcher) << "Starting UIApplicationMain for a running main()";
++    UIApplicationMain(argc, argv, nil, NSStringFromClass([QIOSApplicationDelegate class]));
++    Q_UNREACHABLE();
++}
+ 
+ static void __attribute__((noinline, noreturn)) user_main_trampoline()
+ {
+@@ -234,7 +271,7 @@ static void __attribute__((noinline, noreturn)) user_main_trampoline()
+             qFatal("Could not convert argv[%d] to C string", i);
+     }
+ 
+-    int exitCode = main(argc, argv);
++    int exitCode = user_main(argc, argv);
+     delete[] argv;
+ 
+     logActivity.applicationDidFinishLaunching.enter();
+@@ -307,6 +344,16 @@ static bool rootLevelRunLoopIntegration()
+     if (!isQtApplication())
+         return;
+ 
++    if (launchedFromIntegration) {
++        // Back to QIOSIntegration's constructor on the next run-loop pass, once
++        // UIApplicationMain has finished launching.
++        CFRunLoopTimerRef launchedTimer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault,
++             CFAbsoluteTimeGetCurrent(), 0, 0, 0, ^(CFRunLoopTimerRef) { longjmp(launchedJumpPoint, 1); });
++        CFRunLoopAddTimer(CFRunLoopGetMain(), launchedTimer, kCFRunLoopCommonModes);
++        CFRelease(launchedTimer);
++        return;
++    }
++
+     if (!rootLevelRunLoopIntegration()) {
+         // We schedule the main-redirection for the next run-loop pass, so that we
+         // can return from this function and let UIApplicationMain finish its job.
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
+index 370032a1..5b046fff 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
+@@ -18,6 +18,7 @@ const char kImePlatformDataReturnKeyType[] = "returnKeyType";
+ 
+ @class QIOSLocaleListener;
+ @class QIOSKeyboardListener;
++@class QIOSKeyboardTapListener;
+ @class QIOSTextResponder;
+ @protocol KeyboardState;
+ 
+@@ -71,6 +72,7 @@ public:
+ 
+     void setFocusObject(QObject *object) override;
+     void focusWindowChanged(QWindow *focusWindow);
++    void showKeyboardForTap(const QPointF &globalPos);
+ 
+     void scrollToCursor();
+     void scroll(int y);
+@@ -89,6 +91,7 @@ private:
+ 
+     QIOSLocaleListener *m_localeListener;
+     QIOSKeyboardListener *m_keyboardHideGesture;
++    QIOSKeyboardTapListener *m_keyboardTapGesture;
+     QIOSTextResponder *m_textResponder;
+     KeyboardState m_keyboardState;
+     ImeState m_imeState;
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
+index ccd61734..0e54d9f8 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
+@@ -16,6 +16,7 @@
+ #include <QtCore/private/qcore_mac_p.h>
+ 
+ #include <QGuiApplication>
++#include <QtGui/QInputMethod>
+ #include <QtGui/private/qwindow_p.h>
+ 
+ // -------------------------------------------------------------------------
+@@ -256,6 +257,47 @@ static QUIView *focusView()
+ 
+ // -------------------------------------------------------------------------
+ 
++// Taps that land on the focused text input bring the keyboard back once the user
++// has hidden it: the keyboard otherwise only follows focus changes, and tapping
++// the widget that already has focus is none.
++@interface QIOSKeyboardTapListener : UITapGestureRecognizer <UIGestureRecognizerDelegate>
++- (instancetype)initWithQIOSInputContext:(QT_PREPEND_NAMESPACE(QIOSInputContext) *)context;
++@end
++
++@implementation QIOSKeyboardTapListener {
++    QT_PREPEND_NAMESPACE(QIOSInputContext) *m_context;
++}
++
++- (instancetype)initWithQIOSInputContext:(QT_PREPEND_NAMESPACE(QIOSInputContext) *)context
++{
++    if ((self = [super initWithTarget:self action:@selector(tapped:)])) {
++        m_context = context;
++        self.cancelsTouchesInView = NO;
++        self.delaysTouchesEnded = NO;
++        self.delegate = self;
++    }
++    return self;
++}
++
++- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
++    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other
++{
++    Q_UNUSED(gestureRecognizer);
++    Q_UNUSED(other);
++    return YES;
++}
++
++- (void)tapped:(UITapGestureRecognizer *)sender
++{
++    CGPoint point = [sender locationInView:sender.view];
++    // After Qt has handled the touch, which may move the focus to the tapped widget.
++    dispatch_async(dispatch_get_main_queue(), ^{
++        m_context->showKeyboardForTap(QPointF(point.x, point.y));
++    });
++}
++
++@end
++
+ QT_BEGIN_NAMESPACE
+ 
+ Qt::InputMethodQueries ImeState::update(Qt::InputMethodQueries properties)
+@@ -295,11 +337,13 @@ QIOSInputContext::QIOSInputContext()
+     : QPlatformInputContext()
+     , m_localeListener([QIOSLocaleListener new])
+     , m_keyboardHideGesture([[QIOSKeyboardListener alloc] initWithQIOSInputContext:this])
++    , m_keyboardTapGesture([[QIOSKeyboardTapListener alloc] initWithQIOSInputContext:this])
+     , m_textResponder(0)
+ {
+     if (isQtApplication()) {
+         QIOSScreen *iosScreen = static_cast<QIOSScreen*>(QGuiApplication::primaryScreen()->handle());
+         [iosScreen->uiWindow() addGestureRecognizer:m_keyboardHideGesture];
++        [iosScreen->uiWindow() addGestureRecognizer:m_keyboardTapGesture];
+     }
+ 
+     connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, &QIOSInputContext::focusWindowChanged);
+@@ -310,6 +354,8 @@ QIOSInputContext::~QIOSInputContext()
+     [m_localeListener release];
+     [m_keyboardHideGesture.view removeGestureRecognizer:m_keyboardHideGesture];
+     [m_keyboardHideGesture release];
++    [m_keyboardTapGesture.view removeGestureRecognizer:m_keyboardTapGesture];
++    [m_keyboardTapGesture release];
+ 
+     [m_textResponder release];
+ }
+@@ -320,6 +366,20 @@ void QIOSInputContext::showInputPanel()
+     qImDebug("can't show virtual keyboard without a focus object, ignoring");
+ }
+ 
++void QIOSInputContext::showKeyboardForTap(const QPointF &globalPos)
++{
++    if (!inputMethodAccepted() || (m_textResponder && [m_textResponder isFirstResponder]))
++        return;
++    QWindow *window = qGuiApp->focusWindow();
++    if (!window)
++        return;
++    const QRectF item = qGuiApp->inputMethod()->inputItemClipRectangle();
++    if (!item.contains(window->mapFromGlobal(globalPos)))
++        return;
++    qImDebug("tap on the focus object, showing the keyboard again");
++    update(Qt::ImQueryAll);
++}
++
+ void QIOSInputContext::hideInputPanel()
+ {
+     if (![m_textResponder isFirstResponder]) {
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm
+index 27d0f7f2..5372433b 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm
+@@ -42,6 +42,8 @@ using namespace Qt::StringLiterals;
+ 
+ class QCoreTextFontEngine;
+ 
++void qt_ios_start_uikit(); // qioseventdispatcher.mm
++
+ QIOSIntegration *QIOSIntegration::instance()
+ {
+     return static_cast<QIOSIntegration *>(QGuiApplicationPrivate::platformIntegration());
+@@ -57,6 +59,8 @@ QIOSIntegration::QIOSIntegration()
+     , m_accessibility(0)
+     , m_optionalPlugins(new QFactoryLoader(QIosOptionalPluginInterface_iid, "/platforms/darwin"_L1))
+ {
++    if (Q_UNLIKELY(!qt_apple_isApplicationExtension() && !qt_apple_sharedApplication()))
++        qt_ios_start_uikit();
+     if (Q_UNLIKELY(!qt_apple_isApplicationExtension() && !qt_apple_sharedApplication())) {
+         qFatal("Error: You are creating QApplication before calling UIApplicationMain.\n" \
+                "If you are writing a native iOS application, and only want to use Qt for\n" \
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
+index 8ba3645b..fa9eb95d 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
+@@ -315,6 +315,13 @@ void QIOSScreen::updateProperties()
+     QRect previousAvailableGeometry = m_availableGeometry;
+ 
+     m_geometry = QRectF::fromCGRect(m_uiScreen.bounds).toRect();
++#ifdef Q_OS_IOS
++    // With iPadOS's windowed multitasking (always on since iPadOS 26, which
++    // ignores UIRequiresFullScreen) the app's window can be smaller than the
++    // display: that window is all the screen the app has.
++    if (m_uiWindow && m_uiScreen == [UIScreen mainScreen] && !CGRectIsEmpty(m_uiWindow.bounds))
++        m_geometry = QRectF::fromCGRect(m_uiWindow.bounds).toRect();
++#endif
+ 
+     // The application frame doesn't take safe area insets into account, and
+     // the safe area insets are not available before the UIWindow is shown,
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
+index 682b0437..5a2a97df 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
+@@ -414,12 +414,32 @@
+     }
+ #endif
+ 
++#ifndef Q_OS_TVOS
++    // Desktop apps have no way to put the keyboard away, and some iPad keyboards
++    // have no hide key: one in the shortcuts bar, on the right.
++    if (!platformData.value(kImePlatformDataHideShortcutsBar).toBool()
++        && UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
++        UIBarButtonItem *hide = [[[UIBarButtonItem alloc]
++            initWithImage:[UIImage systemImageNamed:@"keyboard.chevron.compact.down"]
++            style:UIBarButtonItemStylePlain target:self action:@selector(qt_hideKeyboard)] autorelease];
++        UIBarButtonItemGroup *group = [[[UIBarButtonItemGroup alloc] initWithBarButtonItems:@[hide]
++            representativeItem:nil] autorelease];
++        NSArray<UIBarButtonItemGroup *> *groups = self.inputAssistantItem.trailingBarButtonGroups;
++        self.inputAssistantItem.trailingBarButtonGroups = groups ? [groups arrayByAddingObject:group] : @[group];
++    }
++#endif
++
+     self.undoManager.groupsByEvent = NO;
+     [self rebuildUndoStack];
+ 
+     return self;
+ }
+ 
++- (void)qt_hideKeyboard
++{
++    [self resignFirstResponder];
++}
++
+ - (void)dealloc
+ {
+     self.inputView = 0;
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostheme.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostheme.mm
+index fad4a8d5..cf8a804b 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostheme.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostheme.mm
+@@ -36,7 +36,7 @@ QIOSTheme::QIOSTheme()
+ 
+     m_contentSizeCategoryObserver = QMacNotificationObserver(nil,
+         UIContentSizeCategoryDidChangeNotification, [] {
+-        qCDebug(lcQpaFonts) << "Contents size category changed to" << UIApplication.sharedApplication.preferredContentSizeCategory;
++        qDebug() << "Contents size category changed to" << UIApplication.sharedApplication.preferredContentSizeCategory;
+         QPlatformFontDatabase::repopulateFontDatabase();
+     });
+ }
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
+index 1e795861..f1978bcd 100644
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
+@@ -185,8 +185,26 @@ void QIOSWindow::setGeometry(const QRect &rect)
+     applyGeometry(rect);
+ }
+ 
+-void QIOSWindow::applyGeometry(const QRect &rect)
++void QIOSWindow::applyGeometry(const QRect &requested)
+ {
++    // Dialogs and tool windows no larger than the screen, and on it.
++    QRect rect = requested;
++    const Qt::WindowType type = window()->type();
++    if (isQtApplication() && window()->isTopLevel() && !rect.isEmpty() && type != Qt::Popup
++        && type != Qt::ToolTip && m_view.window) {
++        const QRect available = screen()->availableGeometry().intersected(
++            QRectF::fromCGRect(m_view.window.bounds).toRect());
++        if (!available.isEmpty()) {
++            rect.setSize(rect.size().boundedTo(available.size()));
++            if (rect.right() > available.right())
++                rect.moveRight(available.right());
++            if (rect.bottom() > available.bottom())
++                rect.moveBottom(available.bottom());
++            rect.moveLeft(qMax(rect.left(), available.left()));
++            rect.moveTop(qMax(rect.top(), available.top()));
++        }
++    }
++
+     // Geometry changes are asynchronous, but QWindow::geometry() is
+     // expected to report back the 'requested geometry' until we get
+     // a callback with the updated geometry from the window system.
+@@ -218,6 +236,13 @@ bool QIOSWindow::isExposed() const
+ 
+ void QIOSWindow::setWindowState(Qt::WindowStates state)
+ {
++    // iOS has no window management: a main window (an app made for the desktop
++    // restores its saved size, maybe larger than this screen) fills the screen.
++    const bool forceMaximized = isQtApplication() && window()->isTopLevel() && window()->type() == Qt::Window
++        && !(state & (Qt::WindowMinimized | Qt::WindowMaximized | Qt::WindowFullScreen));
++    if (forceMaximized)
++        state |= Qt::WindowMaximized;
++
+     // Update the QWindow representation straight away, so that
+     // we can update the statusbar visibility based on the new
+     // state before applying geometry changes.
+@@ -248,6 +273,9 @@ void QIOSWindow::setWindowState(Qt::WindowStates state)
+     } else {
+         applyGeometry(m_normalGeometry);
+     }
++
++    if (forceMaximized)
++        QWindowSystemInterface::handleWindowStateChanged(window(), state);
+ }
+ 
+ void QIOSWindow::setParent(const QPlatformWindow *parentWindow)
+diff --git a/qtbase-everywhere-src-6.5.5/src/printsupport/configure.cmake b/qtbase-everywhere-src-6.5.5/src/printsupport/configure.cmake
+index 2287789a..a8b4ed38 100644
+--- a/qtbase-everywhere-src-6.5.5/src/printsupport/configure.cmake
++++ b/qtbase-everywhere-src-6.5.5/src/printsupport/configure.cmake
+@@ -40,7 +40,7 @@ qt_feature("printer" PUBLIC
+     SECTION "Painting"
+     LABEL "QPrinter"
+     PURPOSE "Provides a printer backend of QPainter."
+-    CONDITION NOT UIKIT AND QT_FEATURE_picture AND QT_FEATURE_temporaryfile AND QT_FEATURE_pdf
++    CONDITION QT_FEATURE_picture AND QT_FEATURE_temporaryfile AND QT_FEATURE_pdf
+ )
+ qt_feature_definition("printer" "QT_NO_PRINTER" NEGATE VALUE "1")
+ qt_feature("printpreviewwidget" PUBLIC

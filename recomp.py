@@ -7,6 +7,8 @@
   recomp.py toolchain <Game.app> [--check]           fetch (or check for) the Unity editor + iOS support that game needs
   recomp.py unity <Game.app> [stages] [options]      Unity/Mono route (IL2CPP recompilation)
   recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
+  recomp.py qt <App.app> [stages] [options] [--sim]  Qt 6 apps, games or not (arm64 retarget, Qt for iOS);
+                                                     --sim builds for the iOS simulator on this Mac
   recomp.py saves <Game.app> --enable|--disable|--status|--sync [--json]
   recomp.py saves --sync-all                         share a Mac game's saves with its iOS ports via iCloud Drive
   recomp.py mods <Game.app> [--include ID]... [--exclude ID]... [--json]
@@ -18,6 +20,7 @@
 
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
+Qt stages, in order (default: all): toolchain prepare xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
          --saves icloud|off         for a game without Steam: its saves sync through iCloud Drive
                                     (recomp.py saves; the default when its profile has a saves
@@ -42,6 +45,7 @@ from recomp import events, paths, storage  # noqa: E402
 
 STAGES = ["prepare", "player", "inject", "xcode", "install"]
 UNREAL_STAGES = ["prepare", "xcode", "install"]
+QT_STAGES = ["toolchain", "prepare", "xcode", "install"]
 
 
 def default_bundle_id(game, team):
@@ -196,6 +200,53 @@ def cmd_unity(rest):
     return 0
 
 
+def cmd_qt(rest):
+    from recomp import qt_ios as q
+    p = argparse.ArgumentParser(prog="recomp.py qt")
+    p.add_argument("app")
+    p.add_argument("stages", nargs="*")
+    p.add_argument("--team")
+    p.add_argument("--bundle-id")
+    p.add_argument("--device")
+    p.add_argument("--work")
+    p.add_argument("--sim", action="store_true")
+    a = p.parse_args(rest)
+    bad = [s for s in a.stages if s not in QT_STAGES]
+    if bad:
+        p.error(f"unknown stage(s) {bad}; choose from {QT_STAGES}")
+    app = q.App(a.app)
+    sdk = "iphonesimulator" if a.sim else "iphoneos"
+    work = os.path.abspath(a.work or os.path.join(paths.BUILD, app.slug + ("-sim" if a.sim else "")))
+    os.makedirs(work, exist_ok=True)
+    bundle_id = a.bundle_id or default_bundle_id(app, a.team or "sim")
+    stages = a.stages or QT_STAGES
+    if "xcode" in stages and not a.team and not a.sim:
+        sys.exit("xcode needs --team (see: recomp.py env)")
+    if "install" in stages and not a.device and not a.sim:
+        sys.exit("install needs --device (see: recomp.py env)")
+    q.log(f"{app.name}: Qt {app.qt_version} -> {work}")
+    for s in QT_STAGES:
+        if s not in stages:
+            continue
+        events.stage(s, "start")
+        try:
+            if s == "toolchain":
+                q.toolchain(app.qt_version, sdk)
+            elif s == "prepare":
+                q.prepare(app, work, sdk)
+            elif s == "xcode":
+                q.xcode(app, work, a.team, bundle_id)
+            elif s == "install":
+                q.install(work, a.device)
+        except BaseException as e:
+            events.stage(s, "failed")
+            if not isinstance(e, SystemExit):
+                traceback.print_exc()
+            raise
+        events.stage(s, "done")
+    return 0
+
+
 def cmd_unreal(rest):
     from recomp import unreal_ios as u
     p = argparse.ArgumentParser(prog="recomp.py unreal")
@@ -314,7 +365,7 @@ def cmd_mods(rest):
     return 0
 
 
-COMMANDS = {"mods": cmd_mods, "scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal}
+COMMANDS = {"mods": cmd_mods, "scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal, "qt": cmd_qt}
 
 
 def main():

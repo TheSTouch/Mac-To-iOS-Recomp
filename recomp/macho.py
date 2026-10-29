@@ -28,6 +28,8 @@ LC_RPATH = 0x1C | LC_REQ_DYLD
 LC_BUILD_VERSION = 0x32
 LC_VERSION_MIN_MACOSX = 0x24
 LC_DYLD_CHAINED_FIXUPS = 0x34 | LC_REQ_DYLD
+LC_DYLD_INFO = 0x22
+LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
 LC_CODE_SIGNATURE = 0x1D
 DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LAZY_LOAD_DYLIB, LC_LOAD_UPWARD_DYLIB)
 
@@ -38,6 +40,18 @@ def _ver(v):
     """'15.0' -> 0x000F0000 (xxxx.yy.zz nibbles)."""
     parts = [int(x) for x in str(v).split(".")] + [0, 0]
     return parts[0] << 16 | parts[1] << 8 | parts[2]
+
+
+def _uleb(b, i):
+    """(value, next index) of the ULEB128 at b[i]."""
+    v = shift = 0
+    while True:
+        byte = b[i]
+        i += 1
+        v |= (byte & 0x7F) << shift
+        shift += 7
+        if byte < 0x80:
+            return v, i
 
 
 def _cstr(b, off):
@@ -149,6 +163,50 @@ class MachO:
             out.append((i, lib, weak, _cstr(d, off + symbols_off + name_off), e, fmt))
         return out
 
+    def bound_imports(self):
+        """Imports of an older-format file (LC_DYLD_INFO bind opcodes): set of (lib_ordinal, name).
+
+        Reads the regular and lazy bind streams; weak binds go by name alone. For
+        files with chained fixups, imports() has the same and more.
+        """
+        info = next((b for c, b in self.cmds if c in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY)), None)
+        if not info:
+            return {(lib, name) for _i, lib, _w, name, _e, _f in self.imports()}
+        _rb, _rs, bind_off, bind_size, _wo, _ws, lazy_off, lazy_size = struct.unpack_from("<8I", info, 8)
+        out = set()
+        for off, size in ((bind_off, bind_size), (lazy_off, lazy_size)):
+            d, i, end = self.data, off, off + size
+            lib, name = 0, None
+            while i < end:
+                op, imm = d[i] & 0xF0, d[i] & 0x0F
+                i += 1
+                if op == 0x10:  # SET_DYLIB_ORDINAL_IMM
+                    lib = imm
+                elif op == 0x20:  # SET_DYLIB_ORDINAL_ULEB
+                    lib, i = _uleb(d, i)
+                elif op == 0x30:  # SET_DYLIB_SPECIAL_IMM (0, -1, -2...)
+                    lib = -imm if imm else 0
+                elif op == 0x40:  # SET_SYMBOL_TRAILING_FLAGS_IMM
+                    end_name = d.index(b"\0", i)
+                    name = d[i:end_name].decode()
+                    i = end_name + 1
+                elif op in (0x60, 0x70, 0xA0):  # SET_ADDEND_SLEB, SET_SEGMENT_AND_OFFSET_ULEB, ADD_ADDR_ULEB
+                    _v, i = _uleb(d, i)
+                elif op in (0x90, 0xB0):  # DO_BIND, DO_BIND_ADD_ADDR_IMM_SCALED
+                    if name and lib > 0:
+                        out.add((lib, name))
+                elif op == 0x80:  # DO_BIND_ADD_ADDR_ULEB
+                    if name and lib > 0:
+                        out.add((lib, name))
+                    _v, i = _uleb(d, i)
+                elif op == 0xC0:  # DO_BIND_ULEB_TIMES_SKIPPING_ULEB
+                    if name and lib > 0:
+                        out.add((lib, name))
+                    _v, i = _uleb(d, i)
+                    _v, i = _uleb(d, i)
+                # 0x00 DONE (ends one lazy entry), 0x50 SET_TYPE_IMM: nothing to read
+        return out
+
     def read_pointer(self, file_off):
         """Resolve a chained-fixup pointer slot to a vm address (rebases only)."""
         v = struct.unpack_from("<Q", self.data, file_off)[0]
@@ -190,12 +248,13 @@ class MachO:
                 v = struct.unpack_from("<Q", self.data, e)[0]
                 struct.pack_into("<Q", self.data, e, (v & ~0xFFFF) | new)
 
-    def retarget(self, minos="16.0", sdk="26.0", dylibs=None, rpaths=None, install_name=None):
+    def retarget(self, minos="16.0", sdk="26.0", dylibs=None, rpaths=None, install_name=None, platform=PLATFORM_IOS):
         """Mark the file as iOS and rewrite library load commands.
 
         dylibs: replacement list of (cmd, path) library load commands, in ordinal
         order (None keeps them; call remap_imports to match); rpaths: replacement
-        LC_RPATH list (None keeps them); install_name: new LC_ID_DYLIB.
+        LC_RPATH list (None keeps them); install_name: new LC_ID_DYLIB; platform:
+        PLATFORM_IOS, or 7 for the iOS simulator.
         """
         new = []
         seen_build = False
@@ -203,10 +262,10 @@ class MachO:
         for cmd, b in self.cmds:
             if cmd == LC_BUILD_VERSION:
                 ntools = struct.unpack_from("<I", b, 20)[0]
-                b = struct.pack("<6I", cmd, 24 + 8 * ntools, PLATFORM_IOS, _ver(minos), _ver(sdk), ntools) + b[24:24 + 8 * ntools]
+                b = struct.pack("<6I", cmd, 24 + 8 * ntools, platform, _ver(minos), _ver(sdk), ntools) + b[24:24 + 8 * ntools]
                 seen_build = True
             elif cmd == LC_VERSION_MIN_MACOSX:
-                cmd, b = LC_BUILD_VERSION, struct.pack("<6I", LC_BUILD_VERSION, 24, PLATFORM_IOS, _ver(minos), _ver(sdk), 0)
+                cmd, b = LC_BUILD_VERSION, struct.pack("<6I", LC_BUILD_VERSION, 24, platform, _ver(minos), _ver(sdk), 0)
                 seen_build = True
             elif cmd == LC_ID_DYLIB and install_name:
                 b = _str_cmd(cmd, install_name, b[12:24])
@@ -225,7 +284,7 @@ class MachO:
         for p in rpaths or ():
             new.append([LC_RPATH, _str_cmd(LC_RPATH, p, b"")])
         if not seen_build:
-            new.append([LC_BUILD_VERSION, struct.pack("<6I", LC_BUILD_VERSION, 24, PLATFORM_IOS, _ver(minos), _ver(sdk), 0)])
+            new.append([LC_BUILD_VERSION, struct.pack("<6I", LC_BUILD_VERSION, 24, platform, _ver(minos), _ver(sdk), 0)])
         self._write_cmds(new)
 
     def _write_cmds(self, cmds):
