@@ -162,6 +162,9 @@ static UIImage *QRImage(NSString *text) {
     return out;
 }
 
+// The game's window, whatever its root view controller is (Unity's, Unreal's, AIR's
+// CTStandaloneViewController): the key window, else one in the foreground scene, at the
+// normal level (the cover's own window is above it).
 static UIWindow *GameWindow(void) {
     NSMutableArray *windows = [NSMutableArray array];
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
@@ -171,8 +174,11 @@ static UIWindow *GameWindow(void) {
     if (!windows.count) [windows addObjectsFromArray:UIApplication.sharedApplication.windows];
 #pragma clang diagnostic pop
     UIWindow *best = nil;
-    for (UIWindow *w in windows)
-        if (w.rootViewController && w.windowLevel <= UIWindowLevelNormal && (!best || w.isKeyWindow)) best = w;
+    for (UIWindow *w in windows) {
+        if (!w.rootViewController || w.windowLevel > UIWindowLevelNormal) continue;
+        if (w.isKeyWindow) return w;
+        if (!best || w.windowScene.activationState == UISceneActivationStateForegroundActive) best = w;
+    }
     return best;
 }
 
@@ -344,7 +350,9 @@ static RecompLicenseGate *gGate;
 // While the player signs in, a Unity game is paused (UnityPause, which the trampoline uses
 // for the background): the game would otherwise read its saves under the cover, before the
 // sync after the sign-in brings them (Valheim lists its characters as its menu starts). It
-// resumes when the cover lifts. Unreal ports have no such switch and run on.
+// resumes when the cover lifts. Unreal and AIR ports have no such switch and run on under the
+// cover; what they ask Steam for waits for the logon (RecompSteam's RequestEncryptedAppTicket,
+// which Brawlhalla's login needs).
 static void PauseGame(BOOL pause) {
     static BOOL paused;
     typedef void (*UnityPauseFn)(int);
@@ -788,10 +796,13 @@ static UILabel *Label(CGFloat size, UIFontWeight weight, UIColor *color) {
 - (void)cover {
     if (self.window) return;
     if (!self.controller) [self build];
-    UIWindowScene *scene = nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes)
-        if ([s isKindOfClass:UIWindowScene.class] && (!scene || s.activationState == UISceneActivationStateForegroundActive))
-            scene = (UIWindowScene *)s;
+    // Over the game's own scene (AIR's CTAIRSceneDelegate, Unity's and Unreal's implicit one).
+    UIWindowScene *scene = GameWindow().windowScene;
+    if (!scene) {
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes)
+            if ([s isKindOfClass:UIWindowScene.class] && (!scene || s.activationState == UISceneActivationStateForegroundActive))
+                scene = (UIWindowScene *)s;
+    }
     UIWindow *w = scene ? [[UIWindow alloc] initWithWindowScene:scene] : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window = RL_AUTORELEASE(w);
     self.window.windowLevel = UIWindowLevelAlert + 10;
