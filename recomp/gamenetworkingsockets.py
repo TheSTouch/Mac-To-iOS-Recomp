@@ -75,7 +75,11 @@ def source(name):
     archive = os.path.join(src, os.path.basename(url))
     toolchain.fetch(url, archive, name)
     with tarfile.open(archive) as t:
-        t.extractall(src, filter="data")
+        # filter= is Python 3.12+ (and late 3.8-3.11 patches); macOS's own 3.9.6 lacks it.
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(src, filter="data")
+        else:
+            t.extractall(src)
     os.remove(archive)
     if name == "gns":
         for rel, old, new in PATCHES:

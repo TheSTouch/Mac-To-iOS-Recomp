@@ -37,6 +37,11 @@ import os
 import sys
 import traceback
 
+MIN_PYTHON = (3, 9)
+if sys.version_info < MIN_PYTHON:
+    sys.exit("recomp needs Python %d.%d or newer; %s is %s (in Recomp Helper, choose another one in "
+             "Settings > Python)." % (*MIN_PYTHON, sys.executable, sys.version.split()[0]))
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, ROOT)
