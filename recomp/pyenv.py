@@ -12,14 +12,17 @@ STAMP = os.path.join(VENV, "recomp-requirements.txt")
 
 
 def python():
-    """Path to the venv's interpreter, creating or updating the venv when needed."""
+    """Path to the venv's interpreter, creating or updating the venv when needed.
+
+    The venv is rebuilt when the interpreter running the engine changes (another Python chosen
+    in Recomp Helper's settings, or RECOMP_PYTHON): a venv made from the old one keeps using it.
+    """
     exe = os.path.join(VENV, "bin", "python")
-    wanted = "\n".join(REQUIREMENTS)
+    wanted = "\n".join(["python " + sys.executable, "version %d.%d" % sys.version_info[:2], *REQUIREMENTS])
     have = open(STAMP).read() if os.path.exists(STAMP) else None
     if not os.path.exists(exe) or have != wanted:
         print("[recomp] setting up Python packages (one time)", flush=True)
-        if not os.path.exists(exe):
-            subprocess.run([sys.executable, "-m", "venv", VENV], check=True)
+        subprocess.run([sys.executable, "-m", "venv", "--clear", VENV], check=True)
         subprocess.run([exe, "-m", "pip", "install", "-q", "--disable-pip-version-check", *REQUIREMENTS], check=True)
         with open(STAMP, "w") as f:
             f.write(wanted)

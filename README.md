@@ -142,7 +142,15 @@ Download the notarized DMG from [Releases](../../releases), or build it yourself
 - the .NET SDK (`brew install dotnet`);
 - for Unity games, a free Unity Personal license (open Unity Hub once and sign in) and about 40 GB of
   free disk for the build;
-- an iPad or iPhone paired with the Mac, unlocked while the app installs.
+- an iPad or iPhone paired with the Mac, unlocked while the app installs;
+- Python 3.9 or later. macOS's own `/usr/bin/python3` (3.9.6) works, and a newer one
+  (`brew install python`) is better.
+
+Recomp Helper runs the engine with the newest Python it finds in Homebrew (`/opt/homebrew/bin`,
+`/usr/local/bin`) or python.org's installer, else macOS's own. To use another one, set it in
+**Settings > Python**, or start the app with `RECOMP_PYTHON=/path/to/python3`, or run
+`defaults write io.github.thestouch.recomphelper python /path/to/python3` (`defaults delete
+io.github.thestouch.recomphelper python` goes back to automatic).
 
 **With the app:** open Recomp Helper, select a game, press **Port**.
 

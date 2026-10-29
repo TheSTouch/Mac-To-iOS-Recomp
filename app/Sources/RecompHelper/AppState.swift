@@ -19,6 +19,11 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(workspace, forKey: "workspace") }
     }
 
+    /// The Python that runs the engine; empty for the automatic choice (see Engine.python).
+    @Published var python: String {
+        didSet { UserDefaults.standard.set(python, forKey: "python") }
+    }
+
     static let defaultWorkspace: String = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("macToiOSRecomp").path
@@ -27,6 +32,7 @@ final class AppState: ObservableObject {
     init() {
         customFolders = UserDefaults.standard.stringArray(forKey: "customFolders") ?? []
         workspace = UserDefaults.standard.string(forKey: "workspace") ?? Self.defaultWorkspace
+        python = UserDefaults.standard.string(forKey: "python") ?? ""
     }
 
     var selectedGame: Game? { games.first { $0.id == selection } }
@@ -72,6 +78,20 @@ final class AppState: ObservableObject {
 
     func chooseWorkspace() {
         if let path = chooseFolder(prompt: "Use This Folder") { workspace = path }
+    }
+
+    func choosePython() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.resolvesAliases = false  // keep /opt/homebrew/bin/python3, which survives upgrades, not its Cellar target
+        panel.directoryURL = URL(fileURLWithPath: FileManager.default.fileExists(atPath: "/opt/homebrew/bin")
+                                 ? "/opt/homebrew/bin" : "/usr/local/bin")
+        panel.message = "Choose a python3 executable (Python \(Engine.minimumPython.map(String.init).joined(separator: ".")) or newer)."
+        panel.prompt = "Use This Python"
+        return panel.runModal() == .OK ? panel.url?.path : nil
     }
 
     func freeSpace(at path: String) -> Int64? {
