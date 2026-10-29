@@ -332,6 +332,8 @@ def cmd_air(rest):
     if "install" in stages and stages != ["install"]:
         storage.check_port(a.device, game.app)
     u.log(f"{game.name}: Adobe AIR ({', '.join(game.extensions) or 'no extensions'}) -> {work}")
+    if "prepare" in stages:
+        saves_mode(game, game.profile, None, u.log)
     for s in AIR_STAGES:
         if s not in stages:
             continue

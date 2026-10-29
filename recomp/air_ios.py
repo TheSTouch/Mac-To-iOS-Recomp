@@ -20,6 +20,9 @@ ADT needs a provisioning profile to package even though the xcode stage signs
 again: the bundle's own profile once the xcode stage has made one, else the
 team's wildcard profile (which Xcode makes for any project with automatic signing).
 
+SteamAir runs on the port's Steam runtime (recomp/native/RecompSteam), with the Steam sign-in
+cover, as the other routes do; its keys go into the descriptor's InfoAdditions.
+
 The AIR SDK (toolchain/air-sdk/AIRSDK_<version>) only downloads after accepting
 its license, so it is not fetched here; a JDK (toolchain/jdk-17) runs ADT.
 """
@@ -43,6 +46,20 @@ AIR_NS = "http://ns.adobe.com/air/application/51.5"
 ANE_NS = "http://ns.adobe.com/air/extension/51.5"
 # What ADT builds the extensions' slices for: armv7 only to pass its universal-binary check.
 ARCHS = [("armv7", "9.0"), ("arm64", "13.0")]
+RECOMP_NATIVE = os.path.join(ROOT, "recomp", "native")
+STEAM_RUNTIME = os.path.join(RECOMP_NATIVE, "RecompSteam")
+# Extensions whose stand-in runs on code shared with the other routes: built with it into one
+# object of the arm64 slice (constructors included), with what it links. The armv7 slice stays
+# empty: nothing runs it, ADT only wants the architecture there.
+RUNTIMES = {
+    "SteamAir": {
+        "sources": lambda: sorted(os.path.join(STEAM_RUNTIME, n) for n in os.listdir(STEAM_RUNTIME)
+                                  if n.endswith((".c", ".m"))) +
+                           [os.path.join(RECOMP_NATIVE, n) for n in ("RecompLicense.m", "RecompSaves.m", "RecompLog.m")],
+        "include": [STEAM_RUNTIME],
+        "link": ["-framework Foundation", "-framework UIKit", "-framework Security", "-framework CoreImage", "-lz"],
+    },
+}
 # Files of the Mac bundle's Resources that are not the game's content.
 NOT_CONTENT = {"META-INF", "mimetype", "Icon.icns"}
 PROFILE_DIRS = [os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
@@ -227,7 +244,19 @@ def build_ane(sdk, game, ext, work):
     native = os.path.join(out, "ios")
     os.makedirs(native)
     includes = [os.path.join(sdk, "include")]
-    libs = [compile_slice([src], arch, min_ios, includes, out) for arch, min_ios in ARCHS]
+    runtime = RUNTIMES.get(ext)
+    libs = []
+    for arch, min_ios in ARCHS:
+        if not runtime:
+            libs.append(compile_slice([src], arch, min_ios, includes, out))
+        elif arch == "arm64":
+            libs.append(compile_slice([src] + runtime["sources"](), arch, min_ios, includes + runtime["include"],
+                                      out, merge=True))
+        else:
+            empty = os.path.join(out, "empty.c")
+            with open(empty, "w") as f:
+                f.write("// The armv7 slice: ADT wants one, nothing runs it.\n")
+            libs.append(compile_slice([empty], arch, min_ios, includes, out))
     lib = os.path.join(native, f"lib{ext}.a")
     run(["xcrun", "lipo", "-create", *libs, "-output", lib])
     shutil.copy2(os.path.join(folder, "library.swf"), native)
@@ -248,8 +277,16 @@ def build_ane(sdk, game, ext, work):
     os.makedirs(os.path.dirname(ane), exist_ok=True)
     if os.path.exists(ane):
         os.remove(ane)
-    adt(sdk, ["-package", "-target", "ane", ane, xml, "-swc", swc, "-platform", "iPhone-ARM", "-C", native, "."],
-        work)
+    options = []
+    if runtime and runtime.get("link"):
+        platform = os.path.join(out, "platform.xml")
+        with open(platform, "w") as f:
+            f.write(f'<platform xmlns="{ANE_NS}">\n  <linkerOptions>\n' +
+                    "".join(f"    <option>{o}</option>\n" for o in runtime["link"]) +
+                    "  </linkerOptions>\n</platform>\n")
+        options = ["-platformoptions", platform]
+    adt(sdk, ["-package", "-target", "ane", ane, xml, "-swc", swc, "-platform", "iPhone-ARM", *options,
+              "-C", native, "."], work)
     log(f"{ext}.ane: {os.path.relpath(src, ROOT)} ({init})")
     return ane
 
@@ -282,8 +319,64 @@ ENTITLEMENTS = {
 }
 
 
+def ticket_files(binary):
+    """The files whose SHA-256 SteamAir puts in its encrypted app ticket request, relative to the
+    Mac bundle's Contents: a list in its library, each entry 1, a 16-bit big-endian length and the
+    path XOR 0x1c, ending with 0."""
+    with open(binary, "rb") as f:
+        data = f.read()
+    best = []
+    for m in re.finditer(rb"\x01\x00", data):
+        i, found = m.start(), []
+        while data[i:i + 2] == b"\x01\x00" and i + 3 < len(data):
+            n = data[i + 2]
+            path = bytes(c ^ 0x1c for c in data[i + 3:i + 3 + n])
+            if not n or not re.fullmatch(rb"[\x20-\x7e]+", path) or b"/" not in path:
+                break
+            found.append(path.decode())
+            i += 3 + n
+        if found and data[i:i + 1] == b"\x00" and len(found) > len(best):
+            best = found
+    return best
+
+
+def ticket_data(game):
+    """The data SteamAir's ticket request carries, computed from the Mac bundle (SteamAir.c), or None."""
+    import hashlib
+    folder = bundled_extensions(game.app).get("SteamAir")
+    binaries = glob.glob(os.path.join(folder, "META-INF", "ANE", "*", "*.framework", "SteamAir")) if folder else []
+    files = ticket_files(os.path.realpath(binaries[0])) if binaries else []
+    if not files:
+        log("SteamAir: no file list found in its Mac library; the ticket carries no game data")
+        return None
+    out = bytearray(b"em")
+    for rel in files:
+        path = os.path.join(game.contents, rel)
+        digest = bytes(32)
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                digest = hashlib.sha256(f.read()).digest()
+        else:
+            log(f"SteamAir: {rel} is not in the Mac bundle (hashed as zeros, as on the Mac)")
+        out += b"\x01" + digest
+    out += b"\x00"
+    log(f"SteamAir: the ticket carries the hashes of {len(files)} files of the Mac bundle")
+    return bytes(out)
+
+
 def info_additions(game):
-    return dict(INFO_ADDITIONS)
+    """INFO_ADDITIONS, plus what the Steam runtime reads (recomp/native/RecompSteam): the app id and
+    game name for the license cover, the save sync, the SteamAir ticket's data."""
+    from recomp import steam_cloud, steam_license
+    keys = dict(INFO_ADDITIONS)
+    if "SteamAir" in game.extensions:
+        keys["RecompGame"] = game.name
+        keys.update(steam_license.plist_keys(game.app, game.profile, log))
+        keys.update(steam_cloud.plist_keys(game.app, game.profile, getattr(game, "saves_mode", None), "ios", log))
+        data = ticket_data(game)
+        if data:
+            keys["RecompAirTicketData"] = data.hex()   # ADT's plist parser refuses <data>
+    return keys
 
 
 def make_icon(game, work):
