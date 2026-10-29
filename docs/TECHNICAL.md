@@ -12,6 +12,7 @@ Mac game (or a Qt app) into an iOS app, and the details behind controls, mods, s
 | **Unity / Mono** (implemented) | Unity games whose `Data/Managed` holds .NET assemblies | Recompile the game's assemblies to native ARM64 code with the matching Unity version's IL2CPP, then run the game's own data on Unity's iOS player |
 | **Unreal** (implemented) | Unreal Engine 4 games built for Apple Silicon | Re-mark the game's own arm64 binaries as iOS and bind what iOS lacks (AppKit, Mac display and audio APIs) to a shim library |
 | **Qt** (implemented) | Mac apps built with Qt 6.5.5 for Apple Silicon | Retarget the app's own arm64 binaries, run them on an iOS build of the same Qt, desktop OpenGL on gl4es |
+| **AIR** (implemented) | Adobe AIR captive-runtime games (Brawlhalla) | Package the game's own SWFs for AIR's iOS runtime with the AIR SDK, with iOS stand-ins for its native extensions |
 | Mach-O retarget (planned) | Other native arm64 games (custom engines) | Same retargeting, with shims for what each engine uses |
 | Engine runtime swap (planned) | Godot, Ren'Py, LÖVE, HTML5 | Run the game's data on the engine's iOS runtime |
 | Static recompilation | Intel-only games | Per-game project; iPadOS forbids JIT, so no Rosetta-style translation |
@@ -31,6 +32,9 @@ The checks (`recomp/compat.py`), which run on every scan:
 - **Unreal (arm64)**: Unreal Engine 4's bundle layout; every Mach-O thin arm64; and a dry run of
   the `prepare` stage's import binding: every import of the game's binaries must bind to iOS or to
   `RecompAppKit.dylib`. That needs Xcode; the result is cached until the game or the shim changes.
+- **Adobe AIR**: every native extension in `Contents/Resources/META-INF/AIR/extensions` (its id from
+  the extension's `extension.xml`) has a stand-in, `recomp/native/air/<id>.c`; otherwise the check
+  names the missing ids. A note says when the AIR SDK is not installed.
 
 Passing the checks is a good sign, not a promise: what a game does at run time (memory, shaders,
 input, code paths the checks cannot see) only shows on the iPad.
@@ -258,6 +262,85 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
+
+## AIR route
+
+```
+python3 recomp.py air <Game.app> --team <TEAMID> --device <iPad name or UDID> [--interpreter]
+```
+
+Stages (run all, or name some): `prepare package xcode install`. Not in Recomp Helper yet.
+
+An Adobe AIR game is ActionScript bytecode in SWF files, plus native extensions (ANEs). The Mac app
+carries its own AIR runtime (the captive runtime, `Contents/Frameworks/Adobe AIR.framework`) and the
+extensions as Intel frameworks; the SWFs and data run anywhere AIR does. So the route packages the
+game's `Contents/Resources` for AIR's iOS runtime with the AIR SDK's packager, ADT, and swaps each
+extension for an iOS stand-in (`recomp/air_ios.py`):
+
+1. **prepare**: each stand-in, `recomp/native/air/<id>.c`, is built as a static library for armv7
+   and arm64 and lipo'd into one (ADT refuses an `.a` with one architecture, "not a universal
+   binary"; nothing runs the armv7 slice). Packed with the game's own `catalog.xml` and
+   `library.swf` (the extension's ActionScript side) into `<id>.ane`. The descriptor comes from the
+   game's `META-INF/AIR/application.xml`: AIR 51.5, `mobileDevice`, full screen, landscape, the
+   game's render mode, the iPad, file-sharing and controller keys, and the two memory
+   entitlements. ADT refuses `UIStatusBarHidden`, `UISupportedInterfaceOrientations` and
+   `MinimumOSVersion` in `InfoAdditions` (error 105) and `<data>` values in it. The Mac icon
+   becomes an `Assets.car` (actool) at the package's root, which ADT takes instead of its own.
+2. **package**: ADT `ipa-test`, which compiles the ActionScript ahead of time (about 25 minutes for
+   Brawlhalla), or `ipa-test-interpreter` with `--interpreter` (about 2 minutes). It signs from
+   the keychain (`-storetype KeychainStore`) with the team's Apple Development identity and needs
+   a development profile holding that certificate: the bundle's own once the xcode stage has made
+   one, else the team's wildcard. ADT runs `java` by name, so the route puts
+   `toolchain/jdk-17/Contents/Home/bin` first on `PATH`.
+3. **xcode**: the wildcard profile lacks the memory entitlements, so a generated Xcode project
+   with automatic provisioning signs again, as the Unreal route does: its run-script phase copies
+   ADT's app in over a placeholder. ADT's `Info.plist` and `Assets.car` stay as they are: AIR checks
+   at launch that the package is the one ADT made, and shows "application packaging error" when
+   they differ.
+4. **install**: `devicectl`.
+
+The AIR SDK only downloads through HARMAN's AIR SDK Manager after its license is accepted, so the
+route never fetches it: it looks for `toolchain/air-sdk/AIRSDK_*` and says how to get one
+([README](../README.md#getting-started)).
+
+### Brawlhalla's extensions
+
+Each logs its calls to stderr as `[air] ...` (`devicectl device process launch --console`; the
+app stops when devicectl does), except those called every frame.
+
+- **RawData** reads the `.swz` data archives (text entries, WELL512-keyed XOR, a checksum each,
+  zlib), rewritten from the Mac library. The key comes from the game's ActionScript at run time
+  and is never stored or logged.
+- **SoundEngineExtension** stands in for the Wwise 2017.2 wrapper, silently: on iOS the game asks
+  for its banks under `audio/pc` and the Mac build ships `audio/mac`. Sound is a later step.
+- **SteamAir** runs on the [Steam runtime](#steam-runtime): its arm64 slice is `SteamAir.c` with
+  `RecompSteam/`, `RecompLicense.m` (the sign-in cover), `RecompSaves.m` and `RecompLog.m`, merged
+  into one object (`ld -r`) so their constructors are linked; the extension's platform options link
+  UIKit, Security, CoreImage and libz. Its 23 functions do what the Mac library's do, through the
+  flat API. The game learns results through status events (`FREDispatchStatusEventAsync`, code
+  and level as decimal strings): `1` the encrypted app ticket arrived (level: its EResult), then
+  `SteamAir_GetEncryptedAppTicket` hands over a `Vector.<int>` of the 1024-byte buffer and the
+  length; `2`–`7` purchases, licenses, stats and achievements. `SteamAir_Init` answers false, and
+  the game calls it again, until the session knows the player.
+
+  The ticket carries data the game's server checks: `em`, then for each of 7 files of the Mac
+  bundle (its executable, the main SWF, the four archives, the Mac RawData framework) `1` and the
+  file's SHA-256, then `0`. The port computes it from the Mac game when porting, reading the file
+  list from the game's own SteamAir library, and passes it in `Info.plist` as
+  `RecompAirTicketData` (hex). The descriptor's `InfoAdditions` also get `RecompSteamAppId`,
+  `RecompGame` and the save mode keys.
+
+### Not yet
+
+- **Ahead of time**: the game reads its art SWFs with `FileStream` and loads them with
+  `Loader.loadBytes` (`allowCodeImport`). AIR on iOS cannot run bytecode loaded that way when
+  the app is compiled ahead of time, so that build stops on its loading screen after the data
+  archives; the interpreter build runs. Making it load the packaged SWFs with `Loader.load` instead
+  would mean patching the game's ActionScript.
+- **Version**: after the Steam login, Blue Mammoth's server answers that the version is not the
+  latest (the Mac install is current); most likely the game reports itself as the iOS client when
+  AIR says iOS. **Stay offline** reaches the menus.
+- **Input**: no touch controls; a controller is required, not tried yet.
 
 ## On-screen gamepad
 
@@ -564,6 +647,8 @@ stays on your machine.
 - `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
 - `recomp/native/appkit/`: the shim for retargeted Mac binaries
+- `recomp/air_ios.py`: AIR route (prepare, package, xcode, install); `recomp/native/air/`: the iOS
+  stand-ins for the game's native extensions (`<id>.c`)
 - `recomp/qt_ios.py`: Qt route (toolchain, prepare, xcode, install); `recomp/native/qt/`: its per-app
   shim, window fitting and test hooks; `recomp/ios_opengl.py`, `recomp/native/opengl/`: the iOS
   `OpenGL.framework` (gl4es and GLU); `recomp/patches/`: the Qt and gl4es patches
@@ -581,4 +666,4 @@ stays on your machine.
 - `docs/TECHNICAL.md`: this file
 - `stubs/`: hand-written native stub overrides
 - `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite and Harmony weaving (Mono.Cecil); `tools/ilspy.sh`: decompiler
-- `toolchain/`, `build/`: downloaded editors, Qt and gl4es sources and builds, per-game work (not in git)
+- `toolchain/`, `build/`: downloaded editors, Qt and gl4es sources and builds, the AIR SDK and Java, per-game work (not in git)

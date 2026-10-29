@@ -40,6 +40,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
 | [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4, at 30 frames/s |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, online play | ✅ Playable |
+| [Brawlhalla](https://store.steampowered.com/app/291550/Brawlhalla/) (Steam build 25942757) | Adobe AIR 32 | 🟡 Early testing: Steam sign-in and the menus; no match played yet | Not tried |
 
 ### Timberborn
 
@@ -111,6 +112,21 @@ sized to the device's memory.
 Known limits: the on-screen gamepad covers parts of the HUD (hotbar slot 1, the minimap corner,
 food and health); online play and Steam Cloud are tested on the iPad, not yet on the iPhone.
 
+### Brawlhalla
+
+The first game on the [AIR route](docs/TECHNICAL.md#air-route): the game's own ActionScript runs on
+Adobe AIR's iOS runtime. From the command line only for now.
+
+| | |
+|---|---|
+| **App size** | 1.4 GB (1.7 GB compiled ahead of time) |
+| **Screen** | Landscape |
+| **Touch** | Acts as the mouse in menus; there are no touch controls, so a match needs a controller |
+| **Controller** | Required, not tried yet |
+| **Steam** | Sign-in, license check and the game's Steam login (an encrypted app ticket). Blue Mammoth's server then says the game is not the latest version; **Stay offline** reaches the main menu |
+| **Sound** | Silent for now: the game asks for its Wwise sound banks under `audio/pc` on iOS, the Mac build ships `audio/mac`, and the sound engine is a silent stand-in |
+| **Speed** | Built for AIR's interpreter (`--interpreter`). The ahead-of-time build stops on its loading screen: the game loads its art SWFs from bytes, which AIR cannot run when compiled ahead of time |
+
 ## Recomp Helper, the Mac app
 
 <p align="center"><img src="docs/images/recomp-helper.png" width="720" alt="Recomp Helper with Timberborn selected and its saves synced through iCloud Drive"></p>
@@ -145,6 +161,7 @@ Download the notarized DMG from [Releases](../../releases), or build it yourself
 - the .NET SDK (`brew install dotnet`);
 - for Unity games, a free Unity Personal license (open Unity Hub once and sign in) and about 40 GB of
   free disk for the build;
+- for Adobe AIR games, the AIR SDK 51.5 or later and a Java 17 (below);
 - an iPad or iPhone paired with the Mac, unlocked while the app installs;
 - Python 3.9 at the very least; **3.12 or later recommended** (`brew install python`).
 
@@ -179,6 +196,9 @@ python3 recomp.py unity  /path/to/Game.app --team <TEAMID> --device "<iPad name>
 # Unreal game
 python3 recomp.py unreal /path/to/Game.app --team <TEAMID> --device "<iPad name>"
 
+# Adobe AIR game (needs the AIR SDK and Java, below); --interpreter packages in minutes
+python3 recomp.py air /path/to/Game.app --interpreter --team <TEAMID> --device "<iPad name>"
+
 # Qt app (see Mac apps below); --sim builds for the iOS simulator instead
 python3 recomp.py qt /path/to/App.app --team <TEAMID> --device "<iPad name>"
 
@@ -188,11 +208,22 @@ python3 recomp.py saves /path/to/Game.app --enable  # games without Steam: share
 
 Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another disk.
 
+**For Adobe AIR games** (`recomp.py air`), two tools go into the `toolchain/` folder by hand:
+
+- **The AIR SDK**, from HARMAN's AIR SDK Manager (airsdk.harman.com): accept its license, download
+  AIR SDK 51.5 or later, and put its `AIRSDK_<version>` folder in `toolchain/air-sdk/`. Recomp
+  cannot download it for you: only the SDK Manager can, once you accept its terms.
+- **Java 17** for the SDK's packager: Eclipse Temurin 17 for macOS (aarch64, `.tar.gz`, from
+  adoptium.net), unpacked as `toolchain/jdk-17`.
+
+The first package asks once whether `java` may use your signing key: choose **Always Allow**.
+
 | How long it takes | Measured |
 |---|---|
 | Valheim, first port | about 10 min just to convert 4 GB of asset bundles (13 GB of RAM at peak) |
 | Timberborn, port again after changing mods | 15–20 min with Unity's cache warm |
 | Stray, install on the iPad | about 4 min: the whole 8 GB app is copied each time |
+| Brawlhalla, package for AIR's interpreter | about 2 min; compiled ahead of time, about 25 min |
 
 ## Which games can be ported
 
@@ -201,7 +232,9 @@ Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another dis
 - Unity 6 games built with Mono (a `Data/Managed` folder of .NET DLLs), on Apple silicon or Intel:
   the code is recompiled, so the Mac build's CPU does not matter;
 - Unreal Engine 4 games built for Apple silicon, when every function the game imports exists on iOS
-  or in the port's shim.
+  or in the port's shim;
+- Adobe AIR games (captive runtime) whose native extensions all have an iOS stand-in in
+  `recomp/native/air` (Brawlhalla's do), Intel-only or not: the game's code is ActionScript.
 
 **Needs work first** (a game profile, a stub or a patch):
 
@@ -211,7 +244,8 @@ Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another dis
 - libraries that generate code while the game runs (Harmony, MonoMod): iOS forbids it;
 - Unity's old input system: taps act as clicks, but pinch and multi-finger gestures need the Input
   System package;
-- large games on an iPhone: an 8 GB iPhone gives an app about 6 GB.
+- large games on an iPhone: an 8 GB iPhone gives an app about 6 GB;
+- Adobe AIR games with other native extensions: each needs an iOS stand-in.
 
 **Not supported:**
 
