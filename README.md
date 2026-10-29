@@ -129,6 +129,9 @@ one go.
 - **Installs on another device** after a port, and checks the device has room first.
 - **Mods:** tick which of the Mac's mods go into the port.
 - **Saves:** Steam games sync with Steam Cloud; other games can sync through iCloud Drive.
+- **Chooses its Python:** the newest one installed (Homebrew or python.org), or the one you set in
+  **Settings > Python**, which shows the version in use and warns when it is too old or doesn't run.
+  See [Getting started](#getting-started) for why macOS's own Python is a last resort.
 
 Download the notarized DMG from [Releases](../../releases), or build it yourself
 ([Building the app](docs/TECHNICAL.md#building-the-app)).
@@ -143,14 +146,22 @@ Download the notarized DMG from [Releases](../../releases), or build it yourself
 - for Unity games, a free Unity Personal license (open Unity Hub once and sign in) and about 40 GB of
   free disk for the build;
 - an iPad or iPhone paired with the Mac, unlocked while the app installs;
-- Python 3.9 or later. macOS's own `/usr/bin/python3` (3.9.6) works, and a newer one
-  (`brew install python`) is better.
+- Python 3.9 at the very least; **3.12 or later recommended** (`brew install python`).
+
+> [!WARNING]
+> **macOS's own Python is old.** `/usr/bin/python3`, which comes with Xcode, is Python 3.9.6, and
+> it can't be upgraded because it is part of the system. Up to Recomp Helper 0.5.0 the app always
+> used it, so some ports failed with errors such as `extractall() got an unexpected keyword argument
+> 'filter'` ([#1](../../issues/1)). The engine runs on 3.9.6 now, but it is developed on a recent
+> Python: install one with `brew install python` or from [python.org](https://www.python.org/downloads/macos/).
+> Recomp Helper picks it up by itself, and **Settings > Python** shows which one it uses.
 
 Recomp Helper runs the engine with the newest Python it finds in Homebrew (`/opt/homebrew/bin`,
 `/usr/local/bin`) or python.org's installer, else macOS's own. To use another one, set it in
 **Settings > Python**, or start the app with `RECOMP_PYTHON=/path/to/python3`, or run
 `defaults write io.github.thestouch.recomphelper python /path/to/python3` (`defaults delete
-io.github.thestouch.recomphelper python` goes back to automatic).
+io.github.thestouch.recomphelper python` goes back to automatic). From the command line, the
+Python is whichever one runs `recomp.py`: `python3 --version` shows it.
 
 **With the app:** open Recomp Helper, select a game, press **Port**.
 
