@@ -141,6 +141,8 @@ ROUTES = {
     "il2cpp": "Route C - Unity: rebuild a matching-version Unity iOS player around the game's data; "
               "Mono assemblies can be AOT-converted with IL2CPP. Hard, version-specific.",
     "missing": "Nothing to port: the bundle has no executable code (a launcher shortcut, or the game is not installed).",
+    "air": "Route C - Adobe AIR: the game's SWFs on the iOS AIR runtime (AIR SDK), with iOS stand-ins for its "
+           "native extensions (recomp.py air).",
     "none": "No generic route: needs source code or the developer's iOS build.",
 }
 
@@ -157,7 +159,9 @@ def recommend(engine, all_archs, mac_only):
         return ["il2cpp", "retarget"] if has_arm else ["il2cpp"]
     if engine.startswith("FNA"):
         return ["runtime"]
-    if engine in ("Java", "Adobe AIR", "Wine wrapper (not native)", "GameMaker"):
+    if engine == "Adobe AIR":
+        return ["air"]
+    if engine in ("Java", "Wine wrapper (not native)", "GameMaker"):
         return ["none"]
     if engine == "Unreal":
         return ["retarget"] if has_arm else ["none"]

@@ -34,6 +34,9 @@ HINTS = [
      "Unity has no license on this Mac: open Unity Hub once, sign in and add a free Personal license, then retry."),
     (r"No Account for Team|No signing certificate|requires a development team|No profiles for",
      "Xcode could not sign the app: sign in to your developer account in Xcode > Settings > Accounts, then retry."),
+    (r"PLA Update available|agree to the latest Program License Agreement",
+     "Apple wants you to accept its latest Program License Agreement first: sign in at developer.apple.com/account, "
+     "accept it, then retry (until then Xcode cannot make the app's provisioning profile)."),
     (r"doesn't include the .*entitlement|entitlement.*(not supported|could not be included)",
      "Your App ID is missing a capability: let Xcode's automatic signing update it by retrying with your account signed in."),
     (r"(\d+) bytes needed, (\d+) bytes available|Insufficient storage",

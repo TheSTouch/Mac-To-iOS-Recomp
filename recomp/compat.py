@@ -6,7 +6,8 @@
   needs_work  the route applies, but something here is known to stop it or to need a profile
 
 The Unity checks mirror what unity_ios.py does with a game; the Unreal check runs
-unreal_ios.py's import binding as a dry run (cached, since it reads the whole binary).
+unreal_ios.py's import binding as a dry run (cached, since it reads the whole binary);
+the AIR check looks for an iOS stand-in of each native extension (air_ios.py).
 Each check returns (status, detail, checks): checks are the lines the app lists
 under Compatibility.
 """
@@ -19,7 +20,7 @@ import re
 import subprocess
 import sys
 
-from recomp import iossdk, paths, unity_ios, unreal_ios
+from recomp import air_ios, iossdk, paths, unity_ios, unreal_ios
 
 PROFILES = os.path.join(paths.CODE, "recomp", "profiles")
 CACHE = os.path.join(paths.HOME, "cache")
@@ -223,6 +224,31 @@ def unreal(report):
     return "untested", "Untested: Unreal Engine 4, arm64, every import binds on iOS. May work out of the box.", []
 
 
+# --- Adobe AIR ---------------------------------------------------------------------------
+
+def air(report):
+    """Every native extension the game ships needs a stand-in in recomp/native/air: the Mac ones
+    are Intel frameworks, and the rest of an AIR game (its SWFs) runs as it is."""
+    exts = air_ios.bundled_extensions(report["app"])
+    missing = sorted(e for e in exts if not air_ios.stand_in(e))
+    notes = []
+    if exts and not missing:
+        notes.append("Native extensions with iOS stand-ins (recomp/native/air): " + ", ".join(sorted(exts)) + ".")
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            air_ios.air_sdk()
+    except SystemExit:
+        notes.append("Porting needs the AIR SDK, which Recomp cannot download for you: get it with HARMAN's "
+                     "AIR SDK Manager (see the README).")
+    if missing:
+        return ("needs_work", "Adobe AIR: the route applies, but something here needs work first.",
+                ["Native extensions with no iOS stand-in yet (recomp/native/air/<id>.c): " + ", ".join(missing) + "."]
+                + notes)
+    return "untested", "Untested: Adobe AIR, every native extension has an iOS stand-in. May work out of the box.", notes
+
+
 def classify(report):
-    """(status, detail, checks) for a game the Unity (Mono) or Unreal (arm64) route handles."""
+    """(status, detail, checks) for a game the Unity (Mono), Unreal (arm64) or AIR route handles."""
+    if report["engine"] == "Adobe AIR":
+        return tested(report) or air(report)
     return tested(report) or (unity(report) if report["engine"] == "Unity" else unreal(report))

@@ -7,6 +7,9 @@
   recomp.py toolchain <Game.app> [--check]           fetch (or check for) the Unity editor + iOS support that game needs
   recomp.py unity <Game.app> [stages] [options]      Unity/Mono route (IL2CPP recompilation)
   recomp.py unreal <Game.app> [stages] [options]     Unreal Engine 4 route (arm64 binary retarget)
+  recomp.py air <Game.app> [stages] [options] [--interpreter]
+                                                     Adobe AIR route (the game's SWFs on the iOS AIR runtime);
+                                                     --interpreter packages fast, without ahead-of-time compiling
   recomp.py qt <App.app> [stages] [options] [--sim]  Qt 6 apps, games or not (arm64 retarget, Qt for iOS);
                                                      --sim builds for the iOS simulator on this Mac
   recomp.py saves <Game.app> --enable|--disable|--status|--sync [--json]
@@ -21,6 +24,7 @@
 Unity stages, in order (default: all): prepare player inject xcode install
 Unreal stages, in order (default: all): prepare xcode install
 Qt stages, in order (default: all): toolchain prepare xcode install
+AIR stages, in order (default: all): prepare package xcode install
 Options: --team TEAMID  --bundle-id ID  --device NAME|UDID  --work DIR  --unity DIR
          --saves icloud|off         for a game without Steam: its saves sync through iCloud Drive
                                     (recomp.py saves; the default when its profile has a saves
@@ -51,6 +55,7 @@ from recomp import events, paths, storage  # noqa: E402
 STAGES = ["prepare", "player", "inject", "xcode", "install"]
 UNREAL_STAGES = ["prepare", "xcode", "install"]
 QT_STAGES = ["toolchain", "prepare", "xcode", "install"]
+AIR_STAGES = ["prepare", "package", "xcode", "install"]
 
 
 def default_bundle_id(game, team):
@@ -300,6 +305,55 @@ def cmd_unreal(rest):
     return 0
 
 
+def cmd_air(rest):
+    from recomp import air_ios as u
+    p = argparse.ArgumentParser(prog="recomp.py air")
+    p.add_argument("app")
+    p.add_argument("stages", nargs="*")
+    p.add_argument("--team")
+    p.add_argument("--bundle-id")
+    p.add_argument("--device")
+    p.add_argument("--work")
+    p.add_argument("--interpreter", action="store_true",
+                   help="package for ADT's interpreter (minutes) instead of compiling ahead of time (an hour or more)")
+    a = p.parse_args(rest)
+    bad = [s for s in a.stages if s not in AIR_STAGES]
+    if bad:
+        p.error(f"unknown stage(s) {bad}; choose from {AIR_STAGES}")
+    game = u.Game(a.app)
+    work = os.path.abspath(a.work or os.path.join(paths.BUILD, game.slug))
+    os.makedirs(work, exist_ok=True)
+    bundle_id = a.bundle_id or default_bundle_id(game, a.team)
+    stages = a.stages or AIR_STAGES
+    if any(s in stages for s in ("package", "xcode")) and not a.team:
+        sys.exit("package and xcode need --team (see: recomp.py env)")
+    if "install" in stages and not a.device:
+        sys.exit("install needs --device (see: recomp.py env)")
+    if "install" in stages and stages != ["install"]:
+        storage.check_port(a.device, game.app)
+    u.log(f"{game.name}: Adobe AIR ({', '.join(game.extensions) or 'no extensions'}) -> {work}")
+    for s in AIR_STAGES:
+        if s not in stages:
+            continue
+        events.stage(s, "start")
+        try:
+            if s == "prepare":
+                u.prepare(game, work, bundle_id)
+            elif s == "package":
+                u.package(game, work, a.team, bundle_id, a.interpreter)
+            elif s == "xcode":
+                u.xcode(game, work, a.team, bundle_id)
+            elif s == "install":
+                u.install(work, a.device)
+        except BaseException as e:
+            events.stage(s, "failed")
+            if not isinstance(e, SystemExit):
+                traceback.print_exc()
+            raise
+        events.stage(s, "done")
+    return 0
+
+
 def cmd_saves(rest):
     from recomp import saves
     p = argparse.ArgumentParser(prog="recomp.py saves")
@@ -370,7 +424,8 @@ def cmd_mods(rest):
     return 0
 
 
-COMMANDS = {"mods": cmd_mods, "scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal, "qt": cmd_qt}
+COMMANDS = {"mods": cmd_mods, "scan": cmd_scan, "saves": cmd_saves, "env": cmd_env, "toolchain": cmd_toolchain, "unity": cmd_unity, "unreal": cmd_unreal, "qt": cmd_qt,
+            "air": cmd_air}
 
 
 def main():

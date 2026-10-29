@@ -85,6 +85,8 @@ def route_of(report):
         return "unity"
     if report["engine"] == "Unreal" and "arm64" in report["archs"]:
         return "unreal"
+    if report["engine"] == "Adobe AIR":
+        return "air"
     return None
 
 
@@ -101,7 +103,7 @@ def status_of(report):
         return "unsupported", "Intel-only: iOS forbids the JIT a translator would need.", []
     if engine in ("Godot", "RenPy", "LOVE", "Defold") or engine.startswith(("RPGMaker", "Electron")):
         return "planned", f"{engine}: planned engine-runtime route.", []
-    if engine in ("Java", "Adobe AIR", "Wine wrapper (not native)", "GameMaker"):
+    if engine in ("Java", "Wine wrapper (not native)", "GameMaker"):
         return "unsupported", f"{engine}: no generic route.", []
     return "planned", "Native Apple Silicon: planned binary retarget route.", []
 
@@ -143,18 +145,13 @@ def run(cmd):
         return ""
 
 
-def environment():
-    tools = {
-        "xcode": bool(run(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]).strip()),
-        "dotnet": shutil.which("dotnet") is not None or os.path.exists("/usr/local/share/dotnet/dotnet")
-                  or os.path.exists("/opt/homebrew/bin/dotnet"),
-        "python3": True,
-    }
+def signing_teams():
+    """[{id, identity, sha1}]: one Apple Development identity per team (the team is the certificate's OU)."""
     identities = []
     for line in run(["security", "find-identity", "-v", "-p", "codesigning"]).splitlines():
-        m = re.search(r'"(Apple Development: .+ \((\w+)\))"', line)
+        m = re.search(r'([0-9A-F]{40}) "(Apple Development: .+ \((\w+)\))"', line)
         if m:
-            identities.append({"name": m.group(1)})
+            identities.append({"name": m.group(2), "sha1": m.group(1)})
     teams = []
     for ident in identities:
         pem = run(["security", "find-certificate", "-c", ident["name"], "-p"])
@@ -162,7 +159,18 @@ def environment():
                               capture_output=True, text=True).stdout
         m = re.search(r"OU\s*=\s*(\w+)", subj)
         if m and m.group(1) not in [t["id"] for t in teams]:
-            teams.append({"id": m.group(1), "identity": ident["name"]})
+            teams.append({"id": m.group(1), "identity": ident["name"], "sha1": ident["sha1"]})
+    return teams
+
+
+def environment():
+    tools = {
+        "xcode": bool(run(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]).strip()),
+        "dotnet": shutil.which("dotnet") is not None or os.path.exists("/usr/local/share/dotnet/dotnet")
+                  or os.path.exists("/opt/homebrew/bin/dotnet"),
+        "python3": True,
+    }
+    teams = [{"id": t["id"], "identity": t["identity"]} for t in signing_teams()]
     devices = []
     out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "recomp-devices.json")
     run(["xcrun", "devicectl", "list", "devices", "--json-output", out])
