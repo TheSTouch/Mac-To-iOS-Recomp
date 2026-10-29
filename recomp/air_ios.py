@@ -380,8 +380,8 @@ def info_additions(game):
 
 
 def make_icon(game, work):
-    """The Mac icon in an asset catalog (Assets.car, its AppIcon) at the package's root, where
-    ADT takes it instead of its own (the AIR logo); None without an icon."""
+    """The Mac icon in an asset catalog (Assets.car: AppIcon and the launch screen's air_splash)
+    at the package's root, where ADT takes it instead of its own (the AIR logo); None without an icon."""
     icns = game_icon(game)
     base = os.path.join(work, "icon")
     shutil.rmtree(base, ignore_errors=True)
@@ -393,6 +393,14 @@ def make_icon(game, work):
     with open(os.path.join(catalog, "Contents.json"), "w") as f:
         json.dump({"info": {"author": "xcode", "version": 1}}, f)
     run([pyenv.python(), os.path.join(ROOT, "recomp", "appicon.py"), icns, os.path.join(catalog, "AppIcon.appiconset")])
+    # AIR's launch screen shows "air_splash" from the catalog, and without it AIR stops with
+    # "application packaging error": the icon's art stands in for the AIR logo.
+    splash = os.path.join(catalog, "air_splash.imageset")
+    os.makedirs(splash)
+    shutil.copy2(os.path.join(catalog, "AppIcon.appiconset", "AppIcon-1024.png"), os.path.join(splash, "air_splash.png"))
+    with open(os.path.join(splash, "Contents.json"), "w") as f:
+        json.dump({"images": [{"filename": "air_splash.png", "idiom": "universal"}],
+                   "info": {"author": "xcode", "version": 1}}, f)
     out = os.path.join(base, "car")
     os.makedirs(out)
     run(["xcrun", "actool", "--compile", out, "--platform", "iphoneos", "--minimum-deployment-target", "13.0",

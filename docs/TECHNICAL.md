@@ -285,7 +285,9 @@ extension for an iOS stand-in (`recomp/air_ios.py`):
    game's render mode, the iPad, file-sharing and controller keys, and the two memory
    entitlements. ADT refuses `UIStatusBarHidden`, `UISupportedInterfaceOrientations` and
    `MinimumOSVersion` in `InfoAdditions` (error 105) and `<data>` values in it. The Mac icon
-   becomes an `Assets.car` (actool) at the package's root, which ADT takes instead of its own.
+   becomes an `Assets.car` (actool) at the package's root, which ADT takes instead of its own. It
+   also holds `air_splash`, the image AIR's launch screen shows (the icon's art here): without it
+   AIR stops with "application packaging error".
 2. **package**: ADT `ipa-test`, which compiles the ActionScript ahead of time (about 25 minutes for
    Brawlhalla), or `ipa-test-interpreter` with `--interpreter` (about 2 minutes). It signs from
    the keychain (`-storetype KeychainStore`) with the team's Apple Development identity and needs
