@@ -1,7 +1,7 @@
 # How it works
 
 The [README](../README.md) says what the ports do and how to run them. This file covers how each route turns a
-Mac game into an iOS app, and the details behind controls, mods, saves and the Steam runtime.
+Mac game (or a Qt app) into an iOS app, and the details behind controls, mods, saves and the Steam runtime.
 
 ## Routes
 
@@ -11,6 +11,7 @@ Mac game into an iOS app, and the details behind controls, mods, saves and the S
 |---|---|---|
 | **Unity / Mono** (implemented) | Unity games whose `Data/Managed` holds .NET assemblies | Recompile the game's assemblies to native ARM64 code with the matching Unity version's IL2CPP, then run the game's own data on Unity's iOS player |
 | **Unreal** (implemented) | Unreal Engine 4 games built for Apple Silicon | Re-mark the game's own arm64 binaries as iOS and bind what iOS lacks (AppKit, Mac display and audio APIs) to a shim library |
+| **Qt** (implemented) | Mac apps built with Qt 6.5.5 for Apple Silicon | Retarget the app's own arm64 binaries, run them on an iOS build of the same Qt, desktop OpenGL on gl4es |
 | Mach-O retarget (planned) | Other native arm64 games (custom engines) | Same retargeting, with shims for what each engine uses |
 | Engine runtime swap (planned) | Godot, Ren'Py, LÖVE, HTML5 | Run the game's data on the engine's iOS runtime |
 | Static recompilation | Intel-only games | Per-game project; iPadOS forbids JIT, so no Rosetta-style translation |
@@ -180,6 +181,83 @@ Debugging: shipping builds log almost nothing, but Mac game binaries usually kee
 - `xcrun lldb` can attach to the game on the device (`device select <UDID>`, `device process attach
   -p <pid>` after a `devicectl ... launch --start-stopped`); give it ~20 s to load symbols;
 - `tools/xref.py` finds the code that uses a string or address.
+
+## Qt route
+
+```
+python3 recomp.py qt <App.app> --team <TEAMID> --device <iPad name or UDID>
+python3 recomp.py qt <App.app> --sim          # iOS simulator on this Mac, for lldb
+```
+
+Stages (run all, or name some): `toolchain prepare xcode install`. Not in Recomp Helper yet.
+
+A Qt app's own code and libraries are arm64 already. What ties them to macOS is Qt's Cocoa platform
+plugin, desktop OpenGL and a handful of system calls, so the route swaps Qt and OpenGL underneath and
+retargets the rest (`recomp/qt_ios.py`):
+
+1. **toolchain**: Qt `<version>` (read from the app's `QtCore` link) built for iOS from Qt's source,
+   once per version and SDK, under `toolchain/qt-<version>/`: a macOS build first (moc, rcc, qsb),
+   then qtbase, qtshadertools, qtsvg, qt5compat and qtmultimedia for `iphoneos` or `iphonesimulator`.
+   Configured like a Mac build so the app's imports match: **shared frameworks** (Qt builds iOS
+   statically by default), **desktop OpenGL**, D-Bus, QProcess and QPrinter on. Every Qt symbol a Mac
+   app imports then exists. `recomp/patches/qt-<version>-ios.patch` makes that build work and run:
+   - shared frameworks on iOS; no AGL (gone from the macOS 26 SDK);
+   - **start-up**: Qt for iOS expects to own `main()` (`qt_main_wrapper` starts UIKit, then calls the
+     app's `main`). A Mac app's `main` runs first and creates `QApplication` itself, so when the iOS
+     plugin is created with UIKit not running, it calls `UIApplicationMain` there and `longjmp`s back
+     into its constructor once UIKit has launched; `exec()` then runs nested in UIKit's run loop;
+   - the iOS context makes each EAGL context's GL calls go through gl4es (below), with one gl4es state
+     per context, and resolves functions through it;
+   - **windows**: iOS has no window management, so main windows (`Qt::Window`) stay maximized
+     whatever size the app restores, other windows are kept on screen, and the screen is the app's
+     own `UIWindow` when that is smaller than the display (iPadOS 26 runs apps in resizable windows
+     and ignores `UIRequiresFullScreen`);
+   - **keyboard**: it follows focus only, so a tap on the focused text input brings it back once
+     the user has hidden it; on iPad a hide-keyboard button is added at the right of its shortcuts bar.
+2. **prepare**: every Mach-O of the bundle except Qt's own is thinned to arm64 and marked as iOS. Mac
+   Qt apps' binaries bind their imports with dyld-info opcodes, by **library slot**, so each keeps its
+   library list slot for slot (`macho.py` `bound_imports()` reads which symbols come through which
+   slot): a Qt framework becomes `@rpath/QtX.framework/QtX`, a bundled library `@rpath/<name>`, a
+   system library its iOS path when that exports everything the slot imports. A slot whose symbols
+   iOS lacks goes to **`RecompQt.dylib`**, built per app from `recomp/native/qt/`: it re-exports the
+   iOS libraries it stands in for and adds what is missing (a `dlopen` that loads the app's
+   `OpenGL.framework` for any path to the Mac one, `syslog$DARWIN_EXTSN`, Apple-event and collation
+   stubs), then a generated "return 0" stub for anything else. dyld refuses a library listed twice,
+   so slots sharing one are spelled `@rpath/./X`, `@rpath/././X`, same file. The iOS Qt frameworks
+   the app and its plugins need, Qt's iOS plugins and a `qt.conf` go next to them.
+3. **xcode** and **install**: as for the Unreal route; the Mac bundle's `Contents/Resources` goes in
+   as `MacResources/`. A profile can patch the executable (`patches`) and resource files
+   (`resource_patches`: text find/replace), matched on `bundle_id`.
+
+**OpenGL** (`recomp/ios_opengl.py`): iOS has no desktop OpenGL. The port's `OpenGL.framework` is
+[gl4es](https://github.com/ptitSeb/gl4es) v1.1.6 (desktop OpenGL 2.1 on OpenGL ES 2) and GLU, with
+every name gl4es serves exported under its desktop name (an ld64 alias list made from gl4es's own
+lookup table), plus CGL and `NSOpenGLContext` stubs that fail cleanly. Qt's QOpenGLWidget, the app's
+GL loader (GLAD and the like `dlopen` the framework) and GLU all use the same instance.
+`recomp/patches/gl4es-ios.patch`: no symbol aliases in Mach-O, and the bound GLSL and ARB programs
+are kept per context (gl4es shared them between shared contexts, so Qt's compositing shader drew the
+app's meshes). Old ARB assembly programs are hidden (`LIBGL_NOARBPROGRAM`), so apps take their GLSL
+or fixed-pipeline paths. GLSL 1.20 shaders the app ships must also be valid GLSL ES: no implicit
+int-to-float conversion, no `smoothstep(e, e, x)`; fix those with `resource_patches`.
+
+**Window sizes**: a QWidget main window's minimum size is the sum of its contents (a few docks open
+is wider than an 11-inch iPad), and it grows the window back to it. `RecompQtWindows.mm` in the shim
+stops top-level layouts enforcing their minimum, so the contents squeeze into the screen.
+
+**Debugging**: in the simulator, `xcrun simctl launch --wait-for-debugger` then lldb. On a device and
+in the simulator, files dropped into the app's `Documents` (`devicectl device copy to --domain-type
+appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
+
+| File | Content | Result |
+|---|---|---|
+| `recomp-actions` | empty | `recomp-actions.txt`: every QAction, object name and text |
+| `recomp-action` | an action's object name or text | triggers it |
+| `recomp-text` | empty | `recomp-text.txt`: the text of every visible text view |
+| `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
+| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes in the log |
+
+`LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
+show gl4es's shader conversions and errors.
 
 ## On-screen gamepad
 
@@ -486,7 +564,10 @@ stays on your machine.
 - `recomp/unreal_ios.py`: Unreal route; `recomp/macho.py`: Mach-O retargeting; `recomp/iossdk.py`: what
   the iOS SDK exports; `recomp/xcodeproj.py`: minimal Xcode project
 - `recomp/native/appkit/`: the shim for retargeted Mac binaries
-- `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game rules (both routes)
+- `recomp/qt_ios.py`: Qt route (toolchain, prepare, xcode, install); `recomp/native/qt/`: its per-app
+  shim, window fitting and test hooks; `recomp/ios_opengl.py`, `recomp/native/opengl/`: the iOS
+  `OpenGL.framework` (gl4es and GLU); `recomp/patches/`: the Qt and gl4es patches
+- `recomp/il2cpp_patches.py`: libil2cpp patches; `recomp/profiles/`: per-game and per-app rules (all routes)
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
   native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, `RecompLicense.m`, the
   iOS side of the Steam license check, `RecompLog.m`, the log file; `recomp/native/RecompSteam/`:
@@ -500,4 +581,4 @@ stays on your machine.
 - `docs/TECHNICAL.md`: this file
 - `stubs/`: hand-written native stub overrides
 - `tools/inspect_app.py`: triage; `tools/xref.py`: find code using a string; `tools/asmtool`: assembly scan/rewrite and Harmony weaving (Mono.Cecil); `tools/ilspy.sh`: decompiler
-- `toolchain/`, `build/`: downloaded editors and per-game work (not in git)
+- `toolchain/`, `build/`: downloaded editors, Qt and gl4es sources and builds, per-game work (not in git)

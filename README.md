@@ -8,7 +8,7 @@ on your device.
 > share the app. Ports of Steam games play only after you sign in with a Steam account that owns the
 > game.
 
-[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md)
+[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Mac apps](#mac-apps) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md)
 
 ## Steam in your ports
 
@@ -160,6 +160,9 @@ python3 recomp.py unity  /path/to/Game.app --team <TEAMID> --device "<iPad name>
 # Unreal game
 python3 recomp.py unreal /path/to/Game.app --team <TEAMID> --device "<iPad name>"
 
+# Qt app (see Mac apps below); --sim builds for the iOS simulator instead
+python3 recomp.py qt /path/to/App.app --team <TEAMID> --device "<iPad name>"
+
 python3 recomp.py mods  /path/to/Game.app           # which mods go into the next port
 python3 recomp.py saves /path/to/Game.app --enable  # games without Steam: share saves through iCloud Drive
 ```
@@ -201,12 +204,43 @@ Set `RECOMP_HOME` to keep the large files (Unity editors, builds) on another dis
 Passing the checks is a good sign, not a promise: memory, shaders and input only show on the device.
 What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility-checks).
 
+## Mac apps
+
+Apps, not only games, can be ported when they are built with **Qt 6**, the cross-platform toolkit
+many Mac apps for CAD, science, electronics and 3D printing use. The port keeps the app's own Mac
+code and libraries and runs them on an iOS build of the same Qt version, made from source the
+first time (about an hour). From the command line only for now: `recomp.py qt` (Getting started).
+
+**What works:** the app's windows, menus, docks, dialogs and text editors; desktop OpenGL views,
+run on the device's OpenGL ES; the virtual keyboard (a tap on a text field brings it back once
+hidden, and a hide-keyboard button sits at the right of its top bar on iPad); rotation and
+iPadOS's resizable windows: the main window always fills the space it has.
+
+**What an app needs:**
+
+- an Apple silicon (arm64) build, with Qt as frameworks inside the app (`Contents/Frameworks/Qt*.framework`),
+  as most Mac Qt apps ship;
+- Qt 6.5.5 for now: each Qt version needs the port's Qt patches carried over;
+- Qt modules the port builds: Core, Gui, Widgets, OpenGL, Network, Svg, Multimedia, PrintSupport,
+  D-Bus, Concurrent and Qt5Compat. Apps on Qt Quick (QML) need more; apps on Qt WebEngine cannot
+  work, since iOS allows no browser engine but WebKit.
+
+**Limits:** iOS lets an app start no other program, so features that run helper tools or compilers
+do nothing. Touch acts as a mouse: a tap is a click, a drag a mouse drag; there is no hover. Desktop
+layouts made for big screens are tight on an iPad: close the docks you do not need. Some apps need
+small per-app fixes, in a profile, like the games.
+
+For open-source apps, a real iOS build from the app's source code will usually do better: this route
+is for using what is installed on your Mac as it is.
+
 ## Roadmap
 
 ### Engines
 - [x] Unity games built with Mono, recompiled to native code with IL2CPP
 - [x] Unreal Engine 4 games for Apple silicon, retargeted to iOS
 - [ ] Other native Apple silicon games (custom engines): the same retargeting, with shims per engine
+- [x] Mac apps built with Qt 6.5.5, retargeted onto an iOS build of Qt
+- [ ] Other Qt 6 versions; Qt Quick (QML) apps; Qt apps in Recomp Helper's list
 - [ ] Godot, Ren'Py, LÖVE and HTML5 games, on each engine's iOS runtime
 - [ ] Intel-only games, by static recompilation, one game at a time
 
@@ -269,7 +303,7 @@ What each check looks at: [Compatibility checks](docs/TECHNICAL.md#compatibility
 
 ## More
 
-- **[How it works](docs/TECHNICAL.md):** the Unity and Unreal routes, game profiles, touch controls in
+- **[How it works](docs/TECHNICAL.md):** the Unity, Unreal and Qt routes, game profiles, touch controls in
   detail, mods, save sync rules, the Steam runtime, debugging on the device and building the app.
 - **Contributing:** this repository is public. Never commit game files or personal details; see
   [Contributing](docs/TECHNICAL.md#contributing) for the commit guard.
