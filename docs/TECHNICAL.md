@@ -341,8 +341,8 @@ app stops when devicectl does), except those called every frame.
   would mean patching the game's ActionScript.
 - **Version**: after the Steam login, Blue Mammoth's server answers that the version is not the
   latest (the Mac install is current); most likely the game reports itself as the iOS client when
-  AIR says iOS. **Stay offline** reaches the menus.
-- **Input**: no touch controls; a controller is required, not tried yet.
+  AIR says iOS. With **Stay offline** the game plays: training and local matches against bots.
+- **Input**: no touch controls. Keyboard and mouse play as on the Mac; a controller is not tried yet.
 
 ## On-screen gamepad
 

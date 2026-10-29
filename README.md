@@ -40,7 +40,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
 | [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4, at 30 frames/s |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, online play | ✅ Playable |
-| [Brawlhalla](https://store.steampowered.com/app/291550/Brawlhalla/) (Steam build 25942757) | Adobe AIR 32 | 🟡 Early testing: Steam sign-in and the menus; no match played yet | Not tried |
+| [Brawlhalla](https://store.steampowered.com/app/291550/Brawlhalla/) (Steam build 25942757) | Adobe AIR 32 | ✅ Playable offline, keyboard and mouse | Not tried |
 
 ### Timberborn
 
@@ -114,6 +114,8 @@ food and health); online play and Steam Cloud are tested on the iPad, not yet on
 
 ### Brawlhalla
 
+<img src="docs/images/brawlhalla-ipad.jpg" width="480" alt="Brawlhalla's training mode character select on an iPad">
+
 The first game on the [AIR route](docs/TECHNICAL.md#air-route): the game's own ActionScript runs on
 Adobe AIR's iOS runtime. From the command line only for now.
 
@@ -121,9 +123,10 @@ Adobe AIR's iOS runtime. From the command line only for now.
 |---|---|
 | **App size** | 1.4 GB (1.7 GB compiled ahead of time) |
 | **Screen** | Landscape |
-| **Touch** | Acts as the mouse in menus; there are no touch controls, so a match needs a controller |
-| **Controller** | Required, not tried yet |
-| **Steam** | Sign-in, license check and the game's Steam login (an encrypted app ticket). Blue Mammoth's server then says the game is not the latest version; **Stay offline** reaches the main menu |
+| **Touch** | Acts as the mouse in menus; no touch controls, so a match needs a keyboard or a controller |
+| **Keyboard, mouse** | ✅ Matches played, as on the Mac |
+| **Controller** | Not tried yet; expected to work through the game's own controller support |
+| **Steam** | Sign-in, license check and the game's Steam login (an encrypted app ticket). Blue Mammoth's server then says the game is not the latest version, so it is played offline (**Stay offline**): training and local matches against bots |
 | **Sound** | Silent for now: the game asks for its Wwise sound banks under `audio/pc` on iOS, the Mac build ships `audio/mac`, and the sound engine is a silent stand-in |
 | **Speed** | Built for AIR's interpreter (`--interpreter`). The ahead-of-time build stops on its loading screen: the game loads its art SWFs from bytes, which AIR cannot run when compiled ahead of time |
 

@@ -1,0 +1,5 @@
+{
+  "air_id": "BrawlhallaAir",
+  "tested": "playable on iPad with keyboard and mouse, offline (Steam build 25942757, AIR interpreter).",
+  "why": "nothing to change in the game yet: its three native extensions have stand-ins in recomp/native/air. Blue Mammoth's server answers that the version is not the latest after the Steam login, so the game is played offline; the ahead-of-time build stops on its loading screen (the game loads its art SWFs with Loader.loadBytes)."
+}

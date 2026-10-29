@@ -58,11 +58,24 @@ def profile_of(report):
             hit = os.path.exists(os.path.join(contents, "Resources", "Data", "Managed", p["when_assembly"]))
         elif report["engine"] == "Unreal" and p.get("unreal_project"):
             hit = os.path.isdir(os.path.join(contents, "UE4", p["unreal_project"]))
+        elif report["engine"] == "Adobe AIR" and p.get("air_id"):
+            hit = air_id(report["app"]) == p["air_id"]
         else:
             hit = False
         if hit:
             return p
     return None
+
+
+def air_id(app):
+    """The <id> of an AIR app's descriptor (META-INF/AIR/application.xml), or None."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(os.path.join(app, "Contents", "Resources", "META-INF", "AIR", "application.xml")).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    el = next((e for e in root if e.tag.split("}")[-1] == "id"), None)
+    return el.text.strip() if el is not None and el.text else None
 
 
 def tested(report):
