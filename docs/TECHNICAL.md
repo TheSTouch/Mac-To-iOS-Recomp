@@ -231,7 +231,8 @@ retargets the rest (`recomp/qt_ios.py`):
    the app and its plugins need, Qt's iOS plugins and a `qt.conf` go next to them.
 3. **xcode** and **install**: as for the Unreal route; the Mac bundle's `Contents/Resources` goes in
    as `MacResources/`. A profile can patch the executable (`patches`) and resource files
-   (`resource_patches`: text find/replace), matched on `bundle_id`.
+   (`resource_patches`: text find/replace), matched on `bundle_id`, and pin the app's light or
+   dark mode (`appearance`, see **Light and dark mode** below).
 
 **OpenGL** (`recomp/ios_opengl.py`): iOS has no desktop OpenGL. The port's `OpenGL.framework` is
 [gl4es](https://github.com/ptitSeb/gl4es) v1.1.6 (desktop OpenGL 2.1 on OpenGL ES 2) and GLU, with
@@ -256,6 +257,31 @@ separators, 44 pt shortest scroll-bar slider. Drawing stays the app style's. Tex
 least 15 pt, except in text editors (`QPlainTextEdit`, `QTextEdit`, QScintilla), which keep the app's
 or the user's size, and a press must move 12 pt before it starts a drag.
 
+**Touch scrolling**: a finger reaches a QWidget app as the mouse events Qt makes of a touch, so a
+drag in a list or a text view would select. `RecompQtScroll.mm` makes a one-finger drag inside any
+`QAbstractScrollArea` viewport with something to scroll (item views, text views, `QScrollArea`,
+QScintilla) move the content, with momentum and a small bounce at the ends (a `QScroller` per
+viewport fed from an event filter on qApp; mouse and trackpad are left alone). The press is held
+back until it is clear what it is: released without moving, it is a tap and reaches the widget;
+past the drag distance it scrolls and the widget never sees it; a drag the area cannot follow goes
+to the widget. A press held still for 500 ms goes to the widget, so hold-then-drag selects text or
+drags items, and a double tap still selects a word. Sliders and splitter handles keep their drag;
+scroll bars (outside the viewport) stay 18 pt and draggable. Menus are left out (under Fusion a
+menu taller than the screen wraps into columns).
+
+**Light and dark mode**: the app follows the device's mode, and switches
+live. A profile's `"appearance": "light"` or `"dark"` (default `"system"`) puts
+`UIUserInterfaceStyle` in that app's Info.plist, for an app whose own colours only work in one
+mode. Qt's iOS theme palette is only half dark: it starts from Fusion's palette for the scheme Qt
+saw at start-up, before UIKit has a window (light), and gives the Active group's text roles iOS's
+colours only, so inactive text (item views without focus draw as inactive) stayed black on black.
+`RecompQtAppearance.mm` builds the application palette whole from iOS's system colours resolved for
+the current scheme, every role in every group, at start-up and on each change. Widgets under a
+style sheet keep a copy of the palette they were polished with, and Qt does not pass a parent's
+palette on to them, so after each change every window is walked parents first: those the sheet
+gave colours are polished again, the others resolve again. An app that sets its own application
+palette keeps it. Colours the app draws itself (an editor's colour scheme, a 3D view) are its own.
+
 **Dock drawers**: around a main window's central widget, docks leave little of it on an 11-inch
 iPad. `RecompQtDrawers.mm`, for any `QMainWindow`, puts handles on the central widget, kept clear
 of toolbars that run along its edges:
@@ -263,7 +289,9 @@ of toolbars that run along its edges:
   the next brings back the ones that were open; a dock the app opens itself opens its drawer.
   Open or closed is saved per area in the app's `QSettings` (`recomp/drawers/right`,
   `recomp/drawers/bottom`, the hidden docks under `recomp/drawerDocks/<area>`) and applied once the
-  app has restored its own layout. First launch: both closed;
+  app has restored its own layout. First launch: both closed, and the docks the app's own layout
+  had open are saved as what each drawer's first tap brings back. Settings survive an install
+  over the app; only deleting it starts again from both closed;
 - left edge, while docks are open there: a grip that resizes them by dragging; a tap switches
   between an even split with the central widget and the width before it;
 - top-right corner: the central widget alone. Every dock and the window's own toolbars hide, and
@@ -280,8 +308,10 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-text` | empty | `recomp-text.txt`: the text of every visible text view |
 | `recomp-type` | the text | types it into the focused widget, as the keyboard commits text |
 | `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
+| `recomp-swipe` | `x1 y1 x2 y2 ms [hold]` per line, screen points | a one-finger touch through Qt's touch input, as the iOS plugin sends it: held `hold` ms, then moved to the end over `ms`; each line starts as the one before ends (a double tap is two 0 ms lines) |
 | `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes, and each GL view's depth and stencil bits, in the log |
 | `recomp-drawers` | empty | in the log: each dock drawer, open or closed, its handle's screen rectangle (for `recomp-click`) and its docks; the left grip, the central-widget button and the left docks' width (`RecompQtDrawers.mm`) |
+| `recomp-appearance` | empty | in the log: the colour scheme, the application palette per group, and each visible label, button and item view's text and background colours, with whether it has its own palette or a style sheet (`RecompQtAppearance.mm`) |
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
