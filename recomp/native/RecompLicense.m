@@ -230,6 +230,10 @@ typedef NS_ENUM(NSInteger, RLMode) { RLChecking, RLQR, RLPassword, RLGuard, RLNo
 @property (nonatomic) BOOL launchCheck;                // the launch check within the grace period is on screen
 @property (nonatomic, strong) NSDictionary *elsewhereTokens;   // the sign-in "Play here" logs on with
 @property (nonatomic) BOOL elsewhereVerified;          // the license was checked within the grace period
+@property (nonatomic) BOOL elsewhereDismissed;         // "without Steam" chosen: not asked again until Steam is back
+@property (nonatomic) BOOL watching;                   // watchPlaying runs
+@property (nonatomic) BOOL wasLoggedOn;                // the session was logged on at watchPlaying's last look
+@property (nonatomic, strong) UIWindow *noteWindow;    // the note shown by -note:, while it shows
 @end
 
 static RecompLicenseGate *gGate;
@@ -375,7 +379,7 @@ static void PauseGame(BOOL pause) {
     dispatch_once(&once, ^{ unityPause = (UnityPauseFn)dlsym(RTLD_DEFAULT, "RecompUnityPause"); });
     if (!unityPause || paused == pause) return;
     paused = pause;
-    LLOG(@"%@ the game while the player signs in", pause ? @"pausing" : @"resuming");
+    LLOG(@"%@ the game under the cover", pause ? @"pausing" : @"resuming");
     unityPause(pause ? 1 : 0);
 }
 
@@ -483,8 +487,94 @@ static void WhenUnblocked(double seconds, dispatch_block_t done) {
     });
 }
 
+// A short note at the top of the screen over the game, gone after a few seconds; touches go
+// through it to the game.
+- (void)note:(NSString *)text {
+    UIWindowScene *scene = GameWindow().windowScene;
+    UIWindow *w = scene ? [[UIWindow alloc] initWithWindowScene:scene] : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    w.windowLevel = UIWindowLevelAlert + 5;
+    w.userInteractionEnabled = NO;
+    w.backgroundColor = UIColor.clearColor;
+    UIViewController *vc = RL_AUTORELEASE([[UIViewController alloc] init]);
+    vc.view.backgroundColor = UIColor.clearColor;
+    vc.view.userInteractionEnabled = NO;
+    w.rootViewController = vc;
+    UILabel *label = RL_AUTORELEASE([[UILabel alloc] init]);
+    label.text = [NSString stringWithFormat:@"   %@   ", text];   // room around the text inside the rounded label
+    label.numberOfLines = 0;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = UIColor.whiteColor;
+    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    label.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
+    label.layer.cornerRadius = 12;
+    label.layer.masksToBounds = YES;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [vc.view addSubview:label];
+    UILayoutGuide *safe = vc.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
+        [label.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [label.widthAnchor constraintLessThanOrEqualToAnchor:safe.widthAnchor multiplier:0.9],
+        [label.widthAnchor constraintLessThanOrEqualToConstant:560],
+        [label.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+    ]];
+    self.noteWindow = RL_AUTORELEASE(w);
+    w.hidden = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        w.hidden = YES;
+        if (self.noteWindow == w) self.noteWindow = nil;
+    });
+}
+
 - (void)tapAway {
+    self.elsewhereDismissed = YES;
     [self uncover];
+}
+
+// While the game runs: another device started playing (or took the game with its own Play
+// here), so Steam logged this session off and says the account plays elsewhere. The player
+// chooses again, as at launch; after "without Steam" only once Steam is back here and the
+// other device plays again. Deny's retries keep the session trying every two minutes, and it
+// gets Steam back on its own once the other game ends.
+//
+// Steam logs the session off (LoggedInElsewhere) without saying the account plays elsewhere,
+// and Kettle does not tell why a session ended; the next logon would, two minutes later. So a
+// session lost while the game runs logs on again at once: Steam then says whether the account
+// plays elsewhere (and logs it off again for claiming the game). After a network loss that
+// logon just fails, as the retry would have.
+- (void)watchPlaying {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [self watchPlaying]; });
+    uint32_t app = 0;
+    BOOL blocked = RecompSteam_PlayingBlocked(&app);
+    BOOL loggedOn = RecompSteam_State() == RecompSteamLoggedOn;
+    BOOL lost = self.wasLoggedOn && !loggedOn;
+    self.wasLoggedOn = loggedOn;
+    if (loggedOn && !blocked && self.elsewhereDismissed) {
+        self.elsewhereDismissed = NO;
+        LLOG(@"back on Steam: the other device stopped playing");
+        [self note:@"Back on Steam: the other device stopped playing. Online play, achievements and cloud "
+                   @"saves work again."];
+    }
+    if (lost && !self.window && !self.elsewhereDismissed &&
+        RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow) {
+        NSDictionary *state = LoadState();
+        if (state) {
+            LLOG(@"the Steam session ended while playing: logging on again to ask Steam why");
+            RecompSteam_Stop();
+            RecompSteam_Start([state[@"refresh"] UTF8String], gAppId, DeviceName().UTF8String);
+        }
+        return;
+    }
+    if (self.window || self.elsewhereDismissed || loggedOn || !blocked ||
+        RecompSteam_ConcurrentPlay() == RecompSteamConcurrentPlayAllow)
+        return;
+    NSDictionary *state = LoadState();
+    if (!state) return;
+    NSTimeInterval age = NSDate.date.timeIntervalSince1970 - [state[@"verified"] doubleValue];
+    ++self.gen;
+    PauseGame(YES);
+    [self elsewhere:app tokens:state verified:age > -86400 && age < kGrace];
+    self.titleLabel.text = @"Your Steam account is now playing on another device";
 }
 
 // --- sign-in ---
@@ -892,6 +982,10 @@ static UILabel *Label(CGFloat size, UIFontWeight weight, UIColor *color) {
 - (void)uncover {
     self.launchCheck = NO;
     PauseGame(NO);
+    if (!self.watching) {
+        self.watching = YES;
+        [self watchPlaying];
+    }
     if (!self.window) return;
     [self.window endEditing:YES];
     self.window.hidden = YES;

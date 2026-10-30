@@ -616,6 +616,14 @@ shared with someone else, does not play without the game's license.
     claim, so Steam keeps the session), ends the other game, then goes back to deny, claims the
     game and checks the license. *Play without Steam* is offered only when the license was checked
     within the last 30 days.
+
+    While the game runs, the device whose game another device takes (with its own *Play here*)
+    gets the same choice: Steam logs its session off, the port logs on again at once to learn why
+    (Steam's logoff does not say), and a Unity game pauses under "Your Steam account is now playing
+    on another device". After *Play without Steam* the session keeps trying every two minutes;
+    once the other device stops, the game is back on Steam by itself and a note at the top says so
+    for a few seconds. The other app keeps running in every case: neither Steam nor a port can
+    close an app on another device.
   - `"allow"`: no cover; the game goes on with Steam (Cloud, achievements, tickets) without
     ending the other game, and the session does not tell Steam it plays here while the account
     plays elsewhere. Steam may still refuse some calls on its side, and this has not been tested

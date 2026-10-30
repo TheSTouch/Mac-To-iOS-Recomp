@@ -388,7 +388,8 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [ ] Achievements in Unreal games (Stray)
 - [ ] Friends list, invites, Steam overlay, Workshop
 - [x] Steam client core from [Kettle](https://github.com/TheSTouch/kettle), shared with other iOS games
-- [x] "Playing on another device" screen, with *Play here* ending the other device's game
+- [x] "Playing on another device" screen at launch and in game, with *Play here* or play without
+  Steam, and a note when Steam is back
 
 ### Mods
 - [x] Data mods, added any time through Files
