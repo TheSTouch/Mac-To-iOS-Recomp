@@ -17,6 +17,11 @@
 //   far=1e6    far plane (Unreal's is infinite)
 //   mv=1       factor on the motion vector scale the game gives the upscaler
 //   jitter=0   pass the upscaler's jitter (the color given here is already upscaled)
+//   bench=1    no frame generation: the game renders as fast as it can (fps=0 for no
+//              cap) and the screen shows the newest frame at each refresh, dropping
+//              the rest. The GPU stays fully busy at its full clock, so the frames
+//              rendered each second measure what settings cost; otherwise iOS lowers
+//              the GPU clock to the load and the time per frame hides any saving.
 //
 // How: while on, the game draws into stand-in drawables whose textures are this
 // file's (a ring of kRing), so it never waits for the screen's three drawables, and
@@ -39,8 +44,8 @@
 
 id<MTLCommandQueue> RecompGameQueue(void); // RecompMetal.m
 
-typedef struct { double fps, fov, nearZ, farZ, mv; BOOL jitter; } Settings;
-static const Settings kDefaults = {20, 50, 10, 1e6, 1, NO};
+typedef struct { double fps, fov, nearZ, farZ, mv; BOOL jitter, bench; } Settings;
+static const Settings kDefaults = {20, 50, 10, 1e6, 1, NO, NO};
 
 static os_unfair_lock gLock = OS_UNFAIR_LOCK_INIT;
 static Settings gSet;                  // under gLock
@@ -204,7 +209,9 @@ static void Generate(RFGDrawable *d);
 static double gNextAcquire;            // the render thread's
 
 static void Pace(void) {
-    double interval = 1 / CurrentSettings().fps, now = CACurrentMediaTime();
+    double fps = CurrentSettings().fps;
+    if (fps <= 0) return;
+    double interval = 1 / fps, now = CACurrentMediaTime();
     if (gNextAcquire > now && gNextAcquire - now < 1) usleep((useconds_t)((gNextAcquire - now) * 1e6));
     now = CACurrentMediaTime();
     gNextAcquire = (gNextAcquire > now - interval ? gNextAcquire : now) + interval;
@@ -281,7 +288,8 @@ static int gPrevSlot = -1;
 static id<MTLTexture> gPrevTexture;
 static id gInterpolator;
 static BOOL gInterpolatorFailed;
-static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed; double wait; } gStats;
+static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed, dropped; double wait; } gStats;
+static atomic_int gShowing;            // bench: frames presented and not yet on screen
 
 API_AVAILABLE(ios(26.0))
 static id<MTLFXFrameInterpolator> Interpolator(id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> motion) {
@@ -380,7 +388,16 @@ static void Generate(RFGDrawable *cur) {
     id<MTLCommandQueue> q = RecompGameQueue();
     Settings set = CurrentSettings();
     gStats.real++;
-    BOOL made = q && Between(cur, q, set);
+    BOOL bench = set.bench && atomic_load(&gOn);
+    if (bench && atomic_load(&gShowing) > 0) {
+        // The screen has a frame waiting already: this one is dropped.
+        gStats.dropped++;
+        if (gPrevSlot >= 0) dispatch_semaphore_signal(gRingFree);
+        gPrevSlot = cur->slot;
+        gPrevTexture = cur.texture;
+        return;
+    }
+    BOOL made = q && !bench && Between(cur, q, set);
     id<CAMetalDrawable> out = RealDrawable(cur.layer);
     if (q && out && out.texture.width == cur.texture.width && out.texture.height == cur.texture.height) {
         id<MTLCommandBuffer> cb = [q commandBuffer];
@@ -389,7 +406,9 @@ static void Generate(RFGDrawable *cur) {
         [b copyFromTexture:cur.texture toTexture:out.texture];
         [b endEncoding];
         double after = made ? 0.5 / set.fps : 0;
+        if (bench) atomic_fetch_add(&gShowing, 1);
         [out addPresentedHandler:^(id<MTLDrawable> d) {
+            if (bench) atomic_fetch_sub(&gShowing, 1);
             NSArray *handlers;
             @synchronized (cur) {
                 cur->presented = d.presentedTime;
@@ -422,7 +441,8 @@ static void Poll(void) {
         NSArray *kv = [word componentsSeparatedByString:@"="];
         if (kv.count != 2) continue;
         double v = [kv[1] doubleValue];
-        if ([kv[0] isEqualToString:@"fps"] && v >= 5) s.fps = v;
+        if ([kv[0] isEqualToString:@"fps"] && (v >= 5 || v == 0)) s.fps = v;
+        else if ([kv[0] isEqualToString:@"bench"]) s.bench = v != 0;
         else if ([kv[0] isEqualToString:@"fov"] && v > 0) s.fov = v;
         else if ([kv[0] isEqualToString:@"near"] && v > 0) s.nearZ = v;
         else if ([kv[0] isEqualToString:@"far"] && v > 0) s.farZ = v;
@@ -440,13 +460,19 @@ static void Poll(void) {
         atomic_store(&gOrderLen, 0);
     }
     atomic_store(&gOn, on);
-    if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d",
-                 s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter);
+    if (on && s.bench) RLOG(@"framegen: bench, newest frame shown at each refresh, cap %.0f frames/s (0: none)", s.fps);
+    else if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d",
+                      s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter);
     else RLOG(@"framegen: off");
 }
 
 static void Report(void) {
     if (!gStats.real) return;
+    if (CurrentSettings().bench) {
+        RLOG(@"framegen: bench: %.1f frames/s rendered, %.1f shown", gStats.real / 10.0, (gStats.real - gStats.dropped) / 10.0);
+        memset(&gStats, 0, sizeof gStats);
+        return;
+    }
     RLOG(@"framegen: %u frames rendered, %u made between (%.1f ms waiting for a drawable each); not made: %u without "
          @"upscaler inputs, %u history resets, %u without a previous frame, %u without a drawable, %u interpolator failures",
          gStats.real, gStats.made, gStats.made ? gStats.wait * 1000 / gStats.made : 0.0, gStats.noInputs, gStats.reset,
