@@ -451,6 +451,14 @@ cursor (in play); in menus touches act as the mouse, and a quick tap off the pad
 | bottom left / near the face buttons | L3 / R3 |
 | left edge, between LT and L3 | D-pad (Unreal ports): up, down, left, right; two arms held give a diagonal |
 
+In Unreal ports on a phone held sideways, the controls sit against the screen's side edges rather
+than the safe area's, using the space above and below the Dynamic Island (or notch). A control that
+would cover the island slides above or below it, none is cut off by the rounded corners, and the D-pad
+sits at mid height: right beside the island when the island is on the left, at the left edge otherwise.
+Menu and View move inward along the top, and LT and RT up into the corners, so the shoulder buttons
+have room above the island.
+No API gives the island's shape, so its size is guessed from the side safe inset.
+
 The key buttons (Unity ports) stay on screen with or without a controller.
 
 ## Touch controls (Recomp.TouchMouse)
