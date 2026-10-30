@@ -8,7 +8,7 @@ on your device.
 > share the app. Ports of Steam games play only after you sign in with a Steam account that owns the
 > game.
 
-[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Mac apps](#mac-apps) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md)
+[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Mac apps](#mac-apps) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md) · [Disclaimer](#disclaimer)
 
 ## Steam in your ports
 
@@ -289,6 +289,28 @@ small per-app fixes, in a profile, like the games.
 For open-source apps, a real iOS build from the app's source code will usually do better: this route
 is for using what is installed on your Mac as it is.
 
+### Optimized apps
+
+Most apps port as they are. A few also get a profile, as the games do: fixes and touch work made for
+that app, which the porting kit applies when it finds it. The port is still made from the copy
+installed on your Mac; this repository contains none of these apps.
+
+| App | Toolkit | iPad | iPhone |
+|---|---|---|---|
+| [OpenSCAD](https://openscad.org) 2025.07 nightly | Qt 6.5.5, OpenGL | 🚧 In progress | Not tried |
+
+#### OpenSCAD
+
+> **Unofficial port.** This port is not affiliated with or endorsed by the OpenSCAD project. Report
+> bugs in the iOS and iPadOS version [in this repository's issues](../../issues), never to OpenSCAD.
+> What you build is meant for your own devices: please don't share it, and never publish it on the
+> App Store or TestFlight. OpenSCAD is free software under the GPL, and your build stays under it.
+
+All the credit for OpenSCAD goes to its developers and contributors:
+[github.com/openscad/openscad](https://github.com/openscad/openscad). Mac to iOS Recomp is a
+porting kit that happens to include optimizations for some apps; it does not contain or distribute
+OpenSCAD.
+
 ## Roadmap
 
 ### Engines
@@ -356,6 +378,26 @@ is for using what is installed on your Mac as it is.
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
 - [x] Stray on iPhone: a sharper image (2× output instead of 1×, no screen-space reflections)
 - [ ] Stray on iPhone: no short freezes, no black screen, cooler over a long session
+
+## Disclaimer
+
+- **Unofficial ports.** Every app or game ported with this tool is an unofficial port. It is not
+  affiliated with, endorsed by or supported by the app's developer or publisher. Names and
+  trademarks belong to their owners and appear here only to say which software was tested.
+- **Their licenses still apply.** A ported app or game stays under its own license, EULA and terms
+  of service, and under those of the store it came from (Steam, for one). Porting it gives you no
+  right you did not already have. This repository's license covers the tool only.
+- **The porter is responsible.** Whoever runs the tool, "the porter", is solely responsible for what
+  they port, for making sure they are allowed to, and for any use they make of the result
+  afterwards, including sharing it, which most licenses forbid. That includes keeping to Apple's
+  terms for the developer account the port is signed with.
+- **No support.** Ports come with no support, neither from the original developers nor from this
+  project's author or contributors. The author may choose to optimize some apps or games, on their
+  own schedule; that is not a promise of support, fixes or updates.
+- **No warranty, no liability.** The tool and the ports it makes are provided "as is", without
+  warranty of any kind. To the fullest extent the law allows, the author and contributors are not
+  liable for any claim, damage or loss arising from them: lost data or saves, suspended or banned
+  accounts (Steam, Apple or any other), damaged devices, or legal claims from rights holders.
 
 ## More
 
