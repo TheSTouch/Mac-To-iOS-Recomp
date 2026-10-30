@@ -1,4 +1,5 @@
-// Light and dark mode for desktop Qt apps on iOS. The app follows the device's mode, live.
+// Light and dark mode for desktop Qt apps on iOS. The app follows the device's mode (or the
+// one its profile's "appearance" pins in the Info.plist, recomp/qt_ios.py), live.
 //
 // Qt's iOS theme gives the application a palette that is only half dark in dark mode: it
 // starts from Fusion's palette for the scheme Qt saw when it started (before UIKit had a

@@ -506,9 +506,17 @@ done
 PLACEHOLDER_MAIN = "// Replaced by the app's executable before signing (see the Bundle app phase).\nint main(void) { return 0; }\n"
 
 
+APPEARANCES = {"system": None, "light": "Light", "dark": "Dark"}
+
+
 def info_plist(app):
     info = app.info
-    return {
+    # The app follows the device's light or dark mode, unless its profile pins one for
+    # colours of its own that only work in that mode.
+    appearance = app.profile.get("appearance", "system")
+    if appearance not in APPEARANCES:
+        sys.exit(f'profile "appearance": {appearance!r}; choose from {", ".join(APPEARANCES)}')
+    plist = {
         "CFBundleDevelopmentRegion": "en",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
@@ -533,6 +541,9 @@ def info_plist(app):
         "LSSupportsOpeningDocumentsInPlace": True,
         "ITSAppUsesNonExemptEncryption": False,
     }
+    if APPEARANCES[appearance]:
+        plist["UIUserInterfaceStyle"] = APPEARANCES[appearance]
+    return plist
 
 
 def app_icon(app):
