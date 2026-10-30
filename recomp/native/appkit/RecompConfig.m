@@ -26,6 +26,16 @@
 // 1080 pile up (Stray's title menu became one line). Short side / 480 makes up
 // the difference.
 //
+// A file named recomp-ini in Documents lays test settings over all of these, for
+// trying engine settings with a relaunch instead of a rebuild:
+//   [Engine:SystemSettings]
+//   r.Shadow.CSM.MaxCascades=2
+//   [GameUserSettings:/Script/Hk_project.HKGameUserSettings]
+//   FrameRateLimit=0.000000
+// Its keys are written at every launch; a key taken out of it is taken out of the
+// game's .ini at the next launch (or set back to the profile's value), so a test
+// never lingers. Documents/recomp-ini.applied remembers which keys it wrote.
+//
 // "auto" for ResolutionSizeX/Y and LastUserConfirmedResolutionSizeX/Y is the
 // largest display mode the shim offers on this device (RecompDisplay.m), so a
 // profile can ask for the sharpest output without knowing the screen size.
@@ -103,6 +113,52 @@ static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sect
     if (!forced) [wrote writeToFile:sidecar atomically:YES];
 }
 
+// Documents/recomp-ini as {file name: {section: {key: value}}}.
+static NSDictionary *TestSettings(NSString *path) {
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    NSMutableDictionary *files = [NSMutableDictionary new];
+    NSMutableDictionary *keys;
+    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (!line.length || [line hasPrefix:@";"] || [line hasPrefix:@"#"]) continue;
+        if ([line hasPrefix:@"["] && [line hasSuffix:@"]"]) {
+            NSString *inner = [line substringWithRange:NSMakeRange(1, line.length - 2)];
+            NSRange colon = [inner rangeOfString:@":"];
+            keys = nil;
+            if (colon.location == NSNotFound) continue;
+            NSString *file = [inner substringToIndex:colon.location], *section = [inner substringFromIndex:colon.location + 1];
+            if (!files[file]) files[file] = [NSMutableDictionary new];
+            keys = files[file][section] ?: [NSMutableDictionary new];
+            files[file][section] = keys;
+            continue;
+        }
+        NSRange eq = [line rangeOfString:@"="];
+        if (keys && eq.location != NSNotFound && eq.location > 0)
+            keys[[line substringToIndex:eq.location]] = [line substringFromIndex:eq.location + 1];
+    }
+    return files;
+}
+
+// Takes the given keys ({section: [key]}) out of the .ini at path.
+static void RemoveKeys(NSString *path, NSDictionary<NSString *, NSArray *> *sections, NSMutableArray *removed) {
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    if (!text) return;
+    NSMutableArray<NSString *> *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
+    NSString *section = nil;
+    for (NSUInteger i = 0; i < lines.count;) {
+        NSString *line = lines[i];
+        if ([line hasPrefix:@"["]) section = [line substringWithRange:NSMakeRange(1, MAX(line.length, 2) - 2)];
+        NSRange eq = [line rangeOfString:@"="];
+        if (section && eq.location != NSNotFound && [sections[section] containsObject:[line substringToIndex:eq.location]]) {
+            [removed addObject:line];
+            [lines removeObjectAtIndex:i];
+            continue;
+        }
+        i++;
+    }
+    if (removed.count) [[lines componentsJoinedByString:@"\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
 __attribute__((constructor)) static void RecompConfigInit(void) {
     @autoreleasepool {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
@@ -116,19 +172,41 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         NSDictionary *phoneFiles = phone ? info[@"RecompIniOverridesPhone"] : nil;
         if (!dir) return;
         dir = [NSHomeDirectory() stringByAppendingPathComponent:dir];
+        NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *appliedPath = [docs stringByAppendingPathComponent:@"recomp-ini.applied"];
+        NSDictionary *tests = TestSettings([docs stringByAppendingPathComponent:@"recomp-ini"]);
+        NSDictionary *applied = [NSDictionary dictionaryWithContentsOfFile:appliedPath];
         NSMutableSet *names = [NSMutableSet setWithArray:[files allKeys]];
         [names addObjectsFromArray:[phoneFiles allKeys]];
+        [names addObjectsFromArray:[tests allKeys]];
+        [names addObjectsFromArray:[applied allKeys]];
         NSString *set = phoneFiles ? @"iPhone settings over the base" : @"base settings";
+        NSMutableDictionary *nowApplied = [NSMutableDictionary new];
         for (NSString *name in names) {
-            NSDictionary *sections = Overlay(files[name], phoneFiles[name]);
+            NSString *path = [dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]];
+            NSDictionary *profile = Overlay(files[name], phoneFiles[name]);
+            // Keys an earlier test wrote that neither the test nor the profile names now.
+            NSMutableDictionary *stale = [NSMutableDictionary new];
+            for (NSString *section in applied[name])
+                for (NSString *key in applied[name][section])
+                    if (!tests[name][section][key] && !profile[section][key])
+                        stale[section] = [(stale[section] ?: @[]) arrayByAddingObject:key];
+            NSMutableArray *removed = [NSMutableArray new];
+            RemoveKeys(path, stale, removed);
+            if (removed.count) RLOG(@"config: %@.ini: test settings taken out: %@", name, [removed componentsJoinedByString:@", "]);
+            NSMutableDictionary *testKeys = [NSMutableDictionary new];
+            for (NSString *section in tests[name]) testKeys[section] = [tests[name][section] allKeys];
+            if (testKeys.count) nowApplied[name] = testKeys;
+            NSDictionary *sections = Overlay(profile, tests[name]);
             if (![sections count]) continue;
-            BOOL forced = [name isEqualToString:@"Engine"];
+            BOOL forced = [name isEqualToString:@"Engine"] || tests[name];
             NSMutableArray *written = [NSMutableArray new], *kept = [NSMutableArray new];
-            Merge([dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]], sections, forced,
-                  written, kept);
+            Merge(path, sections, forced, written, kept);
             RLOG(@"config: %@.ini (%@): %@ %@%@%@", name, set, forced ? @"forced" : @"defaults written:",
                  written.count ? [written componentsJoinedByString:@", "] : @"none",
                  kept.count ? @"; left as the player set them: " : @"", [kept componentsJoinedByString:@", "]);
+            if (tests[name]) RLOG(@"config: %@.ini: test settings from Documents/recomp-ini: %@", name, tests[name]);
         }
+        [nowApplied writeToFile:appliedPath atomically:YES];
     }
 }
