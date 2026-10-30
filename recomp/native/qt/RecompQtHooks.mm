@@ -50,8 +50,10 @@ static QList<QAction *> allActions()
     return out;
 }
 
-// One touch point, as the iOS plugin fills it (QUIView handleTouches).
-static void sendTouch(QWindow *window, const QPointingDevice *device, QPointF global, QEventPoint::State state)
+// One touch point, as the iOS plugin fills it (QUIView handleTouches). The
+// timestamp is when the finger is there, in ms since boot like a UITouch's.
+static void sendTouch(QWindow *window, const QPointingDevice *device, QPointF global, QEventPoint::State state,
+                      qint64 timestamp)
 {
     QWindowSystemInterface::TouchPoint point;
     point.id = 1;
@@ -60,7 +62,8 @@ static void sendTouch(QWindow *window, const QPointingDevice *device, QPointF gl
     const QSizeF screen = window->screen()->geometry().size();
     point.normalPosition = QPointF(global.x() / screen.width(), global.y() / screen.height());
     point.pressure = state == QEventPoint::State::Released ? 0.0 : 1.0;
-    QWindowSystemInterface::handleTouchEvent<QWindowSystemInterface::AsynchronousDelivery>(window, device, {point});
+    QWindowSystemInterface::handleTouchEvent<QWindowSystemInterface::AsynchronousDelivery>(window, ulong(timestamp),
+                                                                                         device, {point});
 }
 
 static void swipe(QPointF from, QPointF to, int ms)
@@ -77,17 +80,21 @@ static void swipe(QPointF from, QPointF to, int ms)
     }
     fprintf(stderr, "[recomp] swipe %g,%g -> %g,%g over %d ms, starting on %s\n", from.x(), from.y(), to.x(), to.y(),
             ms, under->metaObject()->className());
-    sendTouch(window, device, from, QEventPoint::State::Pressed);
     QPointer<QWindow> target(window);
     auto *timer = new QTimer(QCoreApplication::instance());
     auto *clock = new QElapsedTimer;
     clock->start();
+    const qint64 start = clock->msecsSinceReference();
+    sendTouch(window, device, from, QEventPoint::State::Pressed, start);
     QObject::connect(timer, &QTimer::timeout, [=] {
-        const qint64 t = clock->elapsed();
-        const qreal f = ms > 0 ? qMin<qreal>(1, qreal(t) / ms) : 1;
+        // A busy event loop fires this late: the release is stamped when the
+        // move ends, so the touch keeps its speed to the end, as a flick does.
+        const qint64 t = qMin<qint64>(clock->elapsed(), ms);
+        const qreal f = ms > 0 ? qreal(t) / ms : 1;
         if (target) {
             const QPointF at = from + (to - from) * f;
-            sendTouch(target, device, at, f < 1 ? QEventPoint::State::Updated : QEventPoint::State::Released);
+            sendTouch(target, device, at, f < 1 ? QEventPoint::State::Updated : QEventPoint::State::Released,
+                      start + t);
         }
         if (f >= 1 || !target) {
             timer->stop();
