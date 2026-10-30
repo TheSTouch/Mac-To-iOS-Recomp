@@ -24,6 +24,11 @@
 //              the newest finished frame at each refresh, dropping the rest. The GPU stays fully busy at its full clock, so the frames
 //              rendered each second measure what settings cost; otherwise iOS lowers
 //              the GPU clock to the load and the time per frame hides any saving.
+//   pace=40    no frame generation: the screen is asked for 120 Hz and each frame the
+//              game presents stays on it at least 1/40 s, so a game held to 40 frames/s
+//              (its own frame rate limit) shows each one for exactly 3 refreshes. On an
+//              M1 iPad Pro, Stray uncapped runs 40-50 frames/s, which land on the
+//              refreshes unevenly.
 //
 // How: while on, the game draws into stand-in drawables whose textures are this
 // file's (a ring of kRing), so it never waits for the screen's three drawables, and
@@ -46,8 +51,8 @@
 
 id<MTLCommandQueue> RecompGameQueue(void); // RecompMetal.m
 
-typedef struct { double fps, fov, nearZ, farZ, mv; BOOL jitter, bench; } Settings;
-static const Settings kDefaults = {20, 50, 10, 1e6, 1, NO, NO};
+typedef struct { double fps, fov, nearZ, farZ, mv, pace; BOOL jitter, bench; } Settings;
+static const Settings kDefaults = {20, 50, 10, 1e6, 1, 0, NO, NO};
 
 static os_unfair_lock gLock = OS_UNFAIR_LOCK_INIT;
 static Settings gSet;                  // under gLock
@@ -347,11 +352,14 @@ static id FixNextDrawable(CAMetalLayer *self, SEL s) {
     return d;
 }
 
-// The game's real drawables, presented the usual way, are traced too.
+// The game's real drawables, presented the usual way, are traced too; with pace=N
+// (frame generation off) each stays on screen at least 1/N s.
 static IMP oPresent;
 static void FixPresent(id self, SEL s) {
     Trace('P');
-    ((void (*)(id, SEL))oPresent)(self, s);
+    double pace = atomic_load(&gOn) || tOurs ? 0 : CurrentSettings().pace;
+    if (pace > 0) [self presentAfterMinimumDuration:1 / pace];
+    else ((void (*)(id, SEL))oPresent)(self, s);
 }
 
 // Metal cannot present a stand-in through a command buffer: it becomes a present
@@ -585,10 +593,12 @@ static void Poll(void) {
         else if ([kv[0] isEqualToString:@"far"] && v > 0) s.farZ = v;
         else if ([kv[0] isEqualToString:@"mv"]) s.mv = v;
         else if ([kv[0] isEqualToString:@"jitter"]) s.jitter = v != 0;
+        else if ([kv[0] isEqualToString:@"pace"] && v >= 5) s.pace = v;
     }
+    if (s.pace) on = NO;
     Settings old = CurrentSettings();
     BOOL was = atomic_load(&gOn);
-    if (on == was && (!on || memcmp(&s, &old, sizeof s) == 0)) return;
+    if (on == was && memcmp(&s, &old, sizeof s) == 0) return;
     os_unfair_lock_lock(&gLock);
     gSet = s;
     os_unfair_lock_unlock(&gLock);
@@ -597,11 +607,12 @@ static void Poll(void) {
         atomic_store(&gOrderLen, 0);
     }
     atomic_store(&gOn, on);
-    double shown = on && !s.bench ? 2 * s.fps : 0;
+    double shown = on && !s.bench ? 2 * s.fps : s.pace;
     dispatch_async(dispatch_get_main_queue(), ^{ WantRate(shown); });
     if (on && s.bench) RLOG(@"framegen: bench, newest frame shown at each refresh, cap %.0f frames/s (0: none)", s.fps);
     else if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d",
                       s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter);
+    else if (s.pace) RLOG(@"framegen: off, each frame shown at least 1/%.0f s", s.pace);
     else RLOG(@"framegen: off");
 }
 
