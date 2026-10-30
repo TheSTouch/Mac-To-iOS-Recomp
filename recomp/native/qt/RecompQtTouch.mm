@@ -19,6 +19,9 @@ namespace {
 const int kTarget = 44;          // menu items, tabs, buttons, combo boxes, line edits
 const int kSpinButton = 32;      // spin-box up/down button width
 const int kIndicator = 24;       // check box and radio button
+// Scroll bars stay full width: a drag on the content scrolls (RecompQtScroll.mm),
+// the bar is for long jumps. Transient bars (SH_ScrollBar_Transient) would hide
+// until the content moves, with no hover on a touchscreen to bring them back.
 const int kScrollBar = 18;
 const int kScrollSlider = 44;    // shortest scroll-bar slider
 const int kDockButton = 32;      // dock title-bar close and float buttons
