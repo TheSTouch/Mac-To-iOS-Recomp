@@ -7,7 +7,8 @@
 //  - Mac-only device and layer properties get the values an Apple Silicon Mac reports;
 //  - metallibs from older tools (file format 2.3, e.g. Bink's) are refused while
 //    their header says macOS; with that flag cleared the same code loads and runs;
-//  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged;
+//  - MetalFX needs nothing: the MetalFX scalers the game creates are only logged, and
+//    handed to the frame generation (RecompFrameGen.m);
 //  - command buffers wait while the app is inactive, since iOS refuses GPU work
 //    from the background and the engine would stop with a fatal error;
 //  - the GPU time of every command buffer, and the time the game's threads wait
@@ -213,6 +214,7 @@ static void FixHeapSetStorage(id self, SEL s, NSUInteger mode) {
 // render size changes. Logged once per scaler, to show the upscale actually in use.
 
 static IMP oNewTemporalScaler, oNewSpatialScaler;
+void RecompFrameGenScaler(id scaler); // RecompFrameGen.m
 static void LogScaler(const char *kind, id d, id scaler) {
     RLOG(@"MetalFX: %s scaler %@x%@ -> %@x%@%s", kind, [d valueForKey:@"inputWidth"], [d valueForKey:@"inputHeight"],
          [d valueForKey:@"outputWidth"], [d valueForKey:@"outputHeight"], scaler ? "" : " refused");
@@ -220,6 +222,7 @@ static void LogScaler(const char *kind, id d, id scaler) {
 static id FixNewTemporalScaler(id self, SEL s, id dev) {
     id scaler = ((id (*)(id, SEL, id))oNewTemporalScaler)(self, s, dev);
     LogScaler("temporal", self, scaler);
+    RecompFrameGenScaler(scaler);
     return scaler;
 }
 static id FixNewSpatialScaler(id self, SEL s, id dev) {
@@ -239,6 +242,16 @@ static IMP oCommit, oCommitUnretained;
 static NSCondition *gGate;
 static BOOL gHold;
 static id gLastCommit;
+static id<MTLCommandQueue> gLastQueue;
+
+// The queue of the last command buffer committed: the game renders on one queue, and
+// work that must follow its frames (RecompFrameGen.m) goes on the same queue.
+id<MTLCommandQueue> RecompGameQueue(void) {
+    [gGate lock];
+    id<MTLCommandQueue> q = gLastQueue;
+    [gGate unlock];
+    return q;
+}
 
 // Seconds the GPU spent on the game's work since launch. Command buffers overlap
 // on the GPU, so each one adds only the part of its run after the latest end seen.
@@ -267,6 +280,7 @@ static void Commit(IMP orig, id self, SEL s) {
     [gGate lock];
     while (gHold && !NSThread.isMainThread) [gGate wait];
     gLastCommit = self;
+    gLastQueue = [(id<MTLCommandBuffer>)self commandQueue];
     [(id<MTLCommandBuffer>)self addCompletedHandler:^(id<MTLCommandBuffer> b) { CountGPUTime(b); }];
     ((void (*)(id, SEL))orig)(self, s);
     [gGate unlock];
