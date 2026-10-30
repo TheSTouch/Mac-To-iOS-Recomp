@@ -609,7 +609,13 @@ shared with someone else, does not play without the game's license.
   `RecompSteamConcurrentPlay`, handed to Kettle's `RecompSteam_SetConcurrentPlay` before any
   logon):
   - `"deny"`, the default and every port's setting: the cover offers *Play here* (which ends the
-    other session) or *Play without Steam for now*; the port never takes over silently.
+    other session) or *Play without Steam for now*; the port never takes over silently. Steam logs
+    the port's session off as soon as it logs on (it claims the game at once, as the Steam client
+    does), so the cover comes from Steam's word that the account plays elsewhere, not from the
+    license check. *Play here* logs on again with concurrent play allowed for that moment (no
+    claim, so Steam keeps the session), ends the other game, then goes back to deny, claims the
+    game and checks the license. *Play without Steam* is offered only when the license was checked
+    within the last 30 days.
   - `"allow"`: no cover; the game goes on with Steam (Cloud, achievements, tickets) without
     ending the other game, and the session does not tell Steam it plays here while the account
     plays elsewhere. Steam may still refuse some calls on its side, and this has not been tested
@@ -667,9 +673,10 @@ Timberborn, Valheim, Brawlhalla and Stray kept their sign-in and passed the lice
 Timberborn and Valheim uploaded saves to Steam Cloud and read their achievements; Valheim joined
 a password-protected Steam server by IP; Brawlhalla got its encrypted app ticket; Stray's Cloud
 passes ran with nothing to move. Downloads from Steam Cloud and a new unlock were not exercised.
-When another device held the account, Steam logged the session off (EResult 6) right after the
-logon, before the ownership ticket, so the "playing on another device" cover did not show and the
-port played on in its offline grace; the old copy of the core behaved the same.
+With Timberborn playing on an iPhone, Valheim launched on the iPad showed the "playing on another
+device" cover at once, and *Play here* ended the iPhone's game and went on online (before the fix
+in `RecompLicense.m`, Steam's logoff came before the ownership ticket and the port played on
+offline with no cover, as it did with the old copy of the core).
 
 ### Online play (Valheim)
 
