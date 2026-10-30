@@ -167,10 +167,11 @@ void RecompFrameGenScaler(id scaler) {
 // The game draws into a ring of kRing textures. A frame's texture is read by its own
 // generation and, as the previous frame, by the next one; it goes back to the ring
 // once both are committed (the game's later work on the same queue comes after them).
-// Three keep the game at most one frame ahead of the screen: the previous frame, the
-// one being shown, the one being drawn. A ring of four let it run three frames ahead,
-// 200 ms of input delay at 15 frames/s.
-enum { kRing = 3 };
+// Two keep the game from drawing ahead of the screen: it draws the next frame only once
+// the previous one is handed to the screen, while that one stays as the previous frame
+// for the next generation. Four let it run three frames ahead (200 ms of input delay at
+// 15 frames/s); three, one frame (50 ms at 20 frames/s, felt on the camera).
+enum { kRing = 2 };
 static id<MTLTexture> gRing[kRing];    // the render thread's
 static int gRingNext;
 static dispatch_semaphore_t gRingFree;
@@ -422,6 +423,12 @@ static void LogErrors(id<MTLCommandBuffer> cb) {
     }];
 }
 
+// How long each shown frame stays at least: half a rendered frame, less 3 ms. Exactly
+// half (25 ms at 20 frames/s, 3 refreshes at 120 Hz) rounded up to the next refresh
+// whenever a present came a little late, so every frame stayed 4 refreshes and the
+// game rendered 15 frames/s instead of 20.
+static double Half(Settings set) { return 0.5 / set.fps - 0.003; }
+
 // Makes the frame between the previous one and `cur` straight into a real drawable and
 // presents it; NO when it cannot be made.
 static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set) {
@@ -461,7 +468,7 @@ static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set) {
         fi.aspectRatio = (float)tex.width / tex.height;
         fi.shouldResetHistory = NO;
         [fi encodeToCommandBuffer:cb];
-        double half = 0.5 / set.fps;
+        double half = Half(set);
         [cb addScheduledHandler:^(id<MTLCommandBuffer> b) { [mid presentAfterMinimumDuration:half]; }];
         LogErrors(cb);
         [cb commit];
@@ -483,7 +490,7 @@ static void Generate(RFGDrawable *cur) {
         id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
         [b copyFromTexture:cur.texture toTexture:out.texture];
         [b endEncoding];
-        double after = made ? 0.5 / set.fps : 0;
+        double after = made ? Half(set) : 0;
         [out addPresentedHandler:^(id<MTLDrawable> d) {
             NSArray *handlers;
             @synchronized (cur) {
@@ -502,6 +509,48 @@ static void Generate(RFGDrawable *cur) {
     if (gPrevSlot >= 0) dispatch_semaphore_signal(gRingFree);
     gPrevSlot = cur->slot;
     gPrevTexture = cur.texture;
+}
+
+// --- the screen's refresh rate ------------------------------------------------------------------
+// ProMotion sets the refresh rate from what the app seems to need: Stray presents at 30
+// and the screen stayed at 30 Hz, so each shown frame waited 33 ms for a drawable and
+// 20 rendered became 15. A display link asking for 120 Hz says otherwise.
+@interface RFGTick : NSObject
+@end
+@implementation RFGTick {
+    double start;
+    unsigned ticks;
+}
+// Logs the refresh rate the screen really runs at, every 10 s.
+- (void)tick:(CADisplayLink *)link {
+    if (!start) start = link.timestamp;
+    ticks++;
+    if (link.timestamp - start >= 10) {
+        RLOG(@"framegen: screen refreshing at %.0f Hz (asked %.0f-%.0f, prefers %.0f; max %ld)", ticks / (link.timestamp - start),
+             link.preferredFrameRateRange.minimum, link.preferredFrameRateRange.maximum, link.preferredFrameRateRange.preferred,
+             (long)UIScreen.mainScreen.maximumFramesPerSecond);
+        start = link.timestamp;
+        ticks = 0;
+    }
+}
+@end
+
+static CADisplayLink *gLink;           // main thread
+
+static void WantRate(double shown) {
+    if (shown <= 0) {
+        [gLink invalidate];
+        gLink = nil;
+        return;
+    }
+    if (!gLink) {
+        gLink = [CADisplayLink displayLinkWithTarget:[RFGTick new] selector:@selector(tick:)];
+        [gLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    }
+    // Asked for 40-120 preferring 40, iOS ran the screen at 60 Hz, where 40 frames/s does
+    // not fit; at 120 each shown frame lasts 3 refreshes.
+    gLink.preferredFrameRateRange = CAFrameRateRangeMake(120, 120, 120);
+    RLOG(@"framegen: screen asked for %.0f Hz", shown);
 }
 
 // --- the switch -------------------------------------------------------------------------------
@@ -536,6 +585,8 @@ static void Poll(void) {
         atomic_store(&gOrderLen, 0);
     }
     atomic_store(&gOn, on);
+    double shown = on && !s.bench ? 2 * s.fps : 0;
+    dispatch_async(dispatch_get_main_queue(), ^{ WantRate(shown); });
     if (on && s.bench) RLOG(@"framegen: bench, newest frame shown at each refresh, cap %.0f frames/s (0: none)", s.fps);
     else if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d",
                       s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter);
