@@ -179,13 +179,52 @@ Debugging: shipping builds log almost nothing, but Mac game binaries usually kee
 
 - the shim logs lines starting with `[recomp]`: unimplemented AppKit methods (they return zero instead
   of crashing), a backtrace when the game calls `exit`/`abort` with an error, and every 10 s a heartbeat: frame
-  rate, GPU time per frame, CPU for the busiest threads, the longest wait between frames, memory left
-  and the thermal state;
+  rate, how many presented frames reached the screen, GPU time per frame, CPU for the busiest threads,
+  the longest wait between frames, memory left, the thermal state, and the pipeline states and shader
+  libraries made (count, total and longest time). App state changes (resign active, background,
+  memory warnings) get a line each;
+- when frames are presented but none reach the screen for 4 s while the app is active (iOS stopped
+  showing it: a black screen), the shim logs the window's state and hides and shows the window again;
+- a file named `recomp-ini` in `Documents` lays test settings over the profile's at launch, so an
+  engine setting is tried with a relaunch instead of a rebuild. `[Engine:SystemSettings]` and
+  `[GameUserSettings:<section>]` blocks of `key=value` lines; a key taken out is taken out of the
+  game's `.ini` at the next launch (`recomp-ini.applied` remembers which keys it wrote);
+- `recomp-memory` logs the app's memory by kind of region (Unreal's own heap shows as "untagged";
+  Metal's resources count against the app but not there);
 - copy an empty file named `recomp-screenshot` into the app's `Documents` (`devicectl device copy to
   --domain-type appDataContainer`) to get `recomp-screen.png` back from the same folder;
 - `xcrun lldb` can attach to the game on the device (`device select <UDID>`, `device process attach
   -p <pid>` after a `devicectl ... launch --start-stopped`); give it ~20 s to load symbols;
 - `tools/xref.py` finds the code that uses a string or address.
+
+### Frame generation (iPhone)
+
+`recomp/native/appkit/RecompFrameGen.m`. On iOS 26, MetalFX's frame interpolator makes a frame
+between each two the game renders, from the depth and motion vectors the game already hands
+MetalFX's temporal upscaler. The game draws into stand-in drawables (a ring of two textures, so it
+never waits for the screen's drawables nor runs ahead of it), held to the profile's rate. When it
+presents one, the frame between it and the previous one goes straight into a real drawable, then the
+frame itself is copied into another, each shown for half a rendered frame less 3 ms. A display link
+asks for 120 Hz: otherwise ProMotion follows the game's present rate and 20 rendered became 15.
+
+A profile turns it on for iPhones (`"frame_generation": "fps=20"` in its `iphone` block, the
+Info.plist key `RecompFrameGenPhone`); Stray's does, with `r.OneFrameThreadLag=0` so the controls
+lag less. A file `recomp-framegen` in `Documents` overrides it while the game runs: `off`, `default`
+(the profile's), or `key=value` words (`fps`, `fov`, `near`, `far`, `mv`, `jitter`). `bench=1`
+(with `fps=0`) is meant to measure what settings cost, but the stand-in path renders slower than
+real drawables, so it does not measure yet.
+
+### Measuring power on an iPhone
+
+GPU time per frame does not measure cost on an iPhone: iOS lowers the GPU clock until the GPU is
+about 80 % busy, and frames land on 120 Hz refreshes. What works is the phone's own Performance
+Trace (Settings > Developer) in Power Profiler mode: unplugged (charging reads 0), at full brightness,
+standing still for 2 minutes in the same place, started and stopped from Control Center. The trace
+lands in the device's diagnostic logs (`devicectl device copy from --domain-type systemCrashLogs`,
+`PerformanceTraces/PowerProfiler_*.aar`); `aa extract`, then `xctrace import --template 'Power
+Profiler'`, then the SystemPowerLevel table gives the battery drain per second. Stray in The Slums:
+24.3 % per hour at 30 frames/s, 15.8 at 20, 17.5 with frame generation (20 shown as 40); every
+quality group at low saved nothing. Power follows the frame rate, not the quality settings.
 
 ## Qt route
 
@@ -459,6 +498,10 @@ sits at mid height: right beside the island when the island is on the left, at t
 Menu and View move inward along the top, and LT and RT up into the corners, so the shoulder buttons
 have room above the island.
 No API gives the island's shape, so its size is guessed from the side safe inset.
+
+Stick values start at Unreal 4's own dead zone (0.25) once the finger is past the touch stick's
+small dead zone: Unreal ignores anything below it, so with the camera stick's steep curve nothing
+happened until the thumb was halfway out, which felt like lag.
 
 The key buttons (Unity ports) stay on screen with or without a controller.
 
