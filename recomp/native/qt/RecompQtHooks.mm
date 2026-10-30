@@ -8,22 +8,32 @@
 //                                        widget that takes input methods), as a keyboard would commit it
 //   recomp-click     "x y"            -> a left click (press, release; not a touch) at that point of
 //                                        the screen, in points, sent to the widget under it
+//   recomp-swipe     "x1 y1 x2 y2 ms" -> a one-finger touch from x1,y1 to x2,y2 (screen points), pressed,
+//                                        moved every 16 ms and released over ms milliseconds, handed to
+//                                        Qt as the touchscreen hands it (QWindowSystemInterface), so it
+//                                        goes the way a finger does: touch events, then the mouse events
+//                                        Qt makes of them. "x y x y 0" is a tap, "x y x y 800" a hold
 //   recomp-grab      (empty)          -> recomp-gl-<n>.png: what each QOpenGLWidget rendered, read back
 //                                        from its framebuffer, and recomp-window.png: the window
 //
 // Each request file is deleted once handled. Checked once a second from Qt's event loop.
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
+#include <QtCore/QPointer>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtGui/QAction>
 #include <QtGui/QImage>
 #include <QtGui/QInputMethodEvent>
 #include <QtGui/QScreen>
+#include <QtGui/QWindow>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOpenGLFunctions>
+#include <QtGui/QPointingDevice>
+#include <QtGui/6.5.5/QtGui/qpa/qwindowsysteminterface.h>
 #include <QtOpenGLWidgets/QOpenGLWidget>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QPlainTextEdit>
@@ -38,6 +48,54 @@ static QList<QAction *> allActions()
             if (!out.contains(a))
                 out.append(a);
     return out;
+}
+
+// One touch point, as the iOS plugin fills it (QUIView handleTouches).
+static void sendTouch(QWindow *window, const QPointingDevice *device, QPointF global, QEventPoint::State state)
+{
+    QWindowSystemInterface::TouchPoint point;
+    point.id = 1;
+    point.state = state;
+    point.area = QRectF(global, QSizeF(0, 0));
+    const QSizeF screen = window->screen()->geometry().size();
+    point.normalPosition = QPointF(global.x() / screen.width(), global.y() / screen.height());
+    point.pressure = state == QEventPoint::State::Released ? 0.0 : 1.0;
+    QWindowSystemInterface::handleTouchEvent<QWindowSystemInterface::AsynchronousDelivery>(window, device, {point});
+}
+
+static void swipe(QPointF from, QPointF to, int ms)
+{
+    const QPointingDevice *device = nullptr;
+    for (const QInputDevice *d : QInputDevice::devices())
+        if (d->type() == QInputDevice::DeviceType::TouchScreen)
+            device = static_cast<const QPointingDevice *>(d);
+    QWidget *under = QApplication::widgetAt(from.toPoint());
+    QWindow *window = under ? under->window()->windowHandle() : nullptr;
+    if (!device || !window) {
+        fprintf(stderr, "[recomp] swipe: no %s\n", device ? "window there" : "touchscreen");
+        return;
+    }
+    fprintf(stderr, "[recomp] swipe %g,%g -> %g,%g over %d ms, starting on %s\n", from.x(), from.y(), to.x(), to.y(),
+            ms, under->metaObject()->className());
+    sendTouch(window, device, from, QEventPoint::State::Pressed);
+    QPointer<QWindow> target(window);
+    auto *timer = new QTimer(QCoreApplication::instance());
+    auto *clock = new QElapsedTimer;
+    clock->start();
+    QObject::connect(timer, &QTimer::timeout, [=] {
+        const qint64 t = clock->elapsed();
+        const qreal f = ms > 0 ? qMin<qreal>(1, qreal(t) / ms) : 1;
+        if (target) {
+            const QPointF at = from + (to - from) * f;
+            sendTouch(target, device, at, f < 1 ? QEventPoint::State::Updated : QEventPoint::State::Released);
+        }
+        if (f >= 1 || !target) {
+            timer->stop();
+            timer->deleteLater();
+            delete clock;
+        }
+    });
+    timer->start(16);
 }
 
 static void poll()
@@ -107,6 +165,37 @@ static void poll()
             fprintf(stderr, "[recomp] clicked %s at %d,%d (local %g,%g)\n", w->metaObject()->className(), global.x(),
                     global.y(), local.x(), local.y());
         }
+    }
+    QFile focus(docs + QStringLiteral("recomp-focus"));
+    if (focus.exists() && focus.open(QIODevice::ReadOnly)) {
+        const QStringList args = QString::fromUtf8(focus.readAll()).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        focus.close();
+        focus.remove();
+        if (args.value(0) == QStringLiteral("none")) {
+            if (QWidget *w = QApplication::focusWidget())
+                w->clearFocus();
+            fprintf(stderr, "[recomp] cleared focus\n");
+        } else {
+            int n = args.value(1).toInt();
+            QWidget *target = nullptr;
+            for (QWidget *w : QApplication::allWidgets())
+                if (w->isVisible() && w->inherits(args.value(0).toUtf8().constData()) && n-- == 0)
+                    target = w;
+            if (target) {
+                target->activateWindow();
+                target->setFocus(Qt::MouseFocusReason);
+            }
+            fprintf(stderr, "[recomp] focus %s: %s\n", qPrintable(args.join(QLatin1Char(' '))),
+                    target ? qPrintable(target->objectName()) : "not found");
+        }
+    }
+    QFile swipeRequest(docs + QStringLiteral("recomp-swipe"));
+    if (swipeRequest.exists() && swipeRequest.open(QIODevice::ReadOnly)) {
+        const QStringList v = QString::fromUtf8(swipeRequest.readAll()).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        swipeRequest.close();
+        swipeRequest.remove();
+        swipe(QPointF(v.value(0).toDouble(), v.value(1).toDouble()), QPointF(v.value(2).toDouble(), v.value(3).toDouble()),
+              v.value(4).toInt());
     }
     QFile grab(docs + QStringLiteral("recomp-grab"));
     if (grab.exists()) {
