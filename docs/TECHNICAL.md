@@ -660,7 +660,16 @@ Tested: Valheim on the iPad (sign-in, license, online status, Steam Cloud both w
 Steam game, conflict prompt included, online play below) and Stray on the iPad (sign-in, license,
 online status). Achievements: Valheim's and Stray's are read as Steam has them, and an unlock
 through the runtime (`recomp-steam-cli achievements`, the same functions the game calls) reached
-Steam; an unlock from play on a device is not seen yet. Timberborn has not run on the runtime yet.
+Steam; an unlock from play on a device is not seen yet.
+
+On the Kettle-built runtime (2026-10-30, iPad, every port at `steam_concurrent_play` "deny"):
+Timberborn, Valheim, Brawlhalla and Stray kept their sign-in and passed the license check;
+Timberborn and Valheim uploaded saves to Steam Cloud and read their achievements; Valheim joined
+a password-protected Steam server by IP; Brawlhalla got its encrypted app ticket; Stray's Cloud
+passes ran with nothing to move. Downloads from Steam Cloud and a new unlock were not exercised.
+When another device held the account, Steam logged the session off (EResult 6) right after the
+logon, before the ownership ticket, so the "playing on another device" cover did not show and the
+port played on in its offline grace; the old copy of the core behaved the same.
 
 ### Online play (Valheim)
 
