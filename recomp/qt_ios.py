@@ -328,6 +328,7 @@ def build_shim(work, plan, sdk):
             run(["xcrun", "--sdk", sdk, "clang", "-target", target, "-O2", "-g", "-dynamiclib", "-fobjc-arc",
                  "-install_name", "@rpath/" + SHIM_NAME, "-current_version", "1.0", "-compatibility_version", "1.0",
                  "-F", os.path.dirname(plan.gl), "-F", qt_lib, "-lc++", "-framework", "CoreFoundation",
+                 "-framework", "UIKit",
                  "-framework", "QtCore", "-framework", "QtGui", "-framework", "QtWidgets",
                  "-framework", "QtOpenGLWidgets",
                  "-Wl,-rpath,@executable_path/Frameworks", *reexports, *sources,
@@ -519,9 +520,6 @@ def info_plist(app):
         "CFBundleVersion": str(info.get("CFBundleVersion", "1")),
         "LSRequiresIPhoneOS": True,
         "UIRequiresFullScreen": True,
-        # Qt follows the system's dark mode with a dark palette, which Mac Qt apps'
-        # own colours and style sheets were not drawn for (dark text on dark).
-        "UIUserInterfaceStyle": "Light",
         "UILaunchScreen": {"UIColorName": "", "UIImageRespectsSafeAreaInsets": False},
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft",
                                              "UIInterfaceOrientationLandscapeRight", "UIInterfaceOrientationPortrait"],
