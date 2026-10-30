@@ -353,6 +353,11 @@ private:
         }
         restored = true;
         update();
+        // Saved now, not only on a change: on first launch the docks the app's own layout
+        // opened are what the drawer closed, and what its first tap brings back. Unsaved,
+        // the app starts them hidden next time and that tap opens every dock in the area.
+        for (const Drawer &d : drawers)
+            save(d);
         log();
     }
 
