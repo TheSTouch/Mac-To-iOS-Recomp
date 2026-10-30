@@ -335,11 +335,11 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 | **App size** | 85 MB |
 | **Profile** | OpenSCAD finds its libraries, fonts, colour schemes and shaders in the port's layout; its 3D view's edge shader is fixed for OpenGL ES, which otherwise drew no model |
 | **Editor** | Code editor with the virtual keyboard, which comes up for a tap in the editor; a docked keyboard shrinks the window above it. Hardware keyboards type in it. One-finger drags scroll, hold-then-drag selects |
-| **3D view** | Preview draws on the device; Render (CGAL) is tested in the simulator. A one-finger drag rotates the model, as a mouse drag does; zoom and View All from the view's toolbar. Set the camera from the script with `$vpr`, `$vpd` and `$vpt` |
+| **3D view** | Preview and Render (CGAL) draw on the device. A one-finger drag rotates the model; zoom and View All from the view's toolbar. Set the camera from the script with `$vpr`, `$vpd` and `$vpt` |
 | **Layout** | The Editor and Console docks are drawers: drag their handles to give the 3D view or the code more room, or the corner button for the 3D view alone, then tap again to get the code back |
 | **Viewport-Control, Customizer** | Number fields get the iPad number pad; the panels scroll by touch |
 | **Light and dark mode** | Follows the device; the editor and 3D view keep OpenSCAD's own colour schemes |
-| **Files** | Save your `.scad` files in the app's Documents folder to see them in the Files app (On My iPad › OpenSCAD); not yet tried on the device |
+| **Files** | Save your `.scad` files in the app's Documents folder to see them in the Files app (On My iPad › OpenSCAD) |
 | **Not yet** | Pinch to zoom and two-finger pan in the 3D view; the Files picker for files elsewhere; OpenSCAD features that run other programs |
 
 ## Roadmap
