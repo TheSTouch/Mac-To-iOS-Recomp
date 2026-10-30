@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 
-from recomp import events, paths, storage
+from recomp import events, paths, steam_runtime, storage
 
 ROOT = paths.CODE
 # Built helpers live under HOME: CODE may be a signed, read-only app bundle.
@@ -29,8 +29,8 @@ EDITOR_SRC = os.path.join(ROOT, "recomp", "unity_editor")
 SHIMS = os.path.join(ROOT, "recomp", "shims")
 BUILTIN_MODS = os.path.join(ROOT, "recomp", "builtin_mods")
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
-# The pseudo Steam client every port carries (session, Steamworks flat API, cloud, networking).
-STEAM_RUNTIME = os.path.join(NATIVE_SRC, "RecompSteam")
+# The pseudo Steam client every port carries (session, Steamworks flat API, cloud, networking):
+# recomp/steam_runtime.py.
 PROFILES = os.path.join(ROOT, "recomp", "profiles")
 # Top-level files of recomp/native that Unity ports leave out (none at present: the Steam
 # runtime in RecompSteam/ serves both routes).
@@ -265,12 +265,6 @@ PluginImporter:
 STEAM_EXPORT = re.compile(r"^_((?:SteamAPI|SteamInternal|SteamGameServer|SteamClient|SteamEncryptedAppTicket)\w*)$")
 
 
-def steam_runtime_files():
-    """The runtime's top-level sources and headers (cli/ is the Terminal tool)."""
-    return sorted(n for n in os.listdir(STEAM_RUNTIME)
-                  if os.path.isfile(os.path.join(STEAM_RUNTIME, n)) and n.endswith((".c", ".m", ".mm", ".h")))
-
-
 def steam_runtime_exports():
     """Every Steamworks function the runtime defines, so asmtool's generated stubs leave
     them out (a stub and a definition of one name would not link). Read from the objects
@@ -278,13 +272,11 @@ def steam_runtime_exports():
     from recomp import iossdk
     names = set()
     with tempfile.TemporaryDirectory() as tmp:
-        for n in steam_runtime_files():
-            if n.endswith(".h"):
-                continue
-            obj = os.path.join(tmp, n + ".o")
+        for src in steam_runtime.sources():
+            obj = os.path.join(tmp, os.path.basename(src) + ".o")
             subprocess.run(["xcrun", "-sdk", "iphoneos", "clang", "-arch", "arm64", "-mios-version-min=13.0",
-                            "-isysroot", iossdk.sdk_path(), "-fobjc-arc", "-fmodules", "-w", "-c",
-                            os.path.join(STEAM_RUNTIME, n), "-o", obj], check=True)
+                            "-isysroot", iossdk.sdk_path(), "-fobjc-arc", "-fmodules", "-w",
+                            *steam_runtime.flags(), "-c", src, "-o", obj], check=True)
             out = subprocess.run(["nm", "-gUj", obj], capture_output=True, text=True, check=True).stdout
             names.update(m.group(1) for m in map(STEAM_EXPORT.match, out.split()) if m)
     return sorted(names)
@@ -295,7 +287,7 @@ def write_steam_exports(path):
     any "name(" in an overrides file as defined."""
     names = steam_runtime_exports()
     with open(path, "w") as f:
-        f.write("// Defined by recomp/native/RecompSteam (listed by unity_ios.py so asmtool generates no stub):\n")
+        f.write("// Defined by the Steam runtime (listed by unity_ios.py so asmtool generates no stub):\n")
         for n in names:
             f.write(f"//   {n}()\n")
     log(f"Steam runtime: {len(names)} Steamworks functions implemented")
@@ -377,12 +369,15 @@ def prepare(game, work, unity, ios):
         shutil.copy2(src, native)
         with open(os.path.join(native, n + ".meta"), "w") as f:
             f.write(native_meta(n))
-    # The Steam runtime, beside them; its Objective-C is written for ARC.
-    for n in steam_runtime_files():
-        shutil.copy2(os.path.join(STEAM_RUNTIME, n), native)
+    # The Steam runtime, beside them (Kettle's core and our files in one folder, so each
+    # finds the other's headers); its Objective-C is written for ARC.
+    for src in steam_runtime.files():
+        n = os.path.basename(src)
+        shutil.copy2(src, native)
         if not n.endswith(".h"):
             with open(os.path.join(native, n + ".meta"), "w") as f:
-                f.write(native_meta(n, "-fobjc-arc" if n.endswith((".m", ".mm")) else ""))
+                f.write(native_meta(n, " ".join((["-fobjc-arc"] if n.endswith((".m", ".mm")) else [])
+                                                + steam_runtime.DEFINES)))
     if gns:
         gamenetworkingsockets.enable(native)
 

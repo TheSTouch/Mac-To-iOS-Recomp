@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // The pseudo Steam client's session: one logon to Steam's connection managers (CM)
 // as the player, over a WebSocket, the way the Steam client does. Everything else in
 // RecompSteam (the Steamworks flat API, cloud saves, online play) builds on this file.

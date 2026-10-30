@@ -38,7 +38,7 @@ import sys
 import xml.etree.ElementTree as ET
 import zipfile
 
-from recomp import events, paths, storage, xcodeproj
+from recomp import events, paths, steam_runtime, storage, xcodeproj
 
 ROOT = paths.CODE
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native", "air")
@@ -47,16 +47,15 @@ ANE_NS = "http://ns.adobe.com/air/extension/51.5"
 # What ADT builds the extensions' slices for: armv7 only to pass its universal-binary check.
 ARCHS = [("armv7", "9.0"), ("arm64", "13.0")]
 RECOMP_NATIVE = os.path.join(ROOT, "recomp", "native")
-STEAM_RUNTIME = os.path.join(RECOMP_NATIVE, "RecompSteam")
 # Extensions whose stand-in runs on code shared with the other routes: built with it into one
 # object of the arm64 slice (constructors included), with what it links. The armv7 slice stays
 # empty: nothing runs it, ADT only wants the architecture there.
 RUNTIMES = {
     "SteamAir": {
-        "sources": lambda: sorted(os.path.join(STEAM_RUNTIME, n) for n in os.listdir(STEAM_RUNTIME)
-                                  if n.endswith((".c", ".m"))) +
+        "sources": lambda: steam_runtime.sources() +
                            [os.path.join(RECOMP_NATIVE, n) for n in ("RecompLicense.m", "RecompSaves.m", "RecompLog.m")],
-        "include": [STEAM_RUNTIME],
+        "include": steam_runtime.INCLUDE,
+        "defines": steam_runtime.DEFINES,
         "link": ["-framework Foundation", "-framework UIKit", "-framework Security", "-framework CoreImage", "-lz"],
     },
 }
@@ -212,7 +211,7 @@ def entry_points(src):
     return init.group(1), final.group(1)
 
 
-def compile_slice(sources, arch, min_ios, includes, out_dir, merge=False):
+def compile_slice(sources, arch, min_ios, includes, out_dir, merge=False, defines=()):
     """A static library of sources for one architecture; merge: as one object (ld -r), so that
     every file is linked, also those only a constructor starts."""
     objs = []
@@ -221,7 +220,7 @@ def compile_slice(sources, arch, min_ios, includes, out_dir, merge=False):
         objc = ["-fobjc-arc", "-fmodules"] if src.endswith(".m") else []
         try:
             run(["xcrun", "--sdk", "iphoneos", "clang", "-arch", arch, f"-miphoneos-version-min={min_ios}", "-O2",
-                 "-g", *[x for d in includes for x in ("-I", d)], *objc, "-c", src, "-o", obj])
+                 "-g", *defines, *[x for d in includes for x in ("-I", d)], *objc, "-c", src, "-o", obj])
         except subprocess.CalledProcessError:
             sys.exit(f"building {os.path.basename(src)} for {arch} failed (compiler errors above)")
         objs.append(obj)
@@ -251,7 +250,7 @@ def build_ane(sdk, game, ext, work):
             libs.append(compile_slice([src], arch, min_ios, includes, out))
         elif arch == "arm64":
             libs.append(compile_slice([src] + runtime["sources"](), arch, min_ios, includes + runtime["include"],
-                                      out, merge=True))
+                                      out, merge=True, defines=runtime["defines"]))
         else:
             empty = os.path.join(out, "empty.c")
             with open(empty, "w") as f:

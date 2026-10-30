@@ -104,6 +104,7 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
   | `steam_app_id` | the game's Steam app id, for the [Steam runtime](#steam-runtime) (found from the Steam library otherwise) |
+  | `steam_concurrent_play` | `"deny"` (the default) or `"allow"`: whether Steam stays usable while the same account plays on another device ([Playing on another device](#sign-in-and-license-check)). No port allows it |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
   | `iphone` | settings applied only on an iPhone, over the generic phone defaults: `render_scale`, `target_frame_rate`, `quality_level`, `player_prefs`, `static_fields`, `portrait`, `portrait_horizontal_fov` (listed in `PHONE_DEFAULTS`, `recomp/unity_ios.py`) |
@@ -216,8 +217,27 @@ retargets the rest (`recomp/qt_ios.py`):
      whatever size the app restores, other windows are kept on screen, and the screen is the app's
      own `UIWindow` when that is smaller than the display (iPadOS 26 runs apps in resizable windows
      and ignores `UIRequiresFullScreen`);
-   - **keyboard**: it follows focus only, so a tap on the focused text input brings it back once
-     the user has hidden it; on iPad a hide-keyboard button is added at the right of its shortcuts bar.
+   - **keyboard**: a focus change made by a touch brings the keyboard up only once the finger
+     lifts, and only if the touch landed on the focused input, so a menu or dialog closing and
+     handing focus back brings nothing up. A focus window change made while the keyboard is down
+     keeps it down. A tap on the focused input brings the keyboard back after the user hid it, and a
+     single-line input puts its cursor at the end of its text. On iPad a hide-keyboard button sits at
+     the right of the shortcuts bar. A **docked** keyboard (along the bottom, at least 90 % of the
+     width and 150 pt tall) is taken off the screen's available geometry, so the maximized main
+     window resizes to the space above it and the root view no longer scrolls up. The floating
+     keyboard and the 70 pt bar a hardware keyboard leaves lie over the app;
+   - **number pad** (`qiosnumberpad.mm`): on iPad, number inputs (`ImhDigitsOnly`, a QSpinBox;
+     `ImhFormattedNumbersOnly`, a QDoubleSpinBox) get the app's own pad and no system keyboard: an
+     empty input view and no shortcuts bar. iPadOS's number pad is a popover by the caret, drawn by
+     the out-of-process keyboard. When a tap made the field first responder, iPadOS swaps the pad
+     for the docked keyboard 1 to 1.5 s later, with no call into the app in between, and a tap
+     outside the popover never reaches the app. The pad sits under the input, or above it when there
+     is no room below, on the Qt root view above the windows. It has keys 7 8 9 / 4 5 6 / 1 2 3 /
+     +/- 0 and the locale's decimal separator (doubles only) / delete and Done, typed through the
+     text responder (`insertText:`, `deleteBackward`, `qt_toggleSign`). Touches outside it reach the
+     app, so a tap on another number input moves it there. Done or any other focus change resigns
+     the responder and hides it. It hides while a Qt popup (a menu, a combo box's list) shows, and
+     with a hardware keyboard connected (`GCKeyboard`). The iPhone keeps iOS's own pads.
 2. **prepare**: every Mach-O of the bundle except Qt's own is thinned to arm64 and marked as iOS. Mac
    Qt apps' binaries bind their imports with dyld-info opcodes, by **library slot**, so each keeps its
    library list slot for slot (`macho.py` `bound_imports()` reads which symbols come through which
@@ -231,7 +251,8 @@ retargets the rest (`recomp/qt_ios.py`):
    the app and its plugins need, Qt's iOS plugins and a `qt.conf` go next to them.
 3. **xcode** and **install**: as for the Unreal route; the Mac bundle's `Contents/Resources` goes in
    as `MacResources/`. A profile can patch the executable (`patches`) and resource files
-   (`resource_patches`: text find/replace), matched on `bundle_id`.
+   (`resource_patches`: text find/replace), matched on `bundle_id`, and pin the app's light or
+   dark mode (`appearance`, see **Light and dark mode** below).
 
 **OpenGL** (`recomp/ios_opengl.py`): iOS has no desktop OpenGL. The port's `OpenGL.framework` is
 [gl4es](https://github.com/ptitSeb/gl4es) v1.1.6 (desktop OpenGL 2.1 on OpenGL ES 2) and GLU, with
@@ -248,6 +269,68 @@ int-to-float conversion, no `smoothstep(e, e, x)`; fix those with `resource_patc
 is wider than an 11-inch iPad), and it grows the window back to it. `RecompQtWindows.mm` in the shim
 stops top-level layouts enforcing their minimum, so the contents squeeze into the screen.
 
+**Touch sizes**: a QWidget app keeps the Mac's mouse-sized controls. `RecompQtTouch.mm` puts a proxy
+style over the app's own style (installed when the first widget is polished, and again if the app
+replaces its style): hit targets of 44 pt for menu items, tabs, buttons, combo boxes and line edits,
+32 pt spin-box arrows and dock title-bar buttons, 24 pt check boxes, 12 pt splitter and dock
+separators, 44 pt shortest scroll-bar slider. A menu whose 44 pt rows would not fit the screen's
+height (the space above a docked keyboard, say) gets shorter rows instead, never shorter than their
+text, so it stays one column where Qt would start a second. Drawing stays the app style's. Text is raised to at
+least 15 pt, except in text editors (`QPlainTextEdit`, `QTextEdit`, QScintilla), which keep the app's
+or the user's size, and a press must move 12 pt before it starts a drag.
+
+**Touch scrolling**: a finger reaches a QWidget app as the mouse events Qt makes of a touch, so a
+drag in a list or a text view would select. `RecompQtScroll.mm` makes a one-finger drag inside any
+`QAbstractScrollArea` viewport with something to scroll (item views, text views, `QScrollArea`,
+QScintilla) move the content, with momentum and a small bounce at the ends (a `QScroller` per
+viewport fed from an event filter on qApp; mouse and trackpad are left alone). The press is held
+back until it is clear what it is: released without moving, it is a tap and reaches the widget;
+past the drag distance it scrolls and the widget never sees it; a drag the area cannot follow goes
+to the widget. A press held still for 500 ms goes to the widget, so hold-then-drag selects text or
+drags items, and a double tap still selects a word. Sliders and splitter handles keep their drag;
+scroll bars (outside the viewport) stay 18 pt and draggable. Menus are left out (under Fusion a
+menu taller than the screen wraps into columns).
+
+**Light and dark mode**: the app follows the device's mode, and switches
+live. A profile's `"appearance": "light"` or `"dark"` (default `"system"`) puts
+`UIUserInterfaceStyle` in that app's Info.plist, for an app whose own colours only work in one
+mode. Qt's iOS theme palette is only half dark: it starts from Fusion's palette for the scheme Qt
+saw at start-up, before UIKit has a window (light), and gives the Active group's text roles iOS's
+colours only, so inactive text (item views without focus draw as inactive) stayed black on black.
+`RecompQtAppearance.mm` builds the application palette whole from iOS's system colours resolved for
+the current scheme, every role in every group, at start-up and on each change. Widgets under a
+style sheet keep a copy of the palette they were polished with, and Qt does not pass a parent's
+palette on to them, so after each change every window is walked parents first: those the sheet
+gave colours are polished again, the others resolve again. An app that sets its own application
+palette keeps it. Colours the app draws itself (an editor's colour scheme, a 3D view) are its own.
+
+**Text input**: keys reach a text input through Qt's text responder (`QIOSTextInputResponder`),
+which has to be UIKit's first responder: with a hardware keyboard (or the Mac's, through Universal
+Control) the window's view takes only the arrow keys while the focus widget accepts text, and
+drops the rest. Whether a tap lands on the input, which brings the responder (and the keyboard)
+back, the iOS plugin decides from the input's `Qt::ImInputItemClipRectangle`. QWidget answers that with its visible rectangle, but a
+widget overriding `inputMethodQuery()` may answer nothing (QScintilla answers only `ImHints`
+that way), so no tap landed on it and a hardware keyboard typed nothing there. `RecompQtInput.mm`
+gives such a widget QWidget's answer.
+
+**Dock drawers**: around a main window's central widget, docks leave little of it on an 11-inch
+iPad. `RecompQtDrawers.mm`, for any `QMainWindow`, puts handles on the central widget, kept clear
+of toolbars that run along its edges:
+- left, right and bottom edges: the dock areas there are drawers, each with a handle. While the
+  area's docks are open it is a grip: dragging resizes them, dragging 48 pt past their minimum
+  size closes them all, and a tap switches between an even split with the central widget and the
+  size set last. While they are closed it points out: a tap brings back the ones that were open,
+  at the size they had, and dragging out opens them at the size dragged to (also back within the
+  same drag that closed them). A dock the app opens itself opens its drawer. Open or closed is
+  saved per area in the app's `QSettings` (`recomp/drawers/<area>`, the hidden docks under
+  `recomp/drawerDocks/<area>`) and applied once the app has restored its own layout. First
+  launch: right and bottom closed, left as the app lays it out, and the docks the app's own layout
+  had open are saved as what each drawer's first tap brings back. Settings survive an install over
+  the app; only deleting it starts again. Tabbed docks count as one, the size of the current tab;
+- top-right corner: the central widget alone. Every open drawer closes and the window's own
+  toolbars hide; the handles stay. The next tap brings back what was open, and opening a drawer
+  meanwhile (by its handle or the app) ends it. Drawers it closed are not saved as closed.
+
 **Debugging**: in the simulator, `xcrun simctl launch --wait-for-debugger` then lldb. On a device and
 in the simulator, files dropped into the app's `Documents` (`devicectl device copy to --domain-type
 appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
@@ -257,8 +340,15 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-actions` | empty | `recomp-actions.txt`: every QAction, object name and text |
 | `recomp-action` | an action's object name or text | triggers it |
 | `recomp-text` | empty | `recomp-text.txt`: the text of every visible text view |
+| `recomp-type` | the text | types it into the focused widget, as the keyboard commits text |
 | `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
-| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes in the log |
+| `recomp-swipe` | `x1 y1 x2 y2 ms [hold]` per line, screen points | a one-finger touch through Qt's touch input, as the iOS plugin sends it: held `hold` ms, then moved to the end over `ms`; each line starts as the one before ends (a double tap is two 0 ms lines) |
+| `recomp-focus` | `Class n` (a QSpinBox, a QDoubleSpinBox…), or `none` | focuses the n-th visible widget of that class (from 0) as a click would, with no touch, or clears the focus. `recomp-click` does not move focus, and no hook makes a UIKit touch, so keyboard behaviour after a real tap needs a person |
+| `recomp-pad` | keys (`0`–`9`, `separator`, `sign`, `delete`, `done`), or empty | presses those keys of the iPad number pad one by one, logging the input's text after each; then logs where the pad is, the input and cursor rectangles and the focus window |
+| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; `recomp-screen.png`, the UIKit window with its views (the number pad), which the Qt grab misses; window and screen sizes, and each GL view's depth and stencil bits, in the log |
+| `recomp-drawers` | empty | in the log: each dock drawer, open or closed, its handle's screen rectangle (for `recomp-click`) and its docks; the left grip, the central-widget button and the left docks' width (`RecompQtDrawers.mm`) |
+| `recomp-appearance` | empty | in the log: the colour scheme, the application palette per group, and each visible label, button and item view's text and background colours, with whether it has its own palette or a style sheet (`RecompQtAppearance.mm`) |
+| `recomp-input` | empty | in the log: the focus object, whether it takes text, its input rectangle (and whether the widget answers it itself), its cursor rectangle, and UIKit's first responder (`QIOSTextInputResponder` while keys go to the input) (`RecompQtInput.mm`) |
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
@@ -361,6 +451,14 @@ cursor (in play); in menus touches act as the mouse, and a quick tap off the pad
 | top left | Menu, View |
 | bottom left / near the face buttons | L3 / R3 |
 | left edge, between LT and L3 | D-pad (Unreal ports): up, down, left, right; two arms held give a diagonal |
+
+In Unreal ports on a phone held sideways, the controls sit against the screen's side edges rather
+than the safe area's, using the space above and below the Dynamic Island (or notch). A control that
+would cover the island slides above or below it, none is cut off by the rounded corners, and the D-pad
+sits at mid height: right beside the island when the island is on the left, at the left edge otherwise.
+Menu and View move inward along the top, and LT and RT up into the corners, so the shoulder buttons
+have room above the island.
+No API gives the island's shape, so its size is guessed from the side safe inset.
 
 The key buttons (Unity ports) stay on screen with or without a controller.
 
@@ -468,12 +566,27 @@ has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
 ## Steam runtime
 
-iOS has no Steam app, so a port of a Steam game carries its own Steam client,
-`recomp/native/RecompSteam`. It connects to Steam's servers over the same WebSocket connection the
+iOS has no Steam app, so a port of a Steam game carries its own Steam client. It connects to Steam's servers over the same WebSocket connection the
 Steam client uses, logs on as the player and serves the Steamworks API the game calls
 (`SteamAPI_*`), so the game's own Steam code runs unchanged. Everything goes straight to Steam,
 never through a server of this project. `SteamAPI_Init` succeeds in every port, signed in or not:
 games such as Valheim quit without Steam.
+
+Where the code is:
+
+- **The Steam client core** (the session, the sign-in, the protobuf codec, the Steam Cloud
+  protocol, concurrent play) comes from [Kettle](https://github.com/TheSTouch/kettle) (MIT), a
+  git submodule at `recomp/vendor/kettle` pinned to a tag (`Sources/KettleExperimental`). Run
+  `git submodule update --init recomp/vendor/kettle` after cloning. Every route builds it with
+  Kettle's default parts (sign-in, Cloud, tickets) plus `-DKETTLE_CONCURRENT_PLAY=1`.
+- **The Steamworks API on top** stays here, in `recomp/native/RecompSteam`: the flat API, stats
+  and achievements, user, apps, the start at load, the Cloud sync with local folders, matchmaking
+  and networking. `recomp/steam_runtime.py` lists the sources, include paths and flags every
+  route (Unity, Unreal, AIR, the Mac clone, `cli/build.sh`) builds with.
+- **`recomp/native/RecompSteam/deprecated/`** is the old copy of the core, kept for reference and
+  no longer built.
+- **Fixes to the core go to Kettle first**: a pull request there, a new tag, then the submodule
+  moves to it here. Never patch the files under `recomp/vendor/kettle` in place.
 
 ### Sign-in and license check
 
@@ -499,9 +612,36 @@ shared with someone else, does not play without the game's license.
   second. Offline or with Steam slow to answer, the game starts after a few seconds anyway, for
   30 days after the last successful check; past that it asks to go online. A refunded game or a
   sign-in removed in Steam brings the sign-in screen back at the next launch.
-- **Playing on another device**: Steam lets an account play one game at a time. When it already
-  plays elsewhere, the cover offers *Play here* (which ends the other session) or *Play without
-  Steam for now*; the port never takes over silently.
+- **Playing on another device**: Steam lets an account play one game at a time. What a port does
+  when the account already plays elsewhere is the profile key `steam_concurrent_play` (Info.plist
+  `RecompSteamConcurrentPlay`, handed to Kettle's `RecompSteam_SetConcurrentPlay` before any
+  logon):
+  - `"deny"`, the default and every port's setting: the cover offers *Play here* (which ends the
+    other session) or *Play without Steam for now*; the port never takes over silently. Steam logs
+    the port's session off as soon as it logs on (it claims the game at once, as the Steam client
+    does), so the cover comes from Steam's word that the account plays elsewhere, not from the
+    license check. *Play here* logs on again with concurrent play allowed for that moment (no
+    claim, so Steam keeps the session), ends the other game, then goes back to deny, claims the
+    game and checks the license. *Play without Steam* is offered only when the license was checked
+    within the last 30 days.
+
+    While the game runs, the device whose game another device takes (with its own *Play here*)
+    gets the same choice: Steam logs its session off, the port logs on again at once to learn why
+    (Steam's logoff does not say), and a Unity game pauses under "Your Steam account is now playing
+    on another device". After *Play without Steam* the session keeps trying every two minutes;
+    once the other device stops, the game is back on Steam by itself and a note at the top says so
+    for a few seconds. The other app keeps running in every case: neither Steam nor a port can
+    close an app on another device.
+  - `"allow"`: no cover; the game goes on with Steam (Cloud, achievements, tickets) without
+    ending the other game, and the session does not tell Steam it plays here while the account
+    plays elsewhere. Steam may still refuse some calls on its side, and this has not been tested
+    against live Steam.
+
+  Before allowing it, read what this can mean with Valve:
+  [Kettle's docs/valve.md, "Playing on two devices at once"](https://github.com/TheSTouch/kettle/blob/v0.1.0/docs/valve.md#playing-on-two-devices-at-once).
+  That is our reading, not legal advice: it may contain mistakes or be out of date, so rely only
+  on Valve's official texts, the
+  [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) first.
 - **Signing out**: delete `Recomp Steam license.txt` (Files, *On My iPad*, the game's folder);
   the session ends and the next launch asks to sign in again. Steam lists the sign-in as
   "Recomp: *game* on *device*" under Settings > Security > Authorized devices, where it can be
@@ -542,7 +682,17 @@ Tested: Valheim on the iPad (sign-in, license, online status, Steam Cloud both w
 Steam game, conflict prompt included, online play below) and Stray on the iPad (sign-in, license,
 online status). Achievements: Valheim's and Stray's are read as Steam has them, and an unlock
 through the runtime (`recomp-steam-cli achievements`, the same functions the game calls) reached
-Steam; an unlock from play on a device is not seen yet. Timberborn has not run on the runtime yet.
+Steam; an unlock from play on a device is not seen yet.
+
+On the Kettle-built runtime (2026-10-30, iPad, every port at `steam_concurrent_play` "deny"):
+Timberborn, Valheim, Brawlhalla and Stray kept their sign-in and passed the license check;
+Timberborn and Valheim uploaded saves to Steam Cloud and read their achievements; Valheim joined
+a password-protected Steam server by IP; Brawlhalla got its encrypted app ticket; Stray's Cloud
+passes ran with nothing to move. Downloads from Steam Cloud and a new unlock were not exercised.
+With Timberborn playing on an iPhone, Valheim launched on the iPad showed the "playing on another
+device" cover at once, and *Play here* ended the iPhone's game and went on online (before the fix
+in `RecompLicense.m`, Steam's logoff came before the ownership ticket and the port played on
+offline with no cover, as it did with the old copy of the core).
 
 ### Online play (Valheim)
 
@@ -629,12 +779,14 @@ SIGN_ID="Developer ID Application: <name> (<TEAMID>)" NOTARY_PROFILE=<profile> s
 The second form signs with the hardened runtime, builds a DMG, notarizes and staples it.
 Create the notary profile once with
 `xcrun notarytool store-credentials <profile> --apple-id <apple-id> --team-id <TEAMID>`.
-The app bundles the engine from `git archive HEAD`, so only committed files ship.
+The app bundles the engine from `git archive HEAD`, so only committed files ship, plus Kettle's
+sources at the commit the submodule pins.
 `swift scripts/make-icon.swift` regenerates the icon.
 
 ## Contributing
 
-This repository is public. Never commit game files or personal details: enable the guard
+This repository is public. After cloning, fetch Kettle with
+`git submodule update --init recomp/vendor/kettle`. Never commit game files or personal details: enable the guard
 once per clone with `git config core.hooksPath .githooks`, and list your own private
 strings (name, email, team ID, device names) as regexes in `.git/private-patterns`, which
 stays on your machine.
@@ -658,7 +810,10 @@ stays on your machine.
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
   native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, `RecompLicense.m`, the
   iOS side of the Steam license check, `RecompLog.m`, the log file; `recomp/native/RecompSteam/`:
-  the Steam runtime (session, sign-in, Steamworks API, Steam Cloud, networking, matchmaking, `cli/`)
+  the Steam runtime's Steamworks API (flat API, stats, Steam Cloud sync, networking, matchmaking,
+  `cli/`; `deprecated/` is not built); `recomp/vendor/kettle/`: Kettle, its Steam client core
+  (session, sign-in, Steam Cloud protocol), a submodule; `recomp/steam_runtime.py`: what each
+  route builds of the two
 - `recomp/steam_license.py`: the Mac side of the Steam license check (the app id a port checks)
 - `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`); `recomp/steam_cloud.py`: the save mode and Steam Cloud keys
 - `recomp/gamenetworkingsockets.py`, `recomp/playfab_party.py`: build GameNetworkingSockets, fetch PlayFab Party's iOS framework (when porting, not in git)

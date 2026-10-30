@@ -31,7 +31,9 @@ def main():
     for path in staged:
         if GAME_FILE.search(path):
             problems.append(f"{path}: looks like game content or a build product")
-        size = int(git("cat-file", "-s", f":{path}").strip() or 0)
+        if git("ls-files", "-s", "--", path).startswith("160000 "):
+            continue   # a submodule (recomp/vendor/kettle): a commit of another public repo, no blob here
+        size =int(git("cat-file", "-s", f":{path}").strip() or 0)
         if size > MAX_BYTES:
             problems.append(f"{path}: {size // 1024} KB is over the 1 MB limit")
 

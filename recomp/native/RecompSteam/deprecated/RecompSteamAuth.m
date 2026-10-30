@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // See RecompSteamAuth.h. ARC.
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>

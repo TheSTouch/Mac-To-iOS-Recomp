@@ -60,19 +60,27 @@ index 8a4674b9..a9a7613e 100644
                AND NOT VXWORKS
                AND NOT rtems
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
-index 2c0b5e24..46eb5617 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/CMakeLists.txt
-@@ -29,6 +29,8 @@ qt_internal_add_plugin(QIOSIntegrationPlugin
+@@ -17,6 +17,7 @@
+         qiosglobal.h qiosglobal.mm
+         qiosinputcontext.h qiosinputcontext.mm
+         qiosintegration.h qiosintegration.mm
++        qiosnumberpad.h qiosnumberpad.mm
+         qiosplatformaccessibility.h qiosplatformaccessibility.mm
+         qiosscreen.h qiosscreen.mm
+         qiosservices.h qiosservices.mm
+@@ -29,6 +30,9 @@
          uistrings_p.h uistrings.cpp
      LIBRARIES
          ${FWAudioToolbox}
 +        ${FWCoreGraphics}
 +        "-framework OpenGLES"
++        "-framework GameController"
          ${FWFoundation}
          ${FWMetal}
          ${FWQuartzCore}
-@@ -66,4 +68,7 @@ qt_internal_extend_target(QIOSIntegrationPlugin CONDITION NOT TVOS
+@@ -66,4 +70,7 @@
          ${FWPhotos}
  )
  
@@ -312,10 +320,9 @@ index 24d9d882..0da11c9b 100644
          // We schedule the main-redirection for the next run-loop pass, so that we
          // can return from this function and let UIApplicationMain finish its job.
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
-index 370032a1..5b046fff 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.h
-@@ -18,6 +18,7 @@ const char kImePlatformDataReturnKeyType[] = "returnKeyType";
+@@ -18,6 +18,7 @@
  
  @class QIOSLocaleListener;
  @class QIOSKeyboardListener;
@@ -323,7 +330,7 @@ index 370032a1..5b046fff 100644
  @class QIOSTextResponder;
  @protocol KeyboardState;
  
-@@ -71,6 +72,7 @@ public:
+@@ -71,6 +72,7 @@
  
      void setFocusObject(QObject *object) override;
      void focusWindowChanged(QWindow *focusWindow);
@@ -331,7 +338,7 @@ index 370032a1..5b046fff 100644
  
      void scrollToCursor();
      void scroll(int y);
-@@ -89,6 +91,7 @@ private:
+@@ -89,6 +91,7 @@
  
      QIOSLocaleListener *m_localeListener;
      QIOSKeyboardListener *m_keyboardHideGesture;
@@ -340,10 +347,17 @@ index 370032a1..5b046fff 100644
      KeyboardState m_keyboardState;
      ImeState m_imeState;
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
-index ccd61734..0e54d9f8 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosinputcontext.mm
-@@ -16,6 +16,7 @@
+@@ -7,6 +7,7 @@
+ 
+ #include "qiosglobal.h"
+ #include "qiosintegration.h"
++#include "qiosnumberpad.h"
+ #include "qiosscreen.h"
+ #include "qiostextresponder.h"
+ #include "qiosviewcontroller.h"
+@@ -16,6 +17,7 @@
  #include <QtCore/private/qcore_mac_p.h>
  
  #include <QGuiApplication>
@@ -351,10 +365,11 @@ index ccd61734..0e54d9f8 100644
  #include <QtGui/private/qwindow_p.h>
  
  // -------------------------------------------------------------------------
-@@ -256,6 +257,47 @@ static QUIView *focusView()
+@@ -255,9 +257,138 @@
+ @end
  
  // -------------------------------------------------------------------------
- 
++
 +// Taps that land on the focused text input bring the keyboard back once the user
 +// has hidden it: the keyboard otherwise only follows focus changes, and tapping
 +// the widget that already has focus is none.
@@ -396,10 +411,100 @@ index ccd61734..0e54d9f8 100644
 +
 +@end
 +
++// Follows the fingers on the screen, never recognizing anything: a keyboard for a
++// focus change made by a touch waits for it to end, and comes up only if it landed on
++// the input (QIOSInputContext::update()).
++@interface QIOSTouchWatcher : UIGestureRecognizer <UIGestureRecognizerDelegate>
++@property (nonatomic, readonly) BOOL touching;
++@property (nonatomic, readonly) CGPoint touchedAt; // where the last touch began, in the window
++@property (nonatomic, readonly) CFTimeInterval liftedAt;
++@property (nonatomic, copy) dispatch_block_t whenLifted;
++@end
++
++@implementation QIOSTouchWatcher {
++    NSUInteger m_touches;
++}
++
++- (instancetype)init
++{
++    if ((self = [super initWithTarget:nil action:nil])) {
++        self.cancelsTouchesInView = NO;
++        self.delaysTouchesBegan = NO;
++        self.delaysTouchesEnded = NO;
++        self.delegate = self;
++    }
++    return self;
++}
+ 
++- (void)dealloc
++{
++    [_whenLifted release];
++    [super dealloc];
++}
++
++- (BOOL)touching
++{
++    return m_touches > 0;
++}
++
++- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
++    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other
++{
++    Q_UNUSED(gestureRecognizer);
++    Q_UNUSED(other);
++    return YES;
++}
++
++- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
++{
++    [super touchesBegan:touches withEvent:event];
++    if (!m_touches)
++        _touchedAt = [[touches anyObject] locationInView:self.view];
++    m_touches += touches.count;
++}
++
++- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
++{
++    [super touchesEnded:touches withEvent:event];
++    [self lift:touches.count];
++}
++
++- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
++{
++    [super touchesCancelled:touches withEvent:event];
++    [self lift:touches.count];
++}
++
++- (void)lift:(NSUInteger)count
++{
++    m_touches -= MIN(count, m_touches);
++    if (m_touches)
++        return;
++    _liftedAt = CACurrentMediaTime();
++    self.state = UIGestureRecognizerStateFailed;
++    if (dispatch_block_t block = [[self.whenLifted retain] autorelease]) {
++        self.whenLifted = nil;
++        // After Qt has handled the release.
++        dispatch_async(dispatch_get_main_queue(), block);
++    }
++}
++
++- (void)reset
++{
++    [super reset];
++    m_touches = 0;
++}
++
++@end
++
  QT_BEGIN_NAMESPACE
  
++static QIOSTouchWatcher *qt_touchWatcher = nil;
++
  Qt::InputMethodQueries ImeState::update(Qt::InputMethodQueries properties)
-@@ -295,11 +337,13 @@ QIOSInputContext::QIOSInputContext()
+ {
+     if (!properties)
+@@ -295,11 +426,15 @@
      : QPlatformInputContext()
      , m_localeListener([QIOSLocaleListener new])
      , m_keyboardHideGesture([[QIOSKeyboardListener alloc] initWithQIOSInputContext:this])
@@ -410,31 +515,39 @@ index ccd61734..0e54d9f8 100644
          QIOSScreen *iosScreen = static_cast<QIOSScreen*>(QGuiApplication::primaryScreen()->handle());
          [iosScreen->uiWindow() addGestureRecognizer:m_keyboardHideGesture];
 +        [iosScreen->uiWindow() addGestureRecognizer:m_keyboardTapGesture];
++        qt_touchWatcher = [QIOSTouchWatcher new];
++        [iosScreen->uiWindow() addGestureRecognizer:qt_touchWatcher];
      }
  
      connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, &QIOSInputContext::focusWindowChanged);
-@@ -310,6 +354,8 @@ QIOSInputContext::~QIOSInputContext()
+@@ -310,6 +445,11 @@
      [m_localeListener release];
      [m_keyboardHideGesture.view removeGestureRecognizer:m_keyboardHideGesture];
      [m_keyboardHideGesture release];
 +    [m_keyboardTapGesture.view removeGestureRecognizer:m_keyboardTapGesture];
 +    [m_keyboardTapGesture release];
++    [qt_touchWatcher.view removeGestureRecognizer:qt_touchWatcher];
++    [qt_touchWatcher release];
++    qt_touchWatcher = nil;
  
      [m_textResponder release];
  }
-@@ -320,6 +366,20 @@ void QIOSInputContext::showInputPanel()
+@@ -320,6 +460,23 @@
      qImDebug("can't show virtual keyboard without a focus object, ignoring");
  }
  
++// Whether a point of the screen falls on the focused input.
++static bool onInputItem(const QPointF &globalPos)
++{
++    QWindow *window = qGuiApp->focusWindow();
++    return window && qGuiApp->inputMethod()->inputItemClipRectangle().contains(window->mapFromGlobal(globalPos));
++}
++
 +void QIOSInputContext::showKeyboardForTap(const QPointF &globalPos)
 +{
 +    if (!inputMethodAccepted() || (m_textResponder && [m_textResponder isFirstResponder]))
 +        return;
-+    QWindow *window = qGuiApp->focusWindow();
-+    if (!window)
-+        return;
-+    const QRectF item = qGuiApp->inputMethod()->inputItemClipRectangle();
-+    if (!item.contains(window->mapFromGlobal(globalPos)))
++    if (!onInputItem(globalPos))
 +        return;
 +    qImDebug("tap on the focus object, showing the keyboard again");
 +    update(Qt::ImQueryAll);
@@ -443,6 +556,142 @@ index ccd61734..0e54d9f8 100644
  void QIOSInputContext::hideInputPanel()
  {
      if (![m_textResponder isFirstResponder]) {
+@@ -343,6 +500,31 @@
+ }
+ 
+ // -------------------------------------------------------------------------
++
++// A responder waiting for the touch that made it to end (update()).
++static QIOSTextResponder *qt_pendingResponder = nil;
++
++// Set while a focus window change resets the responder with no keyboard up: a menu
++// or dialog closing must not bring the keyboard up for the input that kept focus
++// under it. A tap on that input does (showKeyboardForTap).
++static bool qt_keepKeyboardDown = false;
++
++// A docked keyboard takes its height off the screens' available geometry
++// (qiosscreen.mm), so a maximized window, a desktop app's main window, resizes
++// to the space above it instead of the root view scrolling up.
++CGRect qt_dockedKeyboardRect = CGRectZero; // screen coordinates
++
++static void setDockedKeyboard(CGRect rect)
++{
++    if (CGRectEqualToRect(rect, qt_dockedKeyboardRect))
++        return;
++    qt_dockedKeyboardRect = rect;
++    for (QScreen *screen : QGuiApplication::screens())
++        static_cast<QIOSScreen *>(screen->handle())->updateProperties();
++    for (QWindow *window : QGuiApplication::topLevelWindows())
++        if (window->handle() && (window->windowStates() & Qt::WindowMaximized))
++            window->handle()->setWindowState(window->windowStates());
++}
+ 
+ void QIOSInputContext::updateKeyboardState(NSNotification *notification)
+ {
+@@ -384,6 +566,17 @@
+         m_keyboardState.animationDuration = [[userInfo objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+         m_keyboardState.keyboardAnimating = m_keyboardState.animationDuration > 0 && !atEndOfKeyboardTransition;
+ 
++        // Docked: along the bottom of the screen and across it. A floating keyboard
++        // (the iPad's small one) covers the app instead, and so does the bar of a
++        // minimized keyboard (with a hardware keyboard or the Pencil).
++        const CGRect screenBounds = [UIScreen mainScreen].bounds;
++        const bool docked = m_keyboardState.keyboardVisible
++            && CGRectGetMaxY(frameEnd) >= CGRectGetMaxY(screenBounds) - 1
++            && CGRectGetWidth(frameEnd) >= CGRectGetWidth(screenBounds) * 0.9
++            && CGRectGetHeight(frameEnd) >= 150;
++
++        setDockedKeyboard(docked ? frameEnd : CGRectZero);
++
+         qImDebug() << qPrintable(QString::fromNSString(notification.name)) << "from" << QRectF::fromCGRect(frameBegin) << "to" << QRectF::fromCGRect(frameEnd)
+                    << "(curve =" << m_keyboardState.animationCurve << "duration =" << m_keyboardState.animationDuration << "s)";
+     } else {
+@@ -439,6 +632,9 @@
+     if (!isQtApplication())
+         return;
+ 
++    // Windows resize above a docked keyboard instead (setDockedKeyboard).
++    return;
++
+     if (m_keyboardHideGesture.state == UIGestureRecognizerStatePossible && m_keyboardHideGesture.numberOfTouches == 1) {
+         // Don't scroll to the cursor if the user is touching the screen and possibly
+         // trying to trigger the hide-keyboard gesture.
+@@ -607,7 +803,9 @@
+ 
+     qImDebug() << "new focus window =" << focusWindow;
+ 
++    qt_keepKeyboardDown = !(m_textResponder && [m_textResponder isFirstResponder]);
+     reset();
++    qt_keepKeyboardDown = false;
+ 
+     // The keyboard rectangle depend on the focus window, so
+     // we need to re-evaluate the keyboard state.
+@@ -647,7 +845,9 @@
+     const bool inputIsReadOnly = m_imeState.currentState.value(Qt::ImReadOnly).toBool();
+ 
+     if (inputMethodAccepted() || inputIsReadOnly) {
++        bool newResponder = false;
+         if (!m_textResponder || [m_textResponder needsKeyboardReconfigure:changedProperties]) {
++            newResponder = true;
+             [m_textResponder autorelease];
+             if (inputIsReadOnly) {
+                 qImDebug("creating new read-only text responder");
+@@ -661,13 +861,42 @@
+             [m_textResponder notifyInputDelegate:changedProperties];
+         }
+ 
+-        if (![m_textResponder isFirstResponder]) {
++        // A focus change made by a touch (a tap on an input, or a menu closing and
++        // handing the focus back) brings the keyboard up once the finger lifts, and only
++        // if the touch landed on the input.
++        const bool touched = qt_touchWatcher.touching || CACurrentMediaTime() - qt_touchWatcher.liftedAt < 0.5;
++        if (newResponder && qt_keepKeyboardDown) {
++            qImDebug("focus window changed with the keyboard down, keeping it down");
++        } else if (newResponder && ![m_textResponder isFirstResponder] && touched) {
++            [qt_pendingResponder release];
++            qt_pendingResponder = [m_textResponder retain];
++            const CGPoint at = qt_touchWatcher.touchedAt;
++            const auto show = ^{
++                // Qt has the touch's events by then, so the input's position.
++                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, int64_t(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++                    QIOSTextResponder *pending = qt_pendingResponder;
++                    qt_pendingResponder = nil;
++                    if (pending && pending == m_textResponder && ![pending isFirstResponder]
++                        && inputMethodAccepted() && onInputItem(QPointF(at.x, at.y)))
++                        [pending becomeFirstResponder];
++                    else
++                        [QIOSNumberPad hideIfUnused];
++                    [pending release];
++                });
++            };
++            if (qt_touchWatcher.touching)
++                qt_touchWatcher.whenLifted = show;
++            else
++                show();
++        } else if (![m_textResponder isFirstResponder] && m_textResponder != qt_pendingResponder) {
+             qImDebug("IM enabled, making text responder first responder");
+             [m_textResponder becomeFirstResponder];
+         }
+ 
+-        if (changedProperties & Qt::ImCursorRectangle)
++        if (changedProperties & Qt::ImCursorRectangle) {
+             scrollToCursor();
++            [QIOSNumberPad updatePosition];
++        }
+     } else if ([m_textResponder isFirstResponder]) {
+         qImDebug("IM not enabled, resigning text responder as first responder");
+         [m_textResponder resignFirstResponder];
+@@ -722,8 +951,10 @@
+     // If update() didn't end up creating a new text responder, oldResponder will still be
+     // the first responder. In that case we need to resign it, so that the input panel hides.
+     // (the input panel will apparently not hide if the first responder is only released).
++    // A keyboard waiting for the finger to lift is on its way, so the focus stays.
+     if ([oldResponder isFirstResponder]) {
+         qImDebug("IM not enabled, resigning autoreleased text responder as first responder");
++        FirstResponderCandidate pending(qt_pendingResponder == m_textResponder ? qt_pendingResponder : nil);
+         [oldResponder resignFirstResponder];
+     }
+ }
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm
 index 27d0f7f2..5372433b 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosintegration.mm
@@ -465,11 +714,390 @@ index 27d0f7f2..5372433b 100644
      if (Q_UNLIKELY(!qt_apple_isApplicationExtension() && !qt_apple_sharedApplication())) {
          qFatal("Error: You are creating QApplication before calling UIApplicationMain.\n" \
                 "If you are writing a native iOS application, and only want to use Qt for\n" \
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.h b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.h
+new file mode 100644
+--- /dev/null
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.h
+@@ -0,0 +1,36 @@
++// SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QIOSNUMBERPAD_H
++#define QIOSNUMBERPAD_H
++
++#import <UIKit/UIKit.h>
++
++#include <QtCore/qnamespace.h>
++
++@class QIOSTextInputResponder;
++
++// The iPad's number pad for number inputs: a small panel by the field, drawn by the
++// app above its windows. iPadOS's own (a popover by the caret, drawn by the keyboard
++// process) is swapped for the docked keyboard about a second after a tap focuses
++// the field, with no call into the app in between.
++@interface QIOSNumberPad : UIView
++
+++ (BOOL)wantedForHints:(Qt::InputMethodHints)hints;
++
++// From the responder becoming and resigning first responder.
+++ (void)showForResponder:(QIOSTextInputResponder *)responder decimal:(BOOL)decimal;
+++ (void)hideForResponder:(QIOSTextInputResponder *)responder;
++
++// A pad kept on screen for a responder that then never came (a touch that left the input).
+++ (void)hideIfUnused;
++
++// The input moved.
+++ (void)updatePosition;
++
++// A popup (a menu, a combo box's list) opened or closed: the pad, drawn above the app's
++// windows, is hidden while one shows.
+++ (void)popupsChanged;
++
++@end
++
++#endif // QIOSNUMBERPAD_H
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.mm
+new file mode 100644
+--- /dev/null
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosnumberpad.mm
+@@ -0,0 +1,334 @@
++// SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qiosnumberpad.h"
++
++#import <GameController/GameController.h>
++
++#include "qiosglobal.h"
++#include "qiostextresponder.h"
++#include "qiosviewcontroller.h"
++#include "quiview.h"
++
++#include <QtCore/qlocale.h>
++#include <QtGui/qguiapplication.h>
++#include <QtGui/qinputmethod.h>
++#include <QtGui/qwindow.h>
++
++// Sizes in points, like the system keyboard's keys.
++static const CGFloat kKeyWidth = 56;
++static const CGFloat kKeyHeight = 44;
++static const CGFloat kGap = 6;
++static const CGFloat kMargin = 8;
++static const CGFloat kFromInput = 6; // between the pad and the input
++
++static UIColor *keyboardColor(CGFloat light, CGFloat dark)
++{
++    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
++        return [UIColor colorWithWhite:traits.userInterfaceStyle == UIUserInterfaceStyleDark ? dark : light alpha:1];
++    }];
++}
++
++@interface QIOSNumberPadKey : UIButton
++@property (nonatomic, retain) UIColor *normalColor;
++@property (nonatomic, retain) UIColor *pressedColor;
++@end
++
++@implementation QIOSNumberPadKey
++
++- (void)dealloc
++{
++    [_normalColor release];
++    [_pressedColor release];
++    [super dealloc];
++}
++
++- (void)setHighlighted:(BOOL)highlighted
++{
++    [super setHighlighted:highlighted];
++    self.backgroundColor = highlighted ? self.pressedColor : self.normalColor;
++}
++
++@end
++
++static QIOSNumberPad *s_numberPad = nil;
++
++static bool popupShowing()
++{
++    for (QWindow *window : QGuiApplication::topLevelWindows())
++        if (window->type() == Qt::Popup && window->isVisible())
++            return true;
++    return false;
++}
++
++@implementation QIOSNumberPad {
++    QIOSTextInputResponder *m_responder; // the one the keys type into, retained
++    BOOL m_decimal;
++    QIOSNumberPadKey *m_zero;
++    QIOSNumberPadKey *m_separator;
++    NSTimer *m_repeat;
++}
++
+++ (BOOL)wantedForHints:(Qt::InputMethodHints)hints
++{
++    return UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
++        && (hints & (Qt::ImhDigitsOnly | Qt::ImhFormattedNumbersOnly));
++}
++
+++ (void)showForResponder:(QIOSTextInputResponder *)responder decimal:(BOOL)decimal
++{
++    if (!s_numberPad)
++        s_numberPad = [[QIOSNumberPad alloc] init];
++    [s_numberPad attach:responder decimal:decimal];
++}
++
+++ (void)hideForResponder:(QIOSTextInputResponder *)responder
++{
++    if (!s_numberPad || s_numberPad->m_responder != responder)
++        return;
++    [s_numberPad detach];
++    // A tap on another number input: its responder waits for the finger to lift
++    // (QIOSInputContext::update()) and the pad then moves there, instead of going
++    // away and coming back.
++    UIResponder *next = FirstResponderCandidate::currentCandidate();
++    if ([next isKindOfClass:[QIOSTextInputResponder class]]
++        && static_cast<QIOSTextInputResponder *>(next).usesNumberPad)
++        return;
++    [s_numberPad fadeOut];
++}
++
+++ (void)hideIfUnused
++{
++    if (s_numberPad && !s_numberPad->m_responder)
++        [s_numberPad fadeOut];
++}
++
+++ (void)updatePosition
++{
++    if (s_numberPad && s_numberPad->m_responder && !s_numberPad.hidden)
++        [s_numberPad place:YES];
++}
++
+++ (void)popupsChanged
++{
++    // Once the window's visibility has settled.
++    dispatch_async(dispatch_get_main_queue(), ^{
++        [s_numberPad refresh];
++    });
++}
++
++- (instancetype)init
++{
++    if (!(self = [super initWithFrame:CGRectMake(0, 0, 2 * kMargin + 3 * kKeyWidth + 2 * kGap,
++                                                 2 * kMargin + 5 * kKeyHeight + 4 * kGap)]))
++        return self;
++
++    self.hidden = YES;
++    self.alpha = 0;
++    self.backgroundColor = keyboardColor(0.82, 0.17);
++    self.layer.cornerRadius = 12;
++    self.layer.shadowColor = UIColor.blackColor.CGColor;
++    self.layer.shadowOpacity = 0.3;
++    self.layer.shadowRadius = 12;
++    self.layer.shadowOffset = CGSizeMake(0, 4);
++
++    UIColor *digit = keyboardColor(1.0, 0.42);
++    UIColor *function = keyboardColor(0.67, 0.27);
++    // A key at x (in key widths), on a row, so many key widths wide.
++    const auto key = [&](CGFloat x, int row, CGFloat keys, NSString *name, NSString *symbol, NSString *label,
++                         UIColor *normal, UIColor *pressed, SEL action) {
++        QIOSNumberPadKey *button = [QIOSNumberPadKey buttonWithType:UIButtonTypeCustom];
++        button.frame = CGRectMake(kMargin + x * (kKeyWidth + kGap), kMargin + row * (kKeyHeight + kGap),
++                                  keys * kKeyWidth + (keys - 1) * kGap, kKeyHeight);
++        button.normalColor = normal;
++        button.pressedColor = pressed;
++        button.backgroundColor = normal;
++        button.layer.cornerRadius = 6;
++        button.layer.shadowColor = UIColor.blackColor.CGColor;
++        button.layer.shadowOpacity = 0.25;
++        button.layer.shadowRadius = 0;
++        button.layer.shadowOffset = CGSizeMake(0, 1);
++        if (symbol) {
++            UIImageSymbolConfiguration *size = [UIImageSymbolConfiguration configurationWithPointSize:20];
++            [button setImage:[UIImage systemImageNamed:symbol withConfiguration:size] forState:UIControlStateNormal];
++            button.tintColor = UIColor.labelColor;
++            button.accessibilityLabel = label;
++        } else {
++            [button setTitle:name forState:UIControlStateNormal];
++            [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
++            button.titleLabel.font = [UIFont systemFontOfSize:24];
++        }
++        button.accessibilityIdentifier = [@"numberpad." stringByAppendingString:name];
++        if (action)
++            [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
++        [self addSubview:button];
++        return button;
++    };
++
++    for (int n = 1; n <= 9; ++n)
++        key((n - 1) % 3, 2 - (n - 1) / 3, 1, [NSString stringWithFormat:@"%d", n], nil, nil, digit, function,
++            @selector(typeKey:));
++    key(0, 3, 1, @"sign", @"plus.forwardslash.minus", @"Change sign", function, digit, @selector(toggleSign));
++    m_zero = key(1, 3, 1, @"0", nil, nil, digit, function, @selector(typeKey:));
++    m_separator = key(2, 3, 1, @"separator", nil, nil, digit, function, @selector(typeKey:)); // titled in attach
++
++    // Delete and Done share the last row, half each.
++    QIOSNumberPadKey *erase = key(0, 4, 1.5, @"delete", @"delete.left", @"Delete", function, digit, nil);
++    [erase addTarget:self action:@selector(startRepeat) forControlEvents:UIControlEventTouchDown];
++    [erase addTarget:self action:@selector(stopRepeat)
++          forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
++    QIOSNumberPadKey *done = key(1.5, 4, 1.5, @"done", nil, nil,
++                                 UIColor.systemBlueColor, function, @selector(done));
++    [done setTitle:NSLocalizedString(@"Done", nil) forState:UIControlStateNormal];
++    [done setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
++    done.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
++
++    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh)
++                                               name:GCKeyboardDidConnectNotification object:nil];
++    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh)
++                                               name:GCKeyboardDidDisconnectNotification object:nil];
++    return self;
++}
++
++- (void)dealloc
++{
++    [NSNotificationCenter.defaultCenter removeObserver:self];
++    [m_repeat invalidate];
++    [m_responder release];
++    [super dealloc];
++}
++
++- (void)attach:(QIOSTextInputResponder *)responder decimal:(BOOL)decimal
++{
++    if (m_responder != responder) {
++        [m_responder release];
++        m_responder = [responder retain];
++    }
++    m_decimal = decimal;
++
++    // Integers have no separator: their 0 takes its place too.
++    m_separator.hidden = !decimal;
++    [m_separator setTitle:QLocale().decimalPoint().toNSString() forState:UIControlStateNormal];
++    CGRect zero = m_zero.frame;
++    zero.size.width = decimal ? kKeyWidth : 2 * kKeyWidth + kGap;
++    m_zero.frame = zero;
++
++    // A hardware keyboard types the numbers.
++    if (GCKeyboard.coalescedKeyboard || popupShowing()) {
++        [self fadeOut];
++        return;
++    }
++
++    QWindow *window = qGuiApp->focusWindow();
++    UIView *root = window && window->handle()
++        ? reinterpret_cast<UIView *>(window->winId()).qtViewController.view : nil;
++    if (!root)
++        return;
++    if (self.superview != root) {
++        self.hidden = YES;
++        [root addSubview:self];
++    }
++    [root bringSubviewToFront:self];
++    // Once Qt has moved the input method's rectangles to the new input.
++    dispatch_async(dispatch_get_main_queue(), ^{
++        if (m_responder != responder)
++            return;
++        [self place:!self.hidden];
++        self.hidden = NO;
++        [UIView animateWithDuration:0.15 delay:0 options:UIViewAnimationOptionBeginFromCurrentState
++                         animations:^{ self.alpha = 1; } completion:nil];
++    });
++}
++
++- (void)detach
++{
++    [self stopRepeat];
++    [m_responder release];
++    m_responder = nil;
++}
++
++- (void)fadeOut
++{
++    if (self.hidden)
++        return;
++    [UIView animateWithDuration:0.1 delay:0 options:UIViewAnimationOptionBeginFromCurrentState
++                     animations:^{ self.alpha = 0; }
++                     completion:^(BOOL finished) {
++                         if (finished)
++                             self.hidden = YES;
++                     }];
++}
++
++// Under the input, or above it when there is no room below, centred on it and kept
++// inside the safe area.
++- (void)place:(BOOL)animated
++{
++    UIView *root = self.superview;
++    QWindow *window = qGuiApp->focusWindow();
++    if (!root || !window || !window->handle())
++        return;
++    QRectF item = qGuiApp->inputMethod()->inputItemClipRectangle();
++    if (item.isEmpty())
++        item = qGuiApp->inputMethod()->cursorRectangle();
++    UIView *view = reinterpret_cast<UIView *>(window->winId());
++    const CGRect input = [view convertRect:item.toCGRect() toView:root];
++    const CGRect area = UIEdgeInsetsInsetRect(root.bounds, root.safeAreaInsets);
++    const CGSize size = self.bounds.size;
++
++    CGFloat y = CGRectGetMaxY(input) + kFromInput;
++    if (y + size.height > CGRectGetMaxY(area) - kMargin)
++        y = CGRectGetMinY(input) - kFromInput - size.height;
++    // An input scrolled partly out of sight, or too tall to have room either side.
++    y = qBound(CGRectGetMinY(area) + kMargin, y, CGRectGetMaxY(area) - kMargin - size.height);
++    CGFloat x = CGRectGetMidX(input) - size.width / 2;
++    x = qBound(CGRectGetMinX(area) + kMargin, x, CGRectGetMaxX(area) - kMargin - size.width);
++
++    const CGPoint center = CGPointMake(x + size.width / 2, y + size.height / 2);
++    if (CGPointEqualToPoint(center, self.center))
++        return;
++    if (animated)
++        [UIView animateWithDuration:0.2 delay:0 options:UIViewAnimationOptionBeginFromCurrentState
++                         animations:^{ self.center = center; } completion:nil];
++    else
++        self.center = center;
++}
++
++// A hardware keyboard or a popup came or went.
++- (void)refresh
++{
++    if (m_responder && [m_responder isFirstResponder])
++        [self attach:m_responder decimal:m_decimal];
++}
++
++- (void)typeKey:(UIButton *)key
++{
++    [m_responder insertText:[key titleForState:UIControlStateNormal]];
++}
++
++- (void)toggleSign
++{
++    [m_responder qt_toggleSign];
++}
++
++- (void)startRepeat
++{
++    [m_responder deleteBackward];
++    [m_repeat invalidate];
++    m_repeat = [NSTimer scheduledTimerWithTimeInterval:0.45 repeats:NO block:^(NSTimer *) {
++        m_repeat = [NSTimer scheduledTimerWithTimeInterval:0.08 repeats:YES block:^(NSTimer *) {
++            [m_responder deleteBackward];
++        }];
++    }];
++}
++
++- (void)stopRepeat
++{
++    [m_repeat invalidate];
++    m_repeat = nil;
++}
++
++- (void)done
++{
++    [m_responder resignFirstResponder];
++}
++
++@end
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
-index 8ba3645b..fa9eb95d 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiosscreen.mm
-@@ -315,6 +315,13 @@ void QIOSScreen::updateProperties()
+@@ -315,6 +315,13 @@
      QRect previousAvailableGeometry = m_availableGeometry;
  
      m_geometry = QRectF::fromCGRect(m_uiScreen.bounds).toRect();
@@ -483,19 +1111,107 @@ index 8ba3645b..fa9eb95d 100644
  
      // The application frame doesn't take safe area insets into account, and
      // the safe area insets are not available before the UIWindow is shown,
+@@ -325,6 +332,16 @@
+     m_availableGeometry = m_geometry.adjusted(safeAreaInsets.left, safeAreaInsets.top,
+         -safeAreaInsets.right, -safeAreaInsets.bottom).intersected(applicationFrame);
+ 
++    // Above a docked keyboard (qiosinputcontext.mm).
++    extern CGRect qt_dockedKeyboardRect;
++    if (m_uiWindow && !CGRectIsEmpty(qt_dockedKeyboardRect)) {
++        const CGRect keyboard = [m_uiWindow convertRect:qt_dockedKeyboardRect
++                                    fromCoordinateSpace:m_uiScreen.coordinateSpace];
++        const int top = int(CGRectGetMinY(keyboard));
++        if (top > m_availableGeometry.top() && top <= m_availableGeometry.bottom())
++            m_availableGeometry.setBottom(top - 1);
++    }
++
+ #ifndef Q_OS_TVOS
+     if (m_uiScreen == [UIScreen mainScreen]) {
+         QIOSViewController *qtViewController = [m_uiWindow.rootViewController isKindOfClass:[QIOSViewController class]] ?
+diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.h b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.h
+--- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.h
++++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.h
+@@ -32,6 +32,10 @@
+ 
+ - (void)notifyInputDelegate:(Qt::InputMethodQueries)updatedProperties;
+ 
++// The iPad's number pad (qiosnumberpad.mm) instead of the keyboard.
++@property(nonatomic, readonly) BOOL usesNumberPad;
++- (void)qt_toggleSign;
++
+ @property(readwrite, retain) UIView *inputView;
+ @property(readwrite, retain) UIView *inputAccessoryView;
+ 
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
-index 682b0437..5a2a97df 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qiostextresponder.mm
-@@ -414,12 +414,32 @@
-     }
- #endif
+@@ -5,6 +5,7 @@
  
+ #include "qiosglobal.h"
+ #include "qiosinputcontext.h"
++#include "qiosnumberpad.h"
+ #include "quiview.h"
+ 
+ #include <QtCore/qscopedvaluerollback.h>
+@@ -200,9 +201,10 @@
+         // No first responder set anymore, sync this with Qt by clearing the
+         // focus object.
+         m_inputContext->clearCurrentFocusObject();
+-    } else if ([UIResponder qt_currentFirstResponder] == [self nextResponder]) {
++    } else if ([UIResponder qt_currentFirstResponder] == [self nextResponder]
++               && !FirstResponderCandidate::currentCandidate()) {
+         // We have resigned the keyboard, and transferred first responder back to the parent view
+-        Q_ASSERT(!FirstResponderCandidate::currentCandidate());
++        // (with a candidate, a number pad waiting for the keyboard to go: see QIOSInputContext::update())
+         if ([self currentImeState:Qt::ImEnabled].toBool()) {
+             // The current focus object expects text input, but there
+             // is no keyboard to get input from. So we clear focus.
+@@ -331,6 +333,9 @@
+ @implementation QIOSTextInputResponder {
+     QString m_markedText;
+     BOOL m_inSelectionChange;
++    BOOL m_usesNumberPad;
++    BOOL m_decimalNumberPad;
++    BOOL m_singleLine;
+ }
+ 
+ - (instancetype)initWithInputContext:(QT_PREPEND_NAMESPACE(QIOSInputContext) *)inputContext
+@@ -368,6 +373,7 @@
+         break;
+     }
+ 
++    m_singleLine = !(hints & Qt::ImhMultiLine);
+     self.secureTextEntry = BOOL(hints & Qt::ImhHiddenText);
+     self.autocorrectionType = (hints & Qt::ImhNoPredictiveText) ?
+                 UITextAutocorrectionTypeNo : UITextAutocorrectionTypeDefault;
+@@ -406,11 +412,37 @@
+         // According to the docs, leadingBarButtonGroups/trailingBarButtonGroups should be set to nil to hide the shortcuts bar.
+         // However, starting with iOS 10, the API has been surrounded with NS_ASSUME_NONNULL, which contradicts this and causes
+         // compiler warnings. Still it is the way to go to really hide the space reserved for that.
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wnonnull"
++        self.inputAssistantItem.leadingBarButtonGroups = nil;
++        self.inputAssistantItem.trailingBarButtonGroups = nil;
++#pragma clang diagnostic pop
++    }
++#endif
++
 +#ifndef Q_OS_TVOS
-+    // Desktop apps have no way to put the keyboard away, and some iPad keyboards
-+    // have no hide key: one in the shortcuts bar, on the right.
-+    if (!platformData.value(kImePlatformDataHideShortcutsBar).toBool()
-+        && UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
++    // On an iPad, number inputs get the app's own number pad (qiosnumberpad.mm) and no
++    // system keyboard: an empty input view, and no shortcuts bar.
++    m_usesNumberPad = !self.inputView && [QIOSNumberPad wantedForHints:hints];
++    m_decimalNumberPad = m_usesNumberPad && (hints & Qt::ImhFormattedNumbersOnly);
++    if (m_usesNumberPad) {
++        self.inputView = [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wnonnull"
+         self.inputAssistantItem.leadingBarButtonGroups = nil;
+         self.inputAssistantItem.trailingBarButtonGroups = nil;
+ #pragma clang diagnostic pop
++    } else if (!platformData.value(kImePlatformDataHideShortcutsBar).toBool()
++               && UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
++        // Desktop apps have no way to put the keyboard away, and some iPad keyboards
++        // have no hide key: one in the shortcuts bar, on the right.
 +        UIBarButtonItem *hide = [[[UIBarButtonItem alloc]
 +            initWithImage:[UIImage systemImageNamed:@"keyboard.chevron.compact.down"]
 +            style:UIBarButtonItemStylePlain target:self action:@selector(qt_hideKeyboard)] autorelease];
@@ -503,18 +1219,80 @@ index 682b0437..5a2a97df 100644
 +            representativeItem:nil] autorelease];
 +        NSArray<UIBarButtonItemGroup *> *groups = self.inputAssistantItem.trailingBarButtonGroups;
 +        self.inputAssistantItem.trailingBarButtonGroups = groups ? [groups arrayByAddingObject:group] : @[group];
-+    }
-+#endif
-+
-     self.undoManager.groupsByEvent = NO;
-     [self rebuildUndoStack];
+     }
+ #endif
  
+@@ -420,6 +452,75 @@
      return self;
  }
  
++- (BOOL)usesNumberPad
++{
++    return m_usesNumberPad;
++}
++
++- (BOOL)becomeFirstResponder
++{
++    if (![super becomeFirstResponder])
++        return NO;
++    if (m_singleLine)
++        [self qt_moveCursorToEnd];
++    if (m_usesNumberPad)
++        [QIOSNumberPad showForResponder:self decimal:m_decimalNumberPad];
++    return YES;
++}
++
++- (BOOL)resignFirstResponder
++{
++    if (![super resignFirstResponder])
++        return NO;
++    if (m_usesNumberPad)
++        [QIOSNumberPad hideForResponder:self];
++    return YES;
++}
++
++// A focused field types at the end of its text, wherever the tap that focused it
++// landed (this comes after the tap's release, which placed the cursor).
++- (void)qt_moveCursorToEnd
++{
++    QObject *focusObject = QGuiApplication::focusObject();
++    if (!focusObject)
++        return;
++    QInputMethodQueryEvent query(Qt::ImSurroundingText | Qt::ImCursorPosition | Qt::ImAnchorPosition);
++    QCoreApplication::sendEvent(focusObject, &query);
++    const int end = int(query.value(Qt::ImSurroundingText).toString().size());
++    if (query.value(Qt::ImCursorPosition).toInt() == end && query.value(Qt::ImAnchorPosition).toInt() == end)
++        return;
++    QInputMethodEvent e(QString(), {QInputMethodEvent::Attribute(QInputMethodEvent::Selection, end, 0)});
++    QCoreApplication::sendEvent(focusObject, &e);
++}
++
 +- (void)qt_hideKeyboard
 +{
 +    [self resignFirstResponder];
++}
++
++// The number pad's +/- key.
++- (void)qt_toggleSign
++{
++    QObject *focusObject = QGuiApplication::focusObject();
++    if (!focusObject)
++        return;
++    QInputMethodQueryEvent query(Qt::ImSurroundingText | Qt::ImCursorPosition);
++    QCoreApplication::sendEvent(focusObject, &query);
++    const QString text = query.value(Qt::ImSurroundingText).toString();
++    const int cursor = query.value(Qt::ImCursorPosition).toInt();
++    // The sign goes before the first digit or separator; a minus already there goes.
++    int at = 0;
++    while (at < text.size() && !text.at(at).isDigit() && text.at(at) != u'.' && text.at(at) != u','
++           && text.at(at) != u'-' && text.at(at) != QChar(0x2212))
++        ++at;
++    QInputMethodEvent e;
++    if (at < text.size() && (text.at(at) == u'-' || text.at(at) == QChar(0x2212)))
++        e.setCommitString(QString(), at - cursor, 1);
++    else
++        e.setCommitString(QStringLiteral("-"), (at < text.size() ? at : 0) - cursor, 0);
++    QCoreApplication::sendEvent(focusObject, &e);
 +}
 +
  - (void)dealloc
@@ -534,10 +1312,28 @@ index fad4a8d5..cf8a804b 100644
      });
  }
 diff --git a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
-index 1e795861..f1978bcd 100644
 --- a/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
 +++ b/qtbase-everywhere-src-6.5.5/src/plugins/platforms/ios/qioswindow.mm
-@@ -185,8 +185,26 @@ void QIOSWindow::setGeometry(const QRect &rect)
+@@ -6,6 +6,7 @@
+ #include "qiosapplicationdelegate.h"
+ #include "qiosglobal.h"
+ #include "qiosintegration.h"
++#include "qiosnumberpad.h"
+ #include "qiosscreen.h"
+ #include "qiosviewcontroller.h"
+ #include "quiview.h"
+@@ -102,6 +103,10 @@
+     if (!isQtApplication() || !window()->isTopLevel())
+         return;
+ 
++    // The number pad keeps out of a popup's way (qiosnumberpad.mm).
++    if (window()->type() == Qt::Popup)
++        [QIOSNumberPad popupsChanged];
++
+     // Since iOS doesn't do window management the way a Qt application
+     // expects, we need to raise and activate windows ourselves:
+     if (visible)
+@@ -185,8 +190,26 @@
      applyGeometry(rect);
  }
  
@@ -565,7 +1361,7 @@ index 1e795861..f1978bcd 100644
      // Geometry changes are asynchronous, but QWindow::geometry() is
      // expected to report back the 'requested geometry' until we get
      // a callback with the updated geometry from the window system.
-@@ -218,6 +236,13 @@ bool QIOSWindow::isExposed() const
+@@ -218,6 +241,13 @@
  
  void QIOSWindow::setWindowState(Qt::WindowStates state)
  {
@@ -579,7 +1375,7 @@ index 1e795861..f1978bcd 100644
      // Update the QWindow representation straight away, so that
      // we can update the statusbar visibility based on the new
      // state before applying geometry changes.
-@@ -248,6 +273,9 @@ void QIOSWindow::setWindowState(Qt::WindowStates state)
+@@ -248,6 +278,9 @@
      } else {
          applyGeometry(m_normalGeometry);
      }

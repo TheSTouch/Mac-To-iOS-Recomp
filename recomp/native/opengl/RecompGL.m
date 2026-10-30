@@ -40,6 +40,7 @@ static void start(EAGLContext *context) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         gles = dlopen("/System/Library/Frameworks/OpenGLES.framework/OpenGLES", RTLD_NOW | RTLD_LOCAL);
+        setvbuf(stdout, NULL, _IOLBF, 0); // gl4es logs with printf; a device console is not a tty
         setenv("LIBGL_ES", "2", 0);
         setenv("LIBGL_GL", "21", 0);
         setenv("LIBGL_NOBANNER", "1", 0);

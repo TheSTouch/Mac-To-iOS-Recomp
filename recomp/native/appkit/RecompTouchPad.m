@@ -10,8 +10,15 @@
 // mouse) pass through.
 //
 // Positions and sizes are for an iPad's screen height; a shorter screen (a phone
-// in landscape) scales them down, never below thumb size, and keeps them clear
-// of the side safe areas (the Dynamic Island or notch).
+// in landscape) scales them down, never below thumb size. On an iPad they count
+// from the safe area's sides. On a phone held sideways they count from the screen's
+// side edges, each side's outermost control a small margin in, using the space above
+// and below the Dynamic Island (or notch): a control over the island's keep-out zone
+// slides out of its band toward its own edge (or, with no room there, inward), one in
+// a rounded corner moves in until it is clear, and the D-pad sits at mid height, right
+// beside the island when the island is on the left, else at the left edge. Menu and
+// View move inward and LT and RT up into the corners, leaving room above the island.
+// No public API gives the island's shape, so it is guessed from the side safe inset.
 #import "RecompAppKit.h"
 #import <GameController/GameController.h>
 #import <objc/runtime.h>
@@ -21,6 +28,8 @@ static GCController *gPad;
 @interface RecompPadButton : NSObject
 @property (copy) NSString *name;
 @property CGPoint center;   // relative: x from the left (>0) or right (<0) edge, y from the bottom (>0) or top (<0) edge
+@property CGPoint edge;     // relative, on a phone held sideways, where it differs from center (else zero)
+@property CGPoint point;    // on screen, set by -layoutSubviews
 @property CGFloat radius;   // at scale 1 (an iPad)
 @property (strong) CAShapeLayer *layer;
 @property (strong) CATextLayer *label;
@@ -48,6 +57,11 @@ static GCController *gPad;
     RecompStick *_left, *_right;
     NSMapTable<UITouch *, id> *_owners; // touch -> button or stick
     CGFloat _scale; // layout scale for this screen height: 1 on an iPad
+    CGFloat _fromLeft, _fromRight; // where relative x counts from, in from each side
+    BOOL _edges;    // a phone held sideways: controls against the screen's side edges
+    CGRect _cutout; // with _edges, the Dynamic Island's or notch's keep-out zone
+    CGPoint _dpad;  // the D-pad's centre on screen
+    UIWindowScene *_scene; // observed: turning the phone over changes no size or inset
 }
 
 static UIColor *Ink(CGFloat a) { return [UIColor colorWithWhite:1 alpha:a]; }
@@ -80,6 +94,16 @@ static const CGFloat kMinScale = 0.7;     // A/B/X/Y stay 44 points wide
 static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
 static const CGPoint kDPad = {84, 200};   // D-pad centre, between L3 and LT
 static const CGFloat kDPadArm = 44;       // centre to each arm
+// A phone held sideways. No public API gives the cutout, so it is guessed from the side
+// safe inset: from 50 points a Dynamic Island, from 44 a notch; either centred on the edge.
+static const CGFloat kNotchInset = 44;
+static const CGFloat kIslandInset = 50;
+static const CGSize kIsland = {37, 126};  // across, along the edge
+static const CGFloat kIslandGap = 11;     // from the screen's edge
+static const CGSize kNotch = {30, 210};   // at the edge
+static const CGFloat kCutoutClear = 6;    // keep-out zone around either
+static const CGFloat kEdgeMargin = 8;     // outermost control to the screen's side edge, at scale 1
+static const CGFloat kCornerRadius = 55;  // the screen's rounded corners: discs stay inside
 
 - (RecompPadButton *)arm:(NSString *)name label:(NSString *)label dx:(CGFloat)dx dy:(CGFloat)dy {
     RecompPadButton *b = [self button:name at:CGPointMake(kDPad.x + dx * kDPadArm, kDPad.y + dy * kDPadArm) radius:20 input:nil];
@@ -128,6 +152,12 @@ static const CGFloat kDPadArm = 44;       // centre to each arm
             [self arm:@"Left" label:@"\u2190" dx:-1 dy:0],
             [self arm:@"Right" label:@"\u2192" dx:1 dy:0],
         ];
+        // A phone held sideways: Menu and View move inward, LT and RT up into the corners,
+        // leaving room above the Dynamic Island for LB or RB.
+        [self buttonNamed:@"Menu"].edge = CGPointMake(136, -34);
+        [self buttonNamed:@"View"].edge = CGPointMake(196, -34);
+        [self buttonNamed:@"LT"].edge = CGPointMake(56, -60);
+        [self buttonNamed:@"RT"].edge = CGPointMake(-56, -60);
         _left = [self stick:^(GCExtendedGamepad *g) { return g.leftThumbstick; } curve:1.3];
         _right = [self stick:^(GCExtendedGamepad *g) { return g.rightThumbstick; } curve:1.8]; // camera
     }
@@ -136,20 +166,89 @@ static const CGFloat kDPadArm = 44;       // centre to each arm
 
 - (CGPoint)place:(CGPoint)rel {
     CGSize s = self.bounds.size;
-    UIEdgeInsets in = self.safeAreaInsets;
     CGFloat x = rel.x * _scale, y = rel.y * _scale;
-    return CGPointMake(x >= 0 ? in.left + x : s.width - in.right + x, y >= 0 ? s.height - y : -y);
+    return CGPointMake(x >= 0 ? _fromLeft + x : s.width - _fromRight + x, y >= 0 ? s.height - y : -y);
 }
+
+- (CGPoint)rel:(RecompPadButton *)b { return _edges && !CGPointEqualToPoint(b.edge, CGPointZero) ? b.edge : b.center; }
 
 - (CGFloat)radius:(RecompPadButton *)b { return MAX(b.radius * _scale, MIN(b.radius, kMinRadius)); }
 
+// A disc in one of the screen's rounded corners moves toward the corner's centre until it is inside.
+- (CGPoint)inCorner:(CGPoint)c radius:(CGFloat)r {
+    CGSize s = self.bounds.size;
+    CGFloat R = kCornerRadius;
+    CGPoint o = CGPointMake(c.x < R ? R : c.x > s.width - R ? s.width - R : c.x, c.y < R ? R : c.y > s.height - R ? s.height - R : c.y);
+    CGFloat d = hypot(c.x - o.x, c.y - o.y);
+    if (d + r <= R) return c;
+    return CGPointMake(o.x + (c.x - o.x) * (R - r) / d, o.y + (c.y - o.y) * (R - r) / d);
+}
+
+- (BOOL)overCutout:(CGPoint)c radius:(CGFloat)r {
+    CGFloat x = MAX(CGRectGetMinX(_cutout), MIN(c.x, CGRectGetMaxX(_cutout)));
+    CGFloat y = MAX(CGRectGetMinY(_cutout), MIN(c.y, CGRectGetMaxY(_cutout)));
+    return hypot(c.x - x, c.y - y) < r;
+}
+
+- (BOOL)fits:(RecompPadButton *)b at:(CGPoint)c radius:(CGFloat)r {
+    if (c.y - r < 0 || c.y + r > self.bounds.size.height || [self overCutout:c radius:r]) return NO;
+    for (RecompPadButton *o in _buttons)
+        if (o != b && hypot(c.x - o.point.x, c.y - o.point.y) < r + [self radius:o]) return NO;
+    return YES;
+}
+
+// A control on a phone held sideways: inside the rounded corners, and clear of the cutout's
+// keep-out zone, sliding out of its band toward the control's own edge (top or bottom), or,
+// if it does not fit there, inward just enough.
+- (CGPoint)fit:(RecompPadButton *)b {
+    CGFloat r = [self radius:b];
+    CGPoint c = [self inCorner:b.point radius:r];
+    if (![self overCutout:c radius:r]) return c;
+    CGFloat y = b.center.y < 0 ? CGRectGetMinY(_cutout) - r : CGRectGetMaxY(_cutout) + r;
+    CGPoint slid = [self inCorner:CGPointMake(c.x, y) radius:r];
+    if ([self fits:b at:slid radius:r]) return slid;
+    BOOL left = CGRectGetMidX(_cutout) < self.bounds.size.width / 2;
+    return CGPointMake(left ? CGRectGetMaxX(_cutout) + r : CGRectGetMinX(_cutout) - r, c.y);
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _scale = MAX(MIN(self.bounds.size.height / kDesignHeight, 1), kMinScale);
+    CGSize s = self.bounds.size;
+    _scale = MAX(MIN(s.height / kDesignHeight, 1), kMinScale);
+    UIEdgeInsets in = self.safeAreaInsets;
+    CGFloat inset = MAX(in.left, in.right);
+    UIInterfaceOrientation o = self.window.windowScene.interfaceOrientation;
+    _edges = inset >= kNotchInset && UIInterfaceOrientationIsLandscape(o);
+    _fromLeft = in.left; _fromRight = in.right;
+    CGFloat margin = kEdgeMargin * _scale, reach = kDPadArm * _scale + [self radius:[self buttonNamed:@"Left"]];
+    _dpad = [self place:kDPad];
+    if (_edges) {
+        // Each side's controls (not the D-pad) move together, the outermost at the margin.
+        CGFloat outL = INFINITY, outR = INFINITY;
+        for (RecompPadButton *b in _buttons) {
+            if (!b.input) continue;
+            CGFloat out = fabs([self rel:b].x) * _scale - [self radius:b];
+            if ([self rel:b].x > 0) outL = MIN(outL, out); else outR = MIN(outR, out);
+        }
+        _fromLeft = margin - outL; _fromRight = margin - outR;
+        // The island is at the phone's top: on the left when the interface is landscapeRight.
+        BOOL island = inset >= kIslandInset, left = o == UIInterfaceOrientationLandscapeRight;
+        CGSize z = island ? kIsland : kNotch;
+        CGFloat gap = island ? kIslandGap : 0;
+        _cutout = CGRectInset(CGRectMake(left ? gap : s.width - gap - z.width, (s.height - z.height) / 2, z.width, z.height),
+                              -kCutoutClear, -kCutoutClear);
+        _dpad = CGPointMake((left ? CGRectGetMaxX(_cutout) : 0) + margin + reach, s.height / 2);
+    }
+    for (RecompPadButton *b in _buttons)
+        b.point = b.input ? [self place:[self rel:b]]
+            : CGPointMake(_dpad.x + b.dpad.dx * kDPadArm * _scale, _dpad.y - b.dpad.dy * kDPadArm * _scale);
+    if (_edges)
+        for (RecompPadButton *b in _buttons)
+            if (b.input) b.point = [self fit:b];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     for (RecompPadButton *b in _buttons) {
-        CGPoint c = [self place:b.center];
+        CGPoint c = b.point;
         CGFloat r = [self radius:b];
         b.layer.path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r)].CGPath;
         b.label.fontSize = round((b.radius > 26 || b.input == nil ? 20 : 13) * MAX(_scale, 0.85));
@@ -169,11 +268,24 @@ static const CGFloat kDPadArm = 44;       // centre to each arm
     [self setNeedsLayout];
 }
 
+// Turning a phone from one landscape to the other moves the island to the other side.
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    UIWindowScene *scene = self.window.windowScene;
+    if (scene == _scene) return;
+    [_scene removeObserver:self forKeyPath:@"effectiveGeometry"];
+    _scene = scene;
+    [_scene addObserver:self forKeyPath:@"effectiveGeometry" options:0 context:NULL];
+}
+
+- (void)observeValueForKeyPath:(NSString *)path ofObject:(id)o change:(NSDictionary *)change context:(void *)ctx {
+    [self setNeedsLayout];
+}
+
 // The D-pad's arms share one disc, split by direction from its centre: no
 // touch on it, not even between the arms, starts the move stick.
 - (RecompPadButton *)armAt:(CGPoint)p {
-    CGPoint d = [self place:kDPad];
-    CGFloat dx = p.x - d.x, dy = d.y - p.y, best = -INFINITY;
+    CGFloat dx = p.x - _dpad.x, dy = _dpad.y - p.y, best = -INFINITY;
     RecompPadButton *arm = nil;
     for (RecompPadButton *b in _buttons) {
         if (b.input || hypot(dx, dy) > kDPadArm * _scale + [self radius:b] + 12 * _scale) continue;
@@ -187,7 +299,7 @@ static const CGFloat kDPadArm = 44;       // centre to each arm
     RecompPadButton *arm = [self armAt:p];
     if (arm) return arm;
     for (RecompPadButton *b in _buttons) {
-        CGPoint c = [self place:b.center];
+        CGPoint c = b.point;
         if (b.input && hypot(p.x - c.x, p.y - c.y) <= [self radius:b] + 12 * _scale) return b;
     }
     return nil;

@@ -24,6 +24,7 @@
 // <appid>/) tells what the last sync did.
 #import "cloud.h"
 #import "RecompSteamSession.h"
+#import "RecompSteamFlat.h"
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>
