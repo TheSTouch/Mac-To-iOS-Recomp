@@ -8,6 +8,9 @@
 //   - a press is held back until it is clear what it is. Released without moving
 //     it is a tap: the press goes to the widget, then the release. Moved past the
 //     drag distance it scrolls, and the widget never sees it;
+//   - held still for kHoldMs it goes to the widget, and the drag that follows is
+//     the widget's own (selecting text, dragging items); a double tap is passed as
+//     the double click it is (selects a word);
 //   - a drag the area cannot follow (sideways in a list that only scrolls down)
 //     goes to the widget at once;
 //   - sliders and splitter handles inside a scrolled area keep their drag, and
@@ -15,6 +18,7 @@
 // Mouse events from a mouse or trackpad are left alone. Qt's own flick gesture
 // (QScroller::grabGesture) is not used: on a touchscreen it scrolls and lets the
 // widget select at the same time.
+#include <QtCore/QBasicTimer>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEasingCurve>
 #include <QtCore/QPointer>
@@ -39,6 +43,7 @@ extern bool recompSendSpontaneousEvent(QObject *receiver, QEvent *event)
 
 namespace {
 
+const int kHoldMs = 500;          // a press held this long is the widget's
 const qreal kDragDistance = 12;   // points before a press becomes a scroll (RecompQtTouch.mm's drag distance)
 const char *const kSetUp = "_recomp_touchScroll";
 const char *const kUnit = "_recomp_scrollUnit";
@@ -113,6 +118,7 @@ public:
             return false;
         switch (event->type()) {
         case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonDblClick:
         case QEvent::MouseMove:
         case QEvent::MouseButtonRelease:
             if (object->isWidgetType() && fromTouch(static_cast<QMouseEvent *>(event)))
@@ -131,6 +137,21 @@ public:
         }
     }
 
+protected:
+    void timerEvent(QTimerEvent *event) override
+    {
+        if (event->timerId() != hold.timerId())
+            return QObject::timerEvent(event);
+        hold.stop();
+        if (mode != Pending)
+            return;
+        // Held still: the touch is the widget's from here on.
+        if (scroller)
+            scroller->stop();
+        replay();
+        mode = PassThrough;
+    }
+
 private:
     enum Mode { Idle, Pending, Scrolling, PassThrough };
 
@@ -146,7 +167,9 @@ private:
         // When the finger was there (a UITouch's time), not when the event got here.
         const qint64 now = qint64(e->timestamp());
         switch (e->type()) {
-        case QEvent::MouseButtonPress: {
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonDblClick: {
+            // Qt sends the second press of a double click as the double click only.
             if (e->button() != Qt::LeftButton || e->buttons() != Qt::LeftButton)
                 return mode == Pending || mode == Scrolling;
             reset();
@@ -174,6 +197,7 @@ private:
             target = w;
             press.reset(static_cast<QMouseEvent *>(e->clone()));
             mode = Pending;
+            hold.start(kHoldMs, this);
             return true;
         }
         case QEvent::MouseMove:
@@ -185,12 +209,14 @@ private:
             }
             scroller->handleInput(QScroller::InputMove, viewport->mapFromGlobal(e->globalPosition()), now);
             if (scroller->state() == QScroller::Dragging) {
+                hold.stop();
                 press.reset();
                 mode = Scrolling;
                 return true;
             }
             if (mode == Pending && scroller->state() == QScroller::Inactive) {
                 // A drag this area cannot follow: the widget's.
+                hold.stop();
                 replay();
                 mode = PassThrough;
                 return false;
@@ -198,6 +224,7 @@ private:
             return true;
         case QEvent::MouseButtonRelease: {
             const Mode was = mode;
+            hold.stop();
             if (scroller && viewport && (was == Pending || was == Scrolling))
                 scroller->handleInput(QScroller::InputRelease, viewport->mapFromGlobal(e->globalPosition()), now);
             if (was == Pending)
@@ -223,6 +250,7 @@ private:
 
     void reset()
     {
+        hold.stop();
         press.reset();
         mode = Idle;
     }
@@ -268,6 +296,7 @@ private:
         return true;
     }
 
+    QBasicTimer hold;
     Mode mode = Idle;
     bool sending = false;
     QPointer<QScroller> scroller;

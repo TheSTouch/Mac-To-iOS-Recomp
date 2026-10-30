@@ -8,11 +8,15 @@
 //                                        widget that takes input methods), as a keyboard would commit it
 //   recomp-click     "x y"            -> a left click (press, release; not a touch) at that point of
 //                                        the screen, in points, sent to the widget under it
-//   recomp-swipe     "x1 y1 x2 y2 ms" -> a one-finger touch from x1,y1 to x2,y2 (screen points), pressed,
-//                                        moved every 16 ms and released over ms milliseconds, handed to
-//                                        Qt as the touchscreen hands it (QWindowSystemInterface), so it
-//                                        goes the way a finger does: touch events, then the mouse events
-//                                        Qt makes of them. "x y x y 0" is a tap, "x y x y 800" a hold
+//   recomp-swipe     "x1 y1 x2 y2 ms [hold]"
+//                                     -> a one-finger touch from x1,y1 to x2,y2 (screen points), pressed,
+//                                        held still for hold milliseconds (none by default), then moved
+//                                        every 16 ms and released over ms milliseconds, handed to Qt as
+//                                        the touchscreen hands it (QWindowSystemInterface), so it goes
+//                                        the way a finger does: touch events, then the mouse events Qt
+//                                        makes of them. "x y x y 0" is a tap, "x y x y 0 800" a hold.
+//                                        One touch per line, each starting as the one before ends
+//                                        (two tap lines are a double tap)
 //   recomp-grab      (empty)          -> recomp-gl-<n>.png: what each QOpenGLWidget rendered, read back
 //                                        from its framebuffer, and recomp-window.png: the window
 //
@@ -66,7 +70,12 @@ static void sendTouch(QWindow *window, const QPointingDevice *device, QPointF gl
                                                                                          device, {point});
 }
 
-static void swipe(QPointF from, QPointF to, int ms)
+// Touches still to come from the last recomp-swipe, one line each.
+static QStringList swipesLeft;
+
+static void nextSwipe();
+
+static void swipe(QPointF from, QPointF to, int ms, int hold)
 {
     const QPointingDevice *device = nullptr;
     for (const QInputDevice *d : QInputDevice::devices())
@@ -76,10 +85,11 @@ static void swipe(QPointF from, QPointF to, int ms)
     QWindow *window = under ? under->window()->windowHandle() : nullptr;
     if (!device || !window) {
         fprintf(stderr, "[recomp] swipe: no %s\n", device ? "window there" : "touchscreen");
+        swipesLeft.clear();
         return;
     }
-    fprintf(stderr, "[recomp] swipe %g,%g -> %g,%g over %d ms, starting on %s\n", from.x(), from.y(), to.x(), to.y(),
-            ms, under->metaObject()->className());
+    fprintf(stderr, "[recomp] swipe %g,%g -> %g,%g over %d ms after %d ms, starting on %s\n", from.x(), from.y(),
+            to.x(), to.y(), ms, hold, under->metaObject()->className());
     QPointer<QWindow> target(window);
     auto *timer = new QTimer(QCoreApplication::instance());
     auto *clock = new QElapsedTimer;
@@ -89,20 +99,30 @@ static void swipe(QPointF from, QPointF to, int ms)
     QObject::connect(timer, &QTimer::timeout, [=] {
         // A busy event loop fires this late: the release is stamped when the
         // move ends, so the touch keeps its speed to the end, as a flick does.
-        const qint64 t = qMin<qint64>(clock->elapsed(), ms);
-        const qreal f = ms > 0 ? qreal(t) / ms : 1;
+        const qint64 t = qMin<qint64>(clock->elapsed(), hold + ms) - hold;
+        const qreal f = t < 0 ? 0 : ms > 0 ? qreal(t) / ms : 1;
         if (target) {
             const QPointF at = from + (to - from) * f;
             sendTouch(target, device, at, f < 1 ? QEventPoint::State::Updated : QEventPoint::State::Released,
-                      start + t);
+                      start + hold + t);
         }
         if (f >= 1 || !target) {
             timer->stop();
             timer->deleteLater();
             delete clock;
+            nextSwipe();
         }
     });
     timer->start(16);
+}
+
+static void nextSwipe()
+{
+    if (swipesLeft.isEmpty())
+        return;
+    const QStringList v = swipesLeft.takeFirst().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    swipe(QPointF(v.value(0).toDouble(), v.value(1).toDouble()), QPointF(v.value(2).toDouble(), v.value(3).toDouble()),
+          v.value(4).toInt(), v.value(5).toInt());
 }
 
 static void poll()
@@ -198,11 +218,10 @@ static void poll()
     }
     QFile swipeRequest(docs + QStringLiteral("recomp-swipe"));
     if (swipeRequest.exists() && swipeRequest.open(QIODevice::ReadOnly)) {
-        const QStringList v = QString::fromUtf8(swipeRequest.readAll()).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        swipesLeft = QString::fromUtf8(swipeRequest.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         swipeRequest.close();
         swipeRequest.remove();
-        swipe(QPointF(v.value(0).toDouble(), v.value(1).toDouble()), QPointF(v.value(2).toDouble(), v.value(3).toDouble()),
-              v.value(4).toInt());
+        nextSwipe();
     }
     QFile grab(docs + QStringLiteral("recomp-grab"));
     if (grab.exists()) {
