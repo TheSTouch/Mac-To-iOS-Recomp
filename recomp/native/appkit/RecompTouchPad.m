@@ -85,6 +85,10 @@ static UIColor *Ink(CGFloat a) { return [UIColor colorWithWhite:1 alpha:a]; }
 
 static const CGFloat kStickTravel = 110; // points of drag for full deflection, at scale 1
 static const CGFloat kDeadZone = 0.1;
+// Unreal 4 ignores stick values under 0.25 (its default dead zone for gamepad sticks):
+// past the touch stick's own dead zone, values start there, or the camera stick, with
+// its steep curve, did nothing until the thumb was half way out (felt as lag in Stray).
+static const CGFloat kGameDeadZone = 0.25;
 static const CGFloat kDesignHeight = 600; // screens at least this tall use scale 1
 static const CGFloat kMinScale = 0.7;     // A/B/X/Y stay 44 points wide
 static const CGFloat kMinRadius = 18;     // nor the small buttons under 36
@@ -324,9 +328,10 @@ static const CGFloat kCornerRadius = 55;  // the screen's rounded corners: discs
     CGFloat dx = p.x - s.origin.x, dy = p.y - s.origin.y;
     CGFloat len = hypot(dx, dy);
     if (len > travel) { dx *= travel / len; dy *= travel / len; len = travel; }
-    // Dead zone, then a power curve on the magnitude: small drags give small,
-    // precise values; the edge of the circle is still full deflection.
-    CGFloat m = len / travel, out = m <= kDeadZone ? 0 : pow((m - kDeadZone) / (1 - kDeadZone), s.curve);
+    // Dead zone, then a power curve on the magnitude from the game's dead zone up: small
+    // drags give small, precise values; the edge of the circle is still full deflection.
+    CGFloat m = len / travel, out = m <= kDeadZone ? 0
+        : kGameDeadZone + (1 - kGameDeadZone) * pow((m - kDeadZone) / (1 - kDeadZone), s.curve);
     CGFloat k = len > 0 ? out / m : 0;
     [s.input(gPad.extendedGamepad) setValueForXAxis:dx / travel * k yAxis:-dy / travel * k];
     [CATransaction begin];

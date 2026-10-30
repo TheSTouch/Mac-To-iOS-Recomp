@@ -38,7 +38,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | Game | Engine | iPad | iPhone |
 |---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
-| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4, at 30 frames/s |
+| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4: 20 frames/s rendered, 40 shown (frame generation) |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, online play | ✅ Playable |
 | [Brawlhalla](https://store.steampowered.com/app/291550/Brawlhalla/) (Steam build 25942757) | Adobe AIR 32 | ✅ Playable offline, keyboard and mouse | Not tried |
 
@@ -81,16 +81,17 @@ device.
 | **Keyboard, trackpad** | ✅ |
 | **Saves on iCloud Drive** | ✅ |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
-| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: 30 fps by default, 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections; at 60 fps the phone overheats within minutes and slows down. The limit can be changed in the game's options |
-| **Memory** | iPhone 17: chapter 4 (The Slums) uses about 5 GB of the 6.1 GB iOS allows, since sounds now decode as they play instead of all being unpacked when a level loads |
+| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down |
+| **Memory** | iPhone 17: chapter 4 (The Slums) reaches about 5.4 GB of the 6.1 GB iOS allows while exploring (sounds decode as they play instead of all being unpacked when a level loads); iOS sends memory warnings from about 5 GB |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 
-Known limits: played up to chapter 4; short freezes the first time a scene appears, while Metal
-compiles its shaders (cached afterwards), and other short freezes on the iPhone; on the iPhone the
+Known limits: played up to chapter 4; freezes of up to a few seconds when new areas load, while
+Metal compiles pipeline states (up to 0.9 s each), worst right after an install; on the iPhone the
 cat looks pixelated while it moves (MetalFX shows moving objects at the render resolution), the
-phone still warms up over a long session, and the screen sometimes goes black while the game keeps
-running (relaunch it); distant textures can load later than on a Mac, since the texture pool is
-sized to the device's memory.
+phone still warms up over a long session, and iOS sometimes stops showing the game while it keeps
+running (black screen; the app now re-shows its window by itself, not yet seen working; going to
+the home screen and back fixes it); distant textures can load later than on a Mac, since the
+texture pool is sized to the device's memory.
 
 ### Valheim
 
@@ -414,7 +415,8 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [ ] Frame rates measured for every tested game
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
 - [x] Stray on iPhone: a sharper image (2× output instead of 1×, no screen-space reflections)
-- [ ] Stray on iPhone: no short freezes, no black screen, cooler over a long session
+- [x] Stray on iPhone: frame generation, 20 frames/s rendered and 40 shown, 28 % less battery than 30 fps
+- [ ] Stray on iPhone: no freezes while new areas load, no black screen, more memory headroom
 
 ## Disclaimer
 

@@ -461,6 +461,14 @@ def info_plist(game):
         "UIApplicationSupportsIndirectInputEvents": True,
         "UIFileSharingEnabled": True,
         "LSSupportsOpeningDocumentsInPlace": True,
+        # An iPhone app is held to 60 Hz without this. Games keep their own frame rate
+        # caps (Stray's is 30 on an iPhone); uncapped, a GPU-bound game runs its GPU flat
+        # out instead of matching a 60 Hz cap, which is how settings are compared.
+        "CADisableMinimumFrameDurationOnPhone": True,
+        # Game Mode: the game gets CPU and GPU priority and background work is
+        # turned down while it is in front (the Metal HUD warns without the key).
+        "LSSupportsGameMode": True,
+        "LSApplicationCategoryType": "public.app-category.games",
         "GCSupportsControllerUserInteraction": True,
         "GCSupportedGameControllers": [{"ProfileName": "ExtendedGamepad"}],
         "NSAppTransportSecurity": {"NSAllowsArbitraryLoads": True},
@@ -471,6 +479,8 @@ def info_plist(game):
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
         "RecompIniOverrides": ini_overrides(game.profile),
         "RecompIniOverridesPhone": overlay(ini_overrides(PHONE_DEFAULTS), ini_overrides(game.profile.get("iphone", {}))),
+        # Read by RecompFrameGen.m: frame generation's settings on an iPhone ("fps=20"), or none.
+        "RecompFrameGenPhone": game.profile.get("iphone", {}).get("frame_generation", ""),
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }
