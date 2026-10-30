@@ -55,7 +55,9 @@ void abort(void) {
 
 // --- heartbeat and screenshots -----------------------------------------------------
 // Every 10 s: drawables the game took (frames), the longest wait between two
-// (a freeze), memory left before iOS ends the app, GPU time per frame, the CPU
+// (a freeze), how many presented frames reached the screen (presentedTime > 0; iOS
+// stops showing an app it no longer has in front, while the app keeps presenting),
+// memory left before iOS ends the app, GPU time per frame, the CPU
 // time of the busiest threads, and the time spent making pipeline states and
 // loading shader libraries. A file named recomp-screenshot in Documents (put there with
 // `devicectl device copy to`) makes the next tick save Documents/recomp-screen.png;
@@ -129,7 +131,7 @@ static NSString *ThreadCPU(double seconds) {
     return s;
 }
 
-static atomic_uint gDrawables, gLongestFrameMs, gSlowFrames;
+static atomic_uint gDrawables, gLongestFrameMs, gSlowFrames, gPresented, gOnScreen;
 static IMP oNextDrawable;
 
 // Only the engine's RHI thread takes drawables, so the last time needs no lock.
@@ -143,7 +145,34 @@ static id CountNextDrawable(id self, SEL s) {
     }
     last = now;
     atomic_fetch_add(&gDrawables, 1);
-    return ((id (*)(id, SEL))oNextDrawable)(self, s);
+    id<CAMetalDrawable> d = ((id (*)(id, SEL))oNextDrawable)(self, s);
+    [d addPresentedHandler:^(id<MTLDrawable> p) {
+        atomic_fetch_add(&gPresented, 1);
+        if (p.presentedTime > 0) atomic_fetch_add(&gOnScreen, 1);
+    }];
+    return d;
+}
+
+// The app's state changes, with the state it is in: a black screen while the game
+// keeps rendering, then a kill with no crash or jetsam report, pointed to the app
+// losing the front without the game knowing.
+static void LogAppStates(void) {
+    static const char *state[] = {"active", "inactive", "background"};
+    NSDictionary<NSNotificationName, NSString *> *names = @{
+        UIApplicationWillResignActiveNotification: @"will resign active",
+        UIApplicationDidBecomeActiveNotification: @"did become active",
+        UIApplicationDidEnterBackgroundNotification: @"did enter background",
+        UIApplicationWillEnterForegroundNotification: @"will enter foreground",
+        UIApplicationDidReceiveMemoryWarningNotification: @"memory warning",
+        UIApplicationProtectedDataWillBecomeUnavailable: @"device locking",
+        UIApplicationWillTerminateNotification: @"will terminate",
+    };
+    for (NSNotificationName n in names)
+        [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:nil usingBlock:^(NSNotification *note) {
+            UIApplicationState now = UIApplication.sharedApplication.applicationState;
+            RLOG(@"app: %@ (state %s, %zu MB memory left)", names[n], now <= 2 ? state[now] : "?",
+                 os_proc_available_memory() >> 20);
+        }];
 }
 
 void RecompPadScript(NSArray<NSString *> *steps);
@@ -324,6 +353,7 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
     gMainThread = pthread_self();
     Method m = class_getInstanceMethod([CAMetalLayer class], @selector(nextDrawable));
     oNextDrawable = method_setImplementation(m, (IMP)CountNextDrawable);
+    LogAppStates();
     dispatch_async(dispatch_get_main_queue(), ^{
         __block unsigned last = 0;
         __block int ticks = 0;
@@ -352,10 +382,11 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
             unsigned frames = now - last;
             double metal[6];
             RecompMetalTimes(metal);
-            RLOG(@"heartbeat: %.1f frames/s (longest %u ms, %u over 100 ms), %zu MB memory left (app %llu MB, of which "
+            RLOG(@"heartbeat: %.1f frames/s (longest %u ms, %u over 100 ms; %u of %u presented reached the screen), %zu MB memory left (app %llu MB, of which "
                  @"Metal %lu MB), thermal %s, battery %.0f%% %s, brightness %.0f%%, GPU %.1f ms/frame (busy %.0f%%), %@; %.0f pipeline states made in %.0f ms "
                  @"(longest %.0f), %.0f shader libraries loaded in %.0f ms (longest %.0f)",
                  frames / elapsed, atomic_exchange(&gLongestFrameMs, 0), atomic_exchange(&gSlowFrames, 0),
+                 atomic_exchange(&gOnScreen, 0), atomic_exchange(&gPresented, 0),
                  os_proc_available_memory() >> 20, Footprint(),
                  (unsigned long)(gpu.currentAllocatedSize >> 20), hot <= 3 ? heat[hot] : "?",
                  device.batteryLevel * 100, power[device.batteryState <= 3 ? device.batteryState : 0],
