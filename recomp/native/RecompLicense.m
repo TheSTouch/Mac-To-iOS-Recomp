@@ -340,7 +340,8 @@ static RecompLicenseGate *gGate;
                 LLOG(@"%@ owns app %u", tokens[@"account"], gAppId);
                 SaveState(@{@"refresh": tokens[@"refresh"], @"steamid": tokens[@"steamid"], @"account": tokens[@"account"],
                             @"verified": @(NSDate.date.timeIntervalSince1970)});
-                if (blocked) [self elsewhere:elsewhere];
+                // With concurrent play allowed (the profile's steam_concurrent_play), the game goes on with Steam.
+                if (blocked && RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow) [self elsewhere:elsewhere];
                 else [self afterCloudSync];
             });
         });

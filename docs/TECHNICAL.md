@@ -104,6 +104,7 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
   | `steam_app_id` | the game's Steam app id, for the [Steam runtime](#steam-runtime) (found from the Steam library otherwise) |
+  | `steam_concurrent_play` | `"deny"` (the default) or `"allow"`: whether Steam stays usable while the same account plays on another device ([Playing on another device](#sign-in-and-license-check)). No port allows it |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
   | `iphone` | settings applied only on an iPhone, over the generic phone defaults: `render_scale`, `target_frame_rate`, `quality_level`, `player_prefs`, `static_fields`, `portrait`, `portrait_horizontal_fov` (listed in `PHONE_DEFAULTS`, `recomp/unity_ios.py`) |
@@ -588,9 +589,22 @@ shared with someone else, does not play without the game's license.
   second. Offline or with Steam slow to answer, the game starts after a few seconds anyway, for
   30 days after the last successful check; past that it asks to go online. A refunded game or a
   sign-in removed in Steam brings the sign-in screen back at the next launch.
-- **Playing on another device**: Steam lets an account play one game at a time. When it already
-  plays elsewhere, the cover offers *Play here* (which ends the other session) or *Play without
-  Steam for now*; the port never takes over silently.
+- **Playing on another device**: Steam lets an account play one game at a time. What a port does
+  when the account already plays elsewhere is the profile key `steam_concurrent_play` (Info.plist
+  `RecompSteamConcurrentPlay`, handed to Kettle's `RecompSteam_SetConcurrentPlay` before any
+  logon):
+  - `"deny"`, the default and every port's setting: the cover offers *Play here* (which ends the
+    other session) or *Play without Steam for now*; the port never takes over silently.
+  - `"allow"`: no cover; the game goes on with Steam (Cloud, achievements, tickets) without
+    ending the other game, and the session does not tell Steam it plays here while the account
+    plays elsewhere. Steam may still refuse some calls on its side, and this has not been tested
+    against live Steam.
+
+  Before allowing it, read what this can mean with Valve:
+  [Kettle's docs/valve.md, "Playing on two devices at once"](https://github.com/TheSTouch/kettle/blob/v0.1.0/docs/valve.md#playing-on-two-devices-at-once).
+  That is our reading, not legal advice: it may contain mistakes or be out of date, so rely only
+  on Valve's official texts, the
+  [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) first.
 - **Signing out**: delete `Recomp Steam license.txt` (Files, *On My iPad*, the game's folder);
   the session ends and the next launch asks to sign in again. Steam lists the sign-in as
   "Recomp: *game* on *device*" under Settings > Security > Authorized devices, where it can be

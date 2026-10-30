@@ -15,6 +15,10 @@ The app id comes from, in order:
 A game that ships the Steamworks library (steam_api) but whose app id cannot be
 found is refused: it was copied out of its Steam library or is not a Steam copy.
 A game with neither (a GOG or itch build, a DRM-free Mac app) gets no check.
+
+The profile's "steam_concurrent_play" ("deny", the default, or "allow") goes to Info.plist as
+"RecompSteamConcurrentPlay": whether Steam stays usable while the same account plays on another
+device (Kettle's RecompSteam_SetConcurrentPlay, set by RecompSteamStart.m before any logon).
 """
 import glob
 import os
@@ -23,6 +27,7 @@ import re
 import sys
 
 STEAMWORKS = re.compile(r"^((lib)?steam_api(64)?|CSteamworks)\.(dylib|bundle|so)$", re.IGNORECASE)
+CONCURRENT_PLAY = ("deny", "allow")
 
 
 def ships_steamworks(app):
@@ -68,13 +73,24 @@ def app_id(app, profile, log=print):
     return None
 
 
+def concurrent_play(profile):
+    """The profile's "steam_concurrent_play"; exits on a value that is neither."""
+    value = (profile or {}).get("steam_concurrent_play", "deny")
+    if value not in CONCURRENT_PLAY:
+        sys.exit(f'profile "steam_concurrent_play" is {value!r}: use "deny" (the default) or "allow"')
+    return value
+
+
 def plist_keys(app, profile, log=print):
-    """The Info.plist keys RecompLicense.m reads."""
+    """The Info.plist keys RecompLicense.m and RecompSteamStart.m read."""
     appid = app_id(app, profile, log)
     if not appid:
         return {}
     log(f"Steam license check: app {appid} (the player signs in to Steam on first launch)")
-    return {"RecompSteamAppId": appid}
+    play = concurrent_play(profile)
+    if play == "allow":
+        log("Steam concurrent play: allow (Steam stays on while the account plays on another device)")
+    return {"RecompSteamAppId": appid, "RecompSteamConcurrentPlay": play}
 
 
 def write_plist(app, profile, path, log=print):
@@ -82,6 +98,7 @@ def write_plist(app, profile, path, log=print):
     with open(path, "rb") as f:
         info = plistlib.load(f)
     info.pop("RecompSteamAppId", None)
+    info.pop("RecompSteamConcurrentPlay", None)
     info.update(plist_keys(app, profile, log))
     with open(path, "wb") as f:
         plistlib.dump(info, f)
