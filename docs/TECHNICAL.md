@@ -558,12 +558,27 @@ has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
 ## Steam runtime
 
-iOS has no Steam app, so a port of a Steam game carries its own Steam client,
-`recomp/native/RecompSteam`. It connects to Steam's servers over the same WebSocket connection the
+iOS has no Steam app, so a port of a Steam game carries its own Steam client. It connects to Steam's servers over the same WebSocket connection the
 Steam client uses, logs on as the player and serves the Steamworks API the game calls
 (`SteamAPI_*`), so the game's own Steam code runs unchanged. Everything goes straight to Steam,
 never through a server of this project. `SteamAPI_Init` succeeds in every port, signed in or not:
 games such as Valheim quit without Steam.
+
+Where the code is:
+
+- **The Steam client core** (the session, the sign-in, the protobuf codec, the Steam Cloud
+  protocol, concurrent play) comes from [Kettle](https://github.com/TheSTouch/kettle) (MIT), a
+  git submodule at `recomp/vendor/kettle` pinned to a tag (`Sources/KettleExperimental`). Run
+  `git submodule update --init recomp/vendor/kettle` after cloning. Every route builds it with
+  Kettle's default parts (sign-in, Cloud, tickets) plus `-DKETTLE_CONCURRENT_PLAY=1`.
+- **The Steamworks API on top** stays here, in `recomp/native/RecompSteam`: the flat API, stats
+  and achievements, user, apps, the start at load, the Cloud sync with local folders, matchmaking
+  and networking. `recomp/steam_runtime.py` lists the sources, include paths and flags every
+  route (Unity, Unreal, AIR, the Mac clone, `cli/build.sh`) builds with.
+- **`recomp/native/RecompSteam/deprecated/`** is the old copy of the core, kept for reference and
+  no longer built.
+- **Fixes to the core go to Kettle first**: a pull request there, a new tag, then the submodule
+  moves to it here. Never patch the files under `recomp/vendor/kettle` in place.
 
 ### Sign-in and license check
 
@@ -732,12 +747,14 @@ SIGN_ID="Developer ID Application: <name> (<TEAMID>)" NOTARY_PROFILE=<profile> s
 The second form signs with the hardened runtime, builds a DMG, notarizes and staples it.
 Create the notary profile once with
 `xcrun notarytool store-credentials <profile> --apple-id <apple-id> --team-id <TEAMID>`.
-The app bundles the engine from `git archive HEAD`, so only committed files ship.
+The app bundles the engine from `git archive HEAD`, so only committed files ship, plus Kettle's
+sources at the commit the submodule pins.
 `swift scripts/make-icon.swift` regenerates the icon.
 
 ## Contributing
 
-This repository is public. Never commit game files or personal details: enable the guard
+This repository is public. After cloning, fetch Kettle with
+`git submodule update --init recomp/vendor/kettle`. Never commit game files or personal details: enable the guard
 once per clone with `git config core.hooksPath .githooks`, and list your own private
 strings (name, email, team ID, device names) as regexes in `.git/private-patterns`, which
 stays on your machine.
@@ -761,7 +778,10 @@ stays on your machine.
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
   native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, `RecompLicense.m`, the
   iOS side of the Steam license check, `RecompLog.m`, the log file; `recomp/native/RecompSteam/`:
-  the Steam runtime (session, sign-in, Steamworks API, Steam Cloud, networking, matchmaking, `cli/`)
+  the Steam runtime's Steamworks API (flat API, stats, Steam Cloud sync, networking, matchmaking,
+  `cli/`; `deprecated/` is not built); `recomp/vendor/kettle/`: Kettle, its Steam client core
+  (session, sign-in, Steam Cloud protocol), a submodule; `recomp/steam_runtime.py`: what each
+  route builds of the two
 - `recomp/steam_license.py`: the Mac side of the Steam license check (the app id a port checks)
 - `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`); `recomp/steam_cloud.py`: the save mode and Steam Cloud keys
 - `recomp/gamenetworkingsockets.py`, `recomp/playfab_party.py`: build GameNetworkingSockets, fetch PlayFab Party's iOS framework (when porting, not in git)

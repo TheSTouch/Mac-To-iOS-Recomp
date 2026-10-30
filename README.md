@@ -437,6 +437,10 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 
 - **[How it works](docs/TECHNICAL.md):** the Unity, Unreal and Qt routes, game profiles, touch controls in
   detail, mods, save sync rules, the Steam runtime, debugging on the device and building the app.
+- **Credits:** the Steam runtime every port carries is built on
+  [Kettle](https://github.com/TheSTouch/kettle) (MIT), its Steam client core (session, sign-in,
+  Steam Cloud), included as a git submodule: after cloning, run
+  `git submodule update --init recomp/vendor/kettle`.
 - **Contributing:** this repository is public. Never commit game files or personal details; see
   [Contributing](docs/TECHNICAL.md#contributing) for the commit guard.
 - **License:** [PolyForm Noncommercial 1.0.0](LICENSE): free for personal, hobby, research and other
