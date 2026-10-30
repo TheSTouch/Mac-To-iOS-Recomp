@@ -122,10 +122,16 @@ def build(sdk="iphoneos"):
          "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DNOX11=ON", "-DNOEGL=ON", "-DSTATICLIB=ON", "-DNO_LOADER=ON",
          "-DDEFAULT_ES=2", f"-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={work}",
          "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"], stdout=subprocess.DEVNULL)  # v1.1.6 predates CMake 4
-    run(["cmake", "--build", os.path.join(work, "gl4es")], stdout=subprocess.DEVNULL)
+    # gl4es writes libGL.a to its source tree's lib/ whatever the build folder, and that
+    # tree is shared by both SDKs: clear both copies so this build's archive is the one taken.
     lib = os.path.join(work, "libGL.a")
-    if not os.path.exists(lib):  # gl4es puts it in its source tree's lib/ whatever the build folder
-        shutil.move(os.path.join(gl4es, "lib", "libGL.a"), lib)
+    built = os.path.join(gl4es, "lib", "libGL.a")
+    for stale in (lib, built):
+        if os.path.exists(stale):
+            os.remove(stale)
+    run(["cmake", "--build", os.path.join(work, "gl4es")], stdout=subprocess.DEVNULL)
+    if not os.path.exists(lib):
+        shutil.move(built, lib)
     _headers(gl4es, glu)
     alias_file = os.path.join(work, "aliases.txt")
     n = _aliases(gl4es, sdk, lib, alias_file)
