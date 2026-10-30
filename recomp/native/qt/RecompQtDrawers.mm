@@ -8,6 +8,11 @@
 // recomp/drawerDocks/<area>) and applied once the app has restored its own layout.
 // First launch: both closed.
 //
+// Two more controls on the central widget: a grip on its left edge, while docks are open
+// on the left, resizes them by dragging (a tap switches between an even split and the
+// width set last), and a button in its top-right corner shows the central widget alone:
+// every dock and the window's toolbars hide, and the next tap brings back what was open.
+//
 // Test hook: an empty `recomp-drawers` file in Documents logs each drawer's state, its
 // handle's screen rectangle (for recomp-click) and the docks in its area.
 #include <QtCore/QCoreApplication>
@@ -25,6 +30,7 @@
 #include <QtWidgets/QToolBar>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 
 namespace {
@@ -36,15 +42,19 @@ const int HandleDepth = 28;
 class Handle : public QWidget
 {
 public:
-    Handle(Qt::DockWidgetArea area, QWidget *parent) : QWidget(parent), area(area)
+    enum Kind { Right, Bottom, Grip, Full };
+
+    Handle(Kind kind, QWidget *parent) : QWidget(parent), kind(kind)
     {
-        setFixedSize(area == Qt::RightDockWidgetArea ? QSize(HandleDepth, HandleLength)
-                                                     : QSize(HandleLength, HandleDepth));
+        setFixedSize(kind == Bottom ? QSize(HandleLength, HandleDepth)
+                     : kind == Full ? QSize(44, 44)
+                                    : QSize(HandleDepth, HandleLength));
     }
 
-    const Qt::DockWidgetArea area;
-    bool open = false;
+    const Kind kind;
+    bool open = false; // a drawer's docks shown; for Full, the central widget alone
     std::function<void()> tapped;
+    std::function<void(int, bool)> dragged; // Grip: points moved right since the press, first move
 
 protected:
     void paintEvent(QPaintEvent *) override
@@ -57,11 +67,26 @@ protected:
         p.setBrush(fill);
         p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
 
-        // The chevron points the way the drawer will move: out of the screen when open.
         const QPointF c = QRectF(rect()).center();
         const qreal s = 5;
         QPainterPath chevron;
-        if (area == Qt::RightDockWidgetArea) {
+        if (kind == Grip) {
+            chevron.moveTo(c.x() - 3, c.y() - 12);
+            chevron.lineTo(c.x() - 3, c.y() + 12);
+            chevron.moveTo(c.x() + 3, c.y() - 12);
+            chevron.lineTo(c.x() + 3, c.y() + 12);
+        } else if (kind == Full) {
+            // Four corners, pointing out to fill the screen, in to go back.
+            const qreal o = 11, i = 4;
+            for (const QPointF &q : {QPointF(-1, -1), QPointF(1, -1), QPointF(1, 1), QPointF(-1, 1)}) {
+                const QPointF tip = c + (open ? q * i : q * o);
+                const qreal toward = open ? 1 : -1; // the arms run back toward the centre when out
+                chevron.moveTo(tip + QPointF(toward * q.x() * 6, 0));
+                chevron.lineTo(tip);
+                chevron.lineTo(tip + QPointF(0, toward * q.y() * 6));
+            }
+        } else if (kind == Right) {
+            // The chevron points the way the drawer will move: out of the screen when open.
             const qreal d = open ? s / 2 : -s / 2;
             chevron.moveTo(c.x() - d, c.y() - s * 1.6);
             chevron.lineTo(c.x() + d, c.y());
@@ -80,8 +105,20 @@ protected:
     void mousePressEvent(QMouseEvent *event) override
     {
         pressed = true;
+        dragging = false;
+        pressX = event->globalPosition().x();
         update();
         event->accept();
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        event->accept();
+        const int dx = qRound(event->globalPosition().x() - pressX);
+        if (!pressed || !dragged || (!dragging && std::abs(dx) < 8))
+            return;
+        dragged(dx, !dragging);
+        dragging = true;
     }
 
     void mouseReleaseEvent(QMouseEvent *event) override
@@ -89,12 +126,14 @@ protected:
         pressed = false;
         update();
         event->accept();
-        if (rect().contains(event->position().toPoint()) && tapped)
+        if (!dragging && rect().contains(event->position().toPoint()) && tapped)
             tapped();
+        dragging = false;
     }
 
 private:
-    bool pressed = false;
+    bool pressed = false, dragging = false;
+    qreal pressX = 0;
 };
 
 class Drawers : public QObject
@@ -103,10 +142,17 @@ public:
     explicit Drawers(QMainWindow *window) : QObject(window), window(window)
     {
         for (Drawer &d : drawers) {
-            d.handle = new Handle(d.area, window);
+            d.handle = new Handle(d.area == Qt::RightDockWidgetArea ? Handle::Right : Handle::Bottom, window);
             d.handle->tapped = [this, &d] { toggle(d); };
             d.handle->hide();
         }
+        grip = new Handle(Handle::Grip, window);
+        grip->dragged = [this](int dx, bool first) { resizeLeft(dx, first); };
+        grip->tapped = [this] { splitLeft(); };
+        grip->hide();
+        full = new Handle(Handle::Full, window);
+        full->tapped = [this] { toggleFull(); };
+        full->hide();
         window->installEventFilter(this);
         // The app restores its dock layout before or as it first shows the window.
         QTimer::singleShot(0, this, [this] { restore(); });
@@ -123,6 +169,14 @@ public:
                 fprintf(stderr, "[recomp]   %s \"%s\" %s\n", qPrintable(dock->objectName()),
                         qPrintable(dock->windowTitle()), dock->isHidden() ? "hidden" : "shown");
         }
+        for (const Handle *h : {grip, full}) {
+            const QRect r(h->mapToGlobal(QPoint(0, 0)), h->size());
+            fprintf(stderr, "[recomp] %s%s, %s at %d,%d %dx%d\n", h == grip ? "left grip" : "central-alone button",
+                    h == full ? (full->open ? " (on)" : " (off)") : "", h->isVisible() ? "shown" : "hidden", r.x(),
+                    r.y(), r.width(), r.height());
+        }
+        if (QDockWidget *left = shownLeft().value(0))
+            fprintf(stderr, "[recomp] left docks %d wide\n", left->width());
     }
 
 protected:
@@ -156,8 +210,79 @@ private:
 
     QMainWindow *const window;
     Drawer drawers[2] = {{Qt::RightDockWidgetArea, "right"}, {Qt::BottomDockWidgetArea, "bottom"}};
+    Handle *grip = nullptr, *full = nullptr;
+    QList<QPointer<QWidget>> fullHid; // what showing the central widget alone hid
+    int leftStart = 0, leftSet = 0;   // left docks' width when a drag began, and after the last one
     QList<QPointer<QObject>> watched;
     bool restored = false, scheduled = false;
+
+    QList<QDockWidget *> shownLeft() const
+    {
+        QList<QDockWidget *> out;
+        for (QDockWidget *dock : window->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly))
+            if (!dock->isFloating() && !dock->isHidden() && window->dockWidgetArea(dock) == Qt::LeftDockWidgetArea)
+                out.append(dock);
+        return out;
+    }
+
+    void setLeft(const QList<QDockWidget *> &left, int width)
+    {
+        width = std::clamp(width, 120, std::max(120, window->width() - 160));
+        window->resizeDocks(left, QList<int>(left.size(), width), Qt::Horizontal);
+    }
+
+    void resizeLeft(int dx, bool first)
+    {
+        const QList<QDockWidget *> left = shownLeft();
+        if (left.isEmpty())
+            return;
+        if (first)
+            leftStart = left.first()->width();
+        setLeft(left, leftStart + dx);
+        leftSet = left.first()->width();
+    }
+
+    // A tap: an even split, or back to the width before it.
+    void splitLeft()
+    {
+        const QList<QDockWidget *> left = shownLeft();
+        if (left.isEmpty())
+            return;
+        // Even: the left docks as wide as the central widget, sharing the space they have.
+        const int now = left.first()->width();
+        const int even = window->centralWidget() ? (now + window->centralWidget()->width()) / 2 : window->width() / 2;
+        if (std::abs(now - even) > 24) {
+            leftSet = now;
+            setLeft(left, even);
+        } else {
+            setLeft(left, leftSet > 0 && std::abs(leftSet - even) > 24 ? leftSet : even * 2 / 3);
+        }
+    }
+
+    void toggleFull()
+    {
+        if (!full->open) {
+            fullHid.clear();
+            for (QDockWidget *dock : window->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly))
+                if (!dock->isFloating() && !dock->isHidden())
+                    fullHid.append(dock);
+            for (QToolBar *bar : window->findChildren<QToolBar *>(Qt::FindDirectChildrenOnly))
+                if (!bar->isHidden())
+                    fullHid.append(bar);
+            full->open = true;
+            for (QWidget *w : fullHid)
+                w->setVisible(false);
+        } else {
+            full->open = false;
+            for (const QPointer<QWidget> &w : fullHid)
+                if (w)
+                    w->setVisible(true);
+            fullHid.clear();
+        }
+        full->update();
+        update();
+        fprintf(stderr, "[recomp] central widget %s\n", full->open ? "alone" : "with its docks");
+    }
 
     QList<QDockWidget *> docks(const Drawer &d) const
     {
@@ -260,17 +385,26 @@ private:
         for (QDockWidget *dock : window->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly))
             watch(dock);
         QWidget *central = window->centralWidget();
+        if (full->open) {
+            // A dock the app opens (an error log, say) ends the central widget alone.
+            for (QDockWidget *dock : window->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly))
+                if (!dock->isFloating() && !dock->isHidden()) {
+                    toggleFull();
+                    return;
+                }
+        }
+        const bool onCentral = central && central->isVisible();
+        const QRect c = onCentral ? edges(central) : QRect();
         for (Drawer &d : drawers) {
             const bool open = isOpen(d);
-            if (open != d.handle->open) {
+            if (open != d.handle->open && !full->open) {
                 d.handle->open = open;
                 d.handle->update();
                 if (restored)
                     save(d);
             }
-            const bool shown = central && central->isVisible() && !docks(d).isEmpty();
+            const bool shown = onCentral && !full->open && !docks(d).isEmpty();
             if (shown) {
-                const QRect c = edges(central);
                 if (d.area == Qt::RightDockWidgetArea)
                     d.handle->move(c.right() + 1 - d.handle->width(), c.center().y() - d.handle->height() / 2);
                 else
@@ -279,6 +413,17 @@ private:
             }
             d.handle->setVisible(shown);
         }
+        const bool gripShown = onCentral && !full->open && !shownLeft().isEmpty();
+        if (gripShown) {
+            grip->move(c.left(), c.center().y() - grip->height() / 2);
+            grip->raise();
+        }
+        grip->setVisible(gripShown);
+        if (onCentral) {
+            full->move(c.right() + 1 - 6 - full->width(), c.top() + 6);
+            full->raise();
+        }
+        full->setVisible(onCentral);
     }
 
     // The central widget's rectangle in the window, less the toolbars it has along its
