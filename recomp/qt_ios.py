@@ -519,6 +519,9 @@ def info_plist(app):
         "CFBundleVersion": str(info.get("CFBundleVersion", "1")),
         "LSRequiresIPhoneOS": True,
         "UIRequiresFullScreen": True,
+        # Qt follows the system's dark mode with a dark palette, which Mac Qt apps'
+        # own colours and style sheets were not drawn for (dark text on dark).
+        "UIUserInterfaceStyle": "Light",
         "UILaunchScreen": {"UIColorName": "", "UIImageRespectsSafeAreaInsets": False},
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft",
                                              "UIInterfaceOrientationLandscapeRight", "UIInterfaceOrientationPortrait"],
