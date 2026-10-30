@@ -285,17 +285,20 @@ palette keeps it. Colours the app draws itself (an editor's colour scheme, a 3D 
 **Dock drawers**: around a main window's central widget, docks leave little of it on an 11-inch
 iPad. `RecompQtDrawers.mm`, for any `QMainWindow`, puts handles on the central widget, kept clear
 of toolbars that run along its edges:
-- right and bottom edges: the dock areas there are drawers. A tap hides every dock in the area,
-  the next brings back the ones that were open; a dock the app opens itself opens its drawer.
-  Open or closed is saved per area in the app's `QSettings` (`recomp/drawers/right`,
-  `recomp/drawers/bottom`, the hidden docks under `recomp/drawerDocks/<area>`) and applied once the
-  app has restored its own layout. First launch: both closed, and the docks the app's own layout
-  had open are saved as what each drawer's first tap brings back. Settings survive an install
-  over the app; only deleting it starts again from both closed;
-- left edge, while docks are open there: a grip that resizes them by dragging; a tap switches
-  between an even split with the central widget and the width before it;
-- top-right corner: the central widget alone. Every dock and the window's own toolbars hide, and
-  the next tap brings back what was open; a dock the app opens meanwhile ends it.
+- left, right and bottom edges: the dock areas there are drawers, each with a handle. While the
+  area's docks are open it is a grip: dragging resizes them, dragging 48 pt past their minimum
+  size closes them all, and a tap switches between an even split with the central widget and the
+  size set last. While they are closed it points out: a tap brings back the ones that were open,
+  at the size they had, and dragging out opens them at the size dragged to (also back within the
+  same drag that closed them). A dock the app opens itself opens its drawer. Open or closed is
+  saved per area in the app's `QSettings` (`recomp/drawers/<area>`, the hidden docks under
+  `recomp/drawerDocks/<area>`) and applied once the app has restored its own layout. First
+  launch: right and bottom closed, left as the app lays it out, and the docks the app's own layout
+  had open are saved as what each drawer's first tap brings back. Settings survive an install over
+  the app; only deleting it starts again. Tabbed docks count as one, the size of the current tab;
+- top-right corner: the central widget alone. Every open drawer closes and the window's own
+  toolbars hide; the handles stay. The next tap brings back what was open, and opening a drawer
+  meanwhile (by its handle or the app) ends it. Drawers it closed are not saved as closed.
 
 **Debugging**: in the simulator, `xcrun simctl launch --wait-for-debugger` then lldb. On a device and
 in the simulator, files dropped into the app's `Documents` (`devicectl device copy to --domain-type
