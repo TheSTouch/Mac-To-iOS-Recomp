@@ -4,6 +4,8 @@
 //   recomp-actions   (empty)          -> recomp-actions.txt: every QAction, "objectName<TAB>text"
 //   recomp-action    "objectName"     -> triggers that action (its text works too)
 //   recomp-text      (empty)          -> recomp-text.txt: the text of every visible text view
+//   recomp-type      "text"           -> types that text into the focused widget (or the first visible
+//                                        widget that takes input methods), as a keyboard would commit it
 //   recomp-click     "x y"            -> a left click (press, release; not a touch) at that point of
 //                                        the screen, in points, sent to the widget under it
 //   recomp-grab      (empty)          -> recomp-gl-<n>.png: what each QOpenGLWidget rendered, read back
@@ -17,9 +19,11 @@
 #include <QtCore/QTimer>
 #include <QtGui/QAction>
 #include <QtGui/QImage>
+#include <QtGui/QInputMethodEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QOpenGLContext>
+#include <QtGui/QOpenGLFunctions>
 #include <QtOpenGLWidgets/QOpenGLWidget>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QPlainTextEdit>
@@ -67,6 +71,27 @@ static void poll()
         }
         fprintf(stderr, "[recomp] wrote recomp-text.txt\n");
     }
+    QFile type(docs + QStringLiteral("recomp-type"));
+    if (type.exists() && type.open(QIODevice::ReadOnly)) {
+        const QString body = QString::fromUtf8(type.readAll());
+        type.close();
+        type.remove();
+        QWidget *target = QApplication::focusWidget();
+        for (QWidget *w : QApplication::allWidgets()) {
+            if (target)
+                break;
+            if (w->isVisible() && w->testAttribute(Qt::WA_InputMethodEnabled))
+                target = w;
+        }
+        if (target) {
+            QInputMethodEvent event;
+            event.setCommitString(body);
+            QApplication::sendEvent(target, &event);
+            fprintf(stderr, "[recomp] typed %d characters into %s\n", int(body.size()), target->metaObject()->className());
+        } else {
+            fprintf(stderr, "[recomp] nothing to type into\n");
+        }
+    }
     QFile click(docs + QStringLiteral("recomp-click"));
     if (click.exists() && click.open(QIODevice::ReadOnly)) {
         const QStringList xy = QString::fromUtf8(click.readAll()).split(QLatin1Char(' '), Qt::SkipEmptyParts);
@@ -90,6 +115,14 @@ static void poll()
         for (QWidget *w : QApplication::allWidgets()) {
             if (auto *gl = qobject_cast<QOpenGLWidget *>(w)) {
                 QImage image = gl->grabFramebuffer();
+                gl->makeCurrent();
+                GLint depth = -1, stencil = -1;
+                QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_DEPTH_BITS, &depth);
+                QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_STENCIL_BITS, &stencil);
+                gl->doneCurrent();
+                fprintf(stderr, "[recomp] %s framebuffer: depth %d bits, stencil %d bits (format asks %d, %d)\n",
+                        gl->metaObject()->className(), depth, stencil, gl->format().depthBufferSize(),
+                        gl->format().stencilBufferSize());
                 image.save(docs + QStringLiteral("recomp-gl-%1.png").arg(n++));
                 fprintf(stderr, "[recomp] grabbed %s %dx%d\n", gl->metaObject()->className(), image.width(),
                         image.height());

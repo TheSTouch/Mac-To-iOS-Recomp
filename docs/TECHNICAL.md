@@ -257,8 +257,9 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-actions` | empty | `recomp-actions.txt`: every QAction, object name and text |
 | `recomp-action` | an action's object name or text | triggers it |
 | `recomp-text` | empty | `recomp-text.txt`: the text of every visible text view |
+| `recomp-type` | the text | types it into the focused widget, as the keyboard commits text |
 | `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
-| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes in the log |
+| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes, and each GL view's depth and stencil bits, in the log |
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
