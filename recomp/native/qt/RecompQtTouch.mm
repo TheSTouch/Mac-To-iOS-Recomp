@@ -3,7 +3,8 @@
 // proxy style over the app's own style raises the hit targets; drawing stays the
 // app style's. Installed when the first widget is polished, once QApplication has
 // set up its style and fonts, and again if the app replaces the style. Text is
-// raised to 15 pt at the same time, except in text editors.
+// raised to 15 pt at the same time, except in text editors, and a press has to
+// move further before it starts a drag.
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QRegularExpression>
@@ -23,6 +24,7 @@ const int kScrollSlider = 44;    // shortest scroll-bar slider
 const int kDockButton = 32;      // dock title-bar close and float buttons
 const int kSeparator = 12;       // splitter and dock separator handles
 const qreal kFont = 15;          // smallest text, in points
+const int kDragDistance = 12;    // a finger's jitter stays a tap (tabs, splitters, text selection)
 
 // Text views keep the app's font: code and logs are sized by the app or the user.
 const char *const kEditors[] = {"QPlainTextEdit", "QTextEdit", "QsciScintillaBase"};
@@ -202,9 +204,14 @@ public:
         // Seen before the widget's own polish, so it is polished with the new style.
         // The proxy goes away when the app sets another style: wrap that one too.
         if (event->type() == QEvent::Polish && object->isWidgetType() && !touchStyle && !gaveUp) {
-            if (!fontsRaised) {
-                fontsRaised = true;
+            if (!tuned) {
+                tuned = true;
                 raiseFonts();
+                if (QApplication::startDragDistance() < kDragDistance) {
+                    fprintf(stderr, "[recomp] touch: drag distance %d -> %d\n", QApplication::startDragDistance(),
+                            kDragDistance);
+                    QApplication::setStartDragDistance(kDragDistance);
+                }
             }
             installTouchStyle();
             gaveUp = !touchStyle;
@@ -224,7 +231,7 @@ public:
 
 private:
     bool gaveUp = false;
-    bool fontsRaised = false;
+    bool tuned = false;
 };
 
 void startTouch()
