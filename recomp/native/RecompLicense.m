@@ -8,9 +8,9 @@
 //
 // The first launch covers the game with a sign-in screen. The player signs in to
 // Steam as a Steam client would, with a QR code scanned in the Steam Mobile app or
-// with account name, password and Steam Guard (RecompSteam/RecompSteamAuth.h, over a
+// with account name, password and Steam Guard (Kettle's RecompSteamAuth.h, over a
 // connection to Steam's connection managers). That one sign-in is the port's Steam
-// session (RecompSteam/RecompSteamSession.h), which also carries saves, achievements
+// session (Kettle's RecompSteamSession.h), which also carries saves, achievements
 // and online play. The license is the session's: logged on, and Steam signs an
 // ownership ticket for the app (it does for a game the account owns or borrows
 // through Steam Family Sharing, and refuses one otherwise).

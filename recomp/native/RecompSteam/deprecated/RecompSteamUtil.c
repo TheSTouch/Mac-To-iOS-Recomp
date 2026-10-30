@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // Small helpers for RecompSteam: CRC-32, gunzip, reading a token's SteamID.
 #include "RecompSteamInternal.h"
 

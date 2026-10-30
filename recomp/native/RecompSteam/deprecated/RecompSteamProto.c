@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // See RecompSteamProto.h.
 #include "RecompSteamProto.h"
 

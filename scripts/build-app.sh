@@ -33,6 +33,13 @@ cp "$BIN" "$APP/Contents/MacOS/RecompHelper"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" app/Info.plist > "$APP/Contents/Info.plist"
 [ -f app/AppIcon.icns ] && cp app/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 git archive HEAD recomp.py recomp tools stubs LICENSE | tar -x -C "$APP/Contents/Resources/engine"
+# git archive leaves submodules empty: Kettle's Steam client core (recomp/steam_runtime.py), at
+# the commit the superproject pins.
+KETTLE=recomp/vendor/kettle
+git submodule update --init "$KETTLE"
+mkdir -p "$APP/Contents/Resources/engine/$KETTLE"
+git -C "$KETTLE" archive "$(git rev-parse "HEAD:$KETTLE")" LICENSE Sources/KettleExperimental \
+    | tar -x -C "$APP/Contents/Resources/engine/$KETTLE"
 
 if [ -z "${SIGN_ID:-}" ]; then
     codesign --force --sign - "$APP"

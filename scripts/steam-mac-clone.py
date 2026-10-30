@@ -29,7 +29,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-RUNTIME = os.path.join(ROOT, "recomp", "native", "RecompSteam")
+from recomp import steam_runtime  # noqa: E402
+RUNTIME = steam_runtime.OURS
 OUT = os.path.join(ROOT, "build", "recomp-steam")
 CLI = os.path.join(OUT, "recomp-steam-cli")
 FRAMEWORKS = ["Foundation", "Security", "CoreFoundation"]
@@ -44,9 +45,8 @@ def run(cmd, **kw):
 
 
 def runtime_sources():
-    """The runtime's sources as the ports build them: every top-level C/ObjC file of
-    RecompSteam (cli/ is the Terminal tool)."""
-    return sorted(p for p in glob.glob(os.path.join(RUNTIME, "*")) if p.endswith((".c", ".m", ".mm")))
+    """The runtime's sources as the ports build them (recomp/steam_runtime.py)."""
+    return steam_runtime.sources()
 
 
 def exported_c_functions(dylib):
@@ -64,7 +64,7 @@ def build_runtime(original=None, out=OUT):
     os.makedirs(objs)
     archs = ["-arch", "arm64", "-arch", "x86_64"]
     common = ["xcrun", "clang", *archs, "-mmacosx-version-min=11.0", "-O1", "-g", "-fobjc-arc", "-fmodules",
-              "-fvisibility=default", "-Wno-unused-function", "-Wno-deprecated-declarations"]
+              "-fvisibility=default", "-Wno-unused-function", "-Wno-deprecated-declarations", *steam_runtime.flags()]
     # Session C's GameNetworkingSockets (Steam servers), when its build script is present.
     gns = None
     try:

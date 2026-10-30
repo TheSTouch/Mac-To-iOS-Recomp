@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // The session behind RecompSteamSession.h: a WebSocket to one of Steam's connection
 // managers, logged on with the player's refresh token as a Steam client would be
 // (protocol as in SteamKit2 and node-steam-user, both of which this follows).

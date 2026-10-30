@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // The Cloud unified service as the Steam client uses it, over the session of
 // RecompSteamSession.h. Field numbers follow steammessages_cloud.steamclient.proto.
 //

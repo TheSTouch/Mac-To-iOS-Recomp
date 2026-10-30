@@ -57,6 +57,13 @@ uint64_t RS_AppOwner(void);
 void RS_PresenceStart(void);
 void RS_PresenceStop(void);
 
+// RecompSteamStart.m (declared here since Kettle's headers, the session's source, left them out):
+// the game's app id before any logon (Info.plist, $SteamAppId, steam_appid.txt; 0 when none).
+uint32_t RS_GameAppID(void);
+// Starts from what is stored on this device (RecompSteamAuth.h), if anything. Returns
+// whether a token was found. Idempotent: does nothing when already started.
+bool RecompSteam_StartStored(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // Shared between RecompSteam's own files; not for other code (use RecompSteamSession.h).
 #ifndef RECOMP_STEAM_INTERNAL_H
 #define RECOMP_STEAM_INTERNAL_H

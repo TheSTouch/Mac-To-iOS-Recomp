@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import sys
 
-from recomp import events, iossdk, macho, paths, steam_license, storage, xcodeproj
+from recomp import events, iossdk, macho, paths, steam_license, steam_runtime, storage, xcodeproj
 
 ROOT = paths.CODE
 NATIVE_SRC = os.path.join(ROOT, "recomp", "native")
@@ -172,10 +172,9 @@ def build_shims(work, game=None):
     sources = sorted(os.path.join(src, n) for n in os.listdir(src) if n.endswith((".m", ".c")))
     sources.append(os.path.join(NATIVE_SRC, "RecompSaves.m"))  # shared with the Unity route
     sources.append(os.path.join(NATIVE_SRC, "RecompLicense.m"))  # likewise
-    # The Steam runtime (recomp/native/RecompSteam): the license check signs in with it, and
+    # The Steam runtime (recomp/steam_runtime.py): the license check signs in with it, and
     # the game's libsteam_api re-exports it, so the process has one session.
-    runtime = os.path.join(NATIVE_SRC, "RecompSteam")
-    sources += sorted(os.path.join(runtime, n) for n in os.listdir(runtime) if n.endswith((".c", ".m", ".mm")))
+    sources += steam_runtime.sources()
     aliases = []
     for c in SHIM_CLASSES:
         for kind in ("CLASS", "METACLASS"):
@@ -184,7 +183,7 @@ def build_shims(work, game=None):
         aliases += ["-Wl,-alias", f"-Wl,_Recomp{k}", f"-Wl,_{k}"]
     fw = [x for f in SHIM_FRAMEWORKS for x in ("-framework", f)]
     shim = os.path.join(out, SHIM_NAME)
-    clang(["-dynamiclib", "-fobjc-arc", "-fmodules", "-Wno-unused-parameter", "-I", runtime, "-lc++",
+    clang(["-dynamiclib", "-fobjc-arc", "-fmodules", "-Wno-unused-parameter", *steam_runtime.flags(), "-lc++",
            "-install_name", SHIM_INSTALL, "-current_version", "1.0", "-compatibility_version", "1.0", *aliases, *fw,
            *sources], shim)
     return shim, build_steam_api(out, shim, game)
