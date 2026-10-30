@@ -282,6 +282,15 @@ palette on to them, so after each change every window is walked parents first: t
 gave colours are polished again, the others resolve again. An app that sets its own application
 palette keeps it. Colours the app draws itself (an editor's colour scheme, a 3D view) are its own.
 
+**Text input**: keys reach a text input through Qt's text responder (`QIOSTextInputResponder`),
+which has to be UIKit's first responder: with a hardware keyboard (or the Mac's, through Universal
+Control) the window's view takes only the arrow keys while the focus widget accepts text, and
+drops the rest. Whether a tap lands on the input, which brings the responder (and the keyboard)
+back, the iOS plugin decides from the input's `Qt::ImInputItemClipRectangle`. QWidget answers that with its visible rectangle, but a
+widget overriding `inputMethodQuery()` may answer nothing (QScintilla answers only `ImHints`
+that way), so no tap landed on it and a hardware keyboard typed nothing there. `RecompQtInput.mm`
+gives such a widget QWidget's answer.
+
 **Dock drawers**: around a main window's central widget, docks leave little of it on an 11-inch
 iPad. `RecompQtDrawers.mm`, for any `QMainWindow`, puts handles on the central widget, kept clear
 of toolbars that run along its edges:
@@ -315,6 +324,7 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes, and each GL view's depth and stencil bits, in the log |
 | `recomp-drawers` | empty | in the log: each dock drawer, open or closed, its handle's screen rectangle (for `recomp-click`) and its docks; the left grip, the central-widget button and the left docks' width (`RecompQtDrawers.mm`) |
 | `recomp-appearance` | empty | in the log: the colour scheme, the application palette per group, and each visible label, button and item view's text and background colours, with whether it has its own palette or a style sheet (`RecompQtAppearance.mm`) |
+| `recomp-input` | empty | in the log: the focus object, whether it takes text, its input rectangle (and whether the widget answers it itself), its cursor rectangle, and UIKit's first responder (`QIOSTextInputResponder` while keys go to the input) (`RecompQtInput.mm`) |
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
