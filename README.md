@@ -8,7 +8,7 @@ on your device.
 > share the app. Ports of Steam games play only after you sign in with a Steam account that owns the
 > game.
 
-[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Mac apps](#mac-apps) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md)
+[Download Recomp Helper](../../releases) · [Getting started](#getting-started) · [Mac apps](#mac-apps) · [Roadmap](#roadmap) · [How it works](docs/TECHNICAL.md) · [Disclaimer](#disclaimer)
 
 ## Steam in your ports
 
@@ -268,9 +268,24 @@ code and libraries and runs them on an iOS build of the same Qt version, made fr
 first time (about an hour). From the command line only for now: `recomp.py qt` (Getting started).
 
 **What works:** the app's windows, menus, docks, dialogs and text editors; desktop OpenGL views,
-run on the device's OpenGL ES; the virtual keyboard (a tap on a text field brings it back once
-hidden, and a hide-keyboard button sits at the right of its top bar on iPad); rotation and
-iPadOS's resizable windows: the main window always fills the space it has.
+run on the device's OpenGL ES; rotation and iPadOS's resizable windows (the main window always
+fills the space it has). Every Qt app also gets the port's touch work:
+
+- **Touch-sized controls:** 44 pt buttons, menu items, tabs and fields, larger check boxes and
+  spin-box arrows, text at least 15 pt (code editors keep their own size). Menus that would not
+  fit the screen's height get shorter rows instead of a second column.
+- **Touch scrolling:** a one-finger drag scrolls lists, text, editors and panels, with momentum and
+  a bounce at the ends. A tap still clicks; hold, then drag, to select; a double tap selects a word.
+- **Dock drawers:** the side and bottom panels become drawers. Drag a drawer's handle to resize it,
+  past its minimum to close it; tap it to switch to an even split, or to bring the panels back
+  once closed. The corner button shows the main view alone and gives everything back on the next
+  tap. Drawers stay as you left them across launches.
+- **Keyboard:** it comes up only for a tap on a text field and goes away with the hide button at
+  the right of its top bar (iPad). The app shrinks to the space above a docked keyboard instead of
+  scrolling under it. Number fields get a small number pad beside the field on iPad. Hardware
+  keyboards, including the Mac's through Universal Control, type everywhere.
+- **Light and dark mode:** apps follow the device and switch live; a profile can pin one mode for
+  an app whose own colours only work in one.
 
 **What an app needs:**
 
@@ -282,12 +297,50 @@ iPadOS's resizable windows: the main window always fills the space it has.
   work, since iOS allows no browser engine but WebKit.
 
 **Limits:** iOS lets an app start no other program, so features that run helper tools or compilers
-do nothing. Touch acts as a mouse: a tap is a click, a drag a mouse drag; there is no hover. Desktop
-layouts made for big screens are tight on an iPad: close the docks you do not need. Some apps need
-small per-app fixes, in a profile, like the games.
+do nothing. Outside scroll areas, touch acts as a mouse: a tap is a click, a drag a mouse drag;
+there is no hover, and a 3D view gets no pinch or two-finger gestures yet. Files open and save through
+Qt's own file dialog, inside the app's folder, which the Files app shows; the Files picker is not
+wired in yet. Some apps
+need small per-app fixes, in a profile, like the games.
 
 For open-source apps, a real iOS build from the app's source code will usually do better: this route
 is for using what is installed on your Mac as it is.
+
+### Optimized apps
+
+Most apps port as they are. A few also get a profile, as the games do: fixes and touch work made for
+that app, which the porting kit applies when it finds it. The port is still made from the copy
+installed on your Mac; this repository contains none of these apps.
+
+| App | Toolkit | iPad | iPhone |
+|---|---|---|---|
+| [OpenSCAD](https://openscad.org) 2025.07 nightly | Qt 6.5.5, OpenGL | 🚧 Usable, early testing | Not tried |
+
+#### OpenSCAD
+
+> **Unofficial port.** This port is not affiliated with or endorsed by the OpenSCAD project. Report
+> bugs in the iOS and iPadOS version [in this repository's issues](../../issues), never to OpenSCAD.
+> What you build is meant for your own devices: please don't share it, and never publish it on the
+> App Store or TestFlight. OpenSCAD is free software under the GPL, and your build stays under it.
+
+All the credit for OpenSCAD goes to its developers and contributors:
+[github.com/openscad/openscad](https://github.com/openscad/openscad). Mac to iOS Recomp is a
+porting kit that happens to include optimizations for some apps; it does not contain or distribute
+OpenSCAD.
+
+Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
+
+| | |
+|---|---|
+| **App size** | 85 MB |
+| **Profile** | OpenSCAD finds its libraries, fonts, colour schemes and shaders in the port's layout; its 3D view's edge shader is fixed for OpenGL ES, which otherwise drew no model |
+| **Editor** | Code editor with the virtual keyboard, which comes up for a tap in the editor; a docked keyboard shrinks the window above it. Hardware keyboards type in it. One-finger drags scroll, hold-then-drag selects |
+| **3D view** | Preview and Render (CGAL) draw on the device. A one-finger drag rotates the model; zoom and View All from the view's toolbar. Set the camera from the script with `$vpr`, `$vpd` and `$vpt` |
+| **Layout** | The Editor and Console docks are drawers: drag their handles to give the 3D view or the code more room, or the corner button for the 3D view alone, then tap again to get the code back |
+| **Viewport-Control, Customizer** | Number fields get the iPad number pad; the panels scroll by touch |
+| **Light and dark mode** | Follows the device; the editor and 3D view keep OpenSCAD's own colour schemes |
+| **Files** | Save your `.scad` files in the app's Documents folder to see them in the Files app (On My iPad › OpenSCAD) |
+| **Not yet** | Pinch to zoom and two-finger pan in the 3D view; the Files picker for files elsewhere; OpenSCAD features that run other programs |
 
 ## Roadmap
 
@@ -296,6 +349,9 @@ is for using what is installed on your Mac as it is.
 - [x] Unreal Engine 4 games for Apple silicon, retargeted to iOS
 - [ ] Other native Apple silicon games (custom engines): the same retargeting, with shims per engine
 - [x] Mac apps built with Qt 6.5.5, retargeted onto an iOS build of Qt
+- [x] Qt apps made for touch: touch sizes, touch scrolling, dock drawers, keyboard and number pad,
+  light and dark mode
+- [ ] Qt apps: pinch and two-finger gestures in 3D views; the Files picker; tried on iPhone
 - [ ] Other Qt 6 versions; Qt Quick (QML) apps; Qt apps in Recomp Helper's list
 - [ ] Godot, Ren'Py, LÖVE and HTML5 games, on each engine's iOS runtime
 - [ ] Intel-only games, by static recompilation, one game at a time
@@ -356,6 +412,26 @@ is for using what is installed on your Mac as it is.
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
 - [x] Stray on iPhone: a sharper image (2× output instead of 1×, no screen-space reflections)
 - [ ] Stray on iPhone: no short freezes, no black screen, cooler over a long session
+
+## Disclaimer
+
+- **Unofficial ports.** Every app or game ported with this tool is an unofficial port. It is not
+  affiliated with, endorsed by or supported by the app's developer or publisher. Names and
+  trademarks belong to their owners and appear here only to say which software was tested.
+- **Their licenses still apply.** A ported app or game stays under its own license, EULA and terms
+  of service, and under those of the store it came from (Steam, for one). Porting it gives you no
+  right you did not already have. This repository's license covers the tool only.
+- **The porter is responsible.** Whoever runs the tool, "the porter", is solely responsible for what
+  they port, for making sure they are allowed to, and for any use they make of the result
+  afterwards, including sharing it, which most licenses forbid. That includes keeping to Apple's
+  terms for the developer account the port is signed with.
+- **No support.** Ports come with no support, neither from the original developers nor from this
+  project's author or contributors. The author may choose to optimize some apps or games, on their
+  own schedule; that is not a promise of support, fixes or updates.
+- **No warranty, no liability.** The tool and the ports it makes are provided "as is", without
+  warranty of any kind. To the fullest extent the law allows, the author and contributors are not
+  liable for any claim, damage or loss arising from them: lost data or saves, suspended or banned
+  accounts (Steam, Apple or any other), damaged devices, or legal claims from rights holders.
 
 ## More
 
