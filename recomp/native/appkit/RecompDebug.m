@@ -132,6 +132,7 @@ static NSString *ThreadCPU(double seconds) {
 }
 
 static atomic_uint gDrawables, gLongestFrameMs, gSlowFrames, gPresented, gOnScreen;
+static atomic_uint gPresentedAll, gOnScreenAll; // since launch, for CheckShown
 static IMP oNextDrawable;
 
 // Only the engine's RHI thread takes drawables, so the last time needs no lock.
@@ -148,9 +149,41 @@ static id CountNextDrawable(id self, SEL s) {
     id<CAMetalDrawable> d = ((id (*)(id, SEL))oNextDrawable)(self, s);
     [d addPresentedHandler:^(id<MTLDrawable> p) {
         atomic_fetch_add(&gPresented, 1);
-        if (p.presentedTime > 0) atomic_fetch_add(&gOnScreen, 1);
+        atomic_fetch_add(&gPresentedAll, 1);
+        if (p.presentedTime > 0) {
+            atomic_fetch_add(&gOnScreen, 1);
+            atomic_fetch_add(&gOnScreenAll, 1);
+        }
     }];
     return d;
+}
+
+// iOS sometimes stops showing the app while it stays active: the screen is black,
+// touch buttons included, the game renders and presents normally, and every drawable
+// comes back unshown (presentedTime 0). Seen mid-play on 2026-10-30 at 16:17 (killed by
+// iOS 1.5 min later) and after a relaunch over a running copy; going to the home screen
+// and back brought the picture back. Called every 2 s: after two checks in a row where
+// at least 20 frames were presented and none was shown, the window is hidden and shown
+// again, at most once every 10 s.
+static void CheckShown(void) {
+    static unsigned lastPresented, lastShown, dark;
+    static double lastTry;
+    unsigned presented = atomic_load(&gPresentedAll), shown = atomic_load(&gOnScreenAll);
+    BOOL black = presented - lastPresented >= 20 && shown == lastShown &&
+                 UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+    lastPresented = presented;
+    lastShown = shown;
+    dark = black ? dark + 1 : 0;
+    if (dark < 2 || CACurrentMediaTime() - lastTry < 10) return;
+    lastTry = CACurrentMediaTime();
+    UIWindow *w = RecompRoot().window;
+    static const char *scene[] = {"foreground active", "foreground inactive", "background"};
+    UISceneActivationState st = w.windowScene.activationState;
+    RLOG(@"screen: no frame shown for %u s while active (window %s, key %d, scene %s, layer hidden %d opacity %.1f): "
+         @"window hidden and shown again", dark * 2, w ? (w.hidden ? "hidden" : "visible") : "none", w.isKeyWindow,
+         st >= 0 && st <= 2 ? scene[st] : "unattached", w.layer.hidden, w.layer.opacity);
+    w.hidden = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{ [w makeKeyAndVisible]; });
 }
 
 // The app's state changes, with the state it is in: a black screen while the game
@@ -364,6 +397,7 @@ __attribute__((constructor)) static void RecompHeartbeat(void) {
             Press();
             PadRecording();
             MemoryBreakdown();
+            CheckShown();
             if (++ticks % 5) return;
             unsigned now = atomic_load(&gDrawables);
             static id<MTLDevice> gpu;
