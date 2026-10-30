@@ -19,8 +19,8 @@
 #import <Foundation/Foundation.h>
 #import <CoreImage/CoreImage.h>
 #import <ImageIO/ImageIO.h>
-#include "../RecompSteamAuth.h"
-#include "../RecompSteamInternal.h"
+#include "RecompSteamAuth.h"
+#include "RecompSteamInternal.h"
 
 bool SteamAPI_ISteamUserStats_RequestCurrentStats(void *self);
 uint32_t SteamAPI_ISteamUserStats_GetNumAchievements(void *self);

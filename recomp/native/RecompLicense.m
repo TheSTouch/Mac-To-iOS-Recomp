@@ -8,9 +8,9 @@
 //
 // The first launch covers the game with a sign-in screen. The player signs in to
 // Steam as a Steam client would, with a QR code scanned in the Steam Mobile app or
-// with account name, password and Steam Guard (RecompSteam/RecompSteamAuth.h, over a
+// with account name, password and Steam Guard (Kettle's RecompSteamAuth.h, over a
 // connection to Steam's connection managers). That one sign-in is the port's Steam
-// session (RecompSteam/RecompSteamSession.h), which also carries saves, achievements
+// session (Kettle's RecompSteamSession.h), which also carries saves, achievements
 // and online play. The license is the session's: logged on, and Steam signs an
 // ownership ticket for the app (it does for a game the account owns or borrows
 // through Steam Family Sharing, and refuses one otherwise).
@@ -228,6 +228,12 @@ typedef NS_ENUM(NSInteger, RLMode) { RLChecking, RLQR, RLPassword, RLGuard, RLNo
 @property (nonatomic) int flow;                        // the sign-in flow in progress (RecompSteamAuth), 0 for none
 @property (nonatomic) int codeType;
 @property (nonatomic) BOOL launchCheck;                // the launch check within the grace period is on screen
+@property (nonatomic, strong) NSDictionary *elsewhereTokens;   // the sign-in "Play here" logs on with
+@property (nonatomic) BOOL elsewhereVerified;          // the license was checked within the grace period
+@property (nonatomic) BOOL elsewhereDismissed;         // "without Steam" chosen: not asked again until Steam is back
+@property (nonatomic) BOOL watching;                   // watchPlaying runs
+@property (nonatomic) BOOL wasLoggedOn;                // the session was logged on at watchPlaying's last look
+@property (nonatomic, strong) UIWindow *noteWindow;    // the note shown by -note:, while it shows
 @end
 
 static RecompLicenseGate *gGate;
@@ -298,6 +304,7 @@ static RecompLicenseGate *gGate;
 - (void)checkLicense:(NSDictionary *)tokens quiet:(BOOL)quiet {
     NSInteger gen = ++self.gen;
     RecompSteam_Start([tokens[@"refresh"] UTF8String], gAppId, DeviceName().UTF8String);
+    [self watchElsewhere:tokens quiet:quiet gen:gen left:kLogonWait + 5];
     RecompSteam_WhenLoggedOn(kLogonWait, ^(bool loggedOn) {
         if (!loggedOn) {
             BOOL refused = RecompSteam_State() == RecompSteamDenied;
@@ -321,6 +328,14 @@ static RecompLicenseGate *gGate;
             BOOL blocked = RecompSteam_PlayingBlocked(&elsewhere);
             Main(^{
                 if (gen != self.gen) return;
+                if (er != kOK && blocked && RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow) {
+                    // Steam logs a session off as soon as it claims the game while the account plays on
+                    // another device, often before the ticket comes: the player still chooses.
+                    LLOG(@"no ownership ticket (error %d): the account plays on another device", er);
+                    self.pending = nil;
+                    [self elsewhere:elsewhere tokens:tokens verified:quiet];
+                    return;
+                }
                 if (er == kTimeout) {
                     self.pending = quiet ? nil : tokens;
                     [self unreachable:Why(er) quiet:quiet];
@@ -340,7 +355,9 @@ static RecompLicenseGate *gGate;
                 LLOG(@"%@ owns app %u", tokens[@"account"], gAppId);
                 SaveState(@{@"refresh": tokens[@"refresh"], @"steamid": tokens[@"steamid"], @"account": tokens[@"account"],
                             @"verified": @(NSDate.date.timeIntervalSince1970)});
-                if (blocked) [self elsewhere:elsewhere];
+                // With concurrent play allowed (the profile's steam_concurrent_play), the game goes on with Steam.
+                if (blocked && RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow)
+                    [self elsewhere:elsewhere tokens:tokens verified:YES];
                 else [self afterCloudSync];
             });
         });
@@ -362,7 +379,7 @@ static void PauseGame(BOOL pause) {
     dispatch_once(&once, ^{ unityPause = (UnityPauseFn)dlsym(RTLD_DEFAULT, "RecompUnityPause"); });
     if (!unityPause || paused == pause) return;
     paused = pause;
-    LLOG(@"%@ the game while the player signs in", pause ? @"pausing" : @"resuming");
+    LLOG(@"%@ the game under the cover", pause ? @"pausing" : @"resuming");
     unityPause(pause ? 1 : 0);
 }
 
@@ -390,24 +407,174 @@ static void PauseGame(BOOL pause) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), lift);
 }
 
-// Steam plays one game per account at a time: the account plays on another device.
-- (void)elsewhere:(uint32_t)app {
+// Steam logs a session off as soon as it claims the game while the account plays on another
+// device (Deny claims it at logon), often before the check below has a ticket, or has even begun.
+// So while a check runs: Steam said the account plays elsewhere and the session is not logged on,
+// and the player chooses at once instead of waiting for the check to give up.
+- (void)watchElsewhere:(NSDictionary *)tokens quiet:(BOOL)quiet gen:(NSInteger)gen left:(double)left {
+    if (gen != self.gen || left <= 0) return;
+    uint32_t app = 0;
+    if (RecompSteam_PlayingBlocked(&app) && RecompSteam_State() != RecompSteamLoggedOn &&
+        RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow) {
+        ++self.gen;   // the check's own answer, when it comes, is dropped
+        self.pending = nil;
+        [self elsewhere:app tokens:tokens verified:quiet];
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        [self watchElsewhere:tokens quiet:quiet gen:gen left:left - 0.5];
+    });
+}
+
+// Steam plays one game per account at a time: the account plays on another device. verified:
+// the license was checked within the grace period, so the game may also play without Steam.
+- (void)elsewhere:(uint32_t)app tokens:(NSDictionary *)tokens verified:(BOOL)verified {
     LLOG(@"the account is playing app %u on another device", app);
+    self.elsewhereTokens = tokens;
+    self.elsewhereVerified = verified;
     [self cover];
     [self show:RLElsewhere status:nil];
+    self.awayButton.hidden = !verified;
     self.titleLabel.text = @"Your Steam account is playing on another device";
-    self.bodyLabel.text = [NSString stringWithFormat:
+    self.bodyLabel.text = verified ? [NSString stringWithFormat:
         @"Steam plays one game per account at a time. Play here to end the game on the other device; or play "
-        @"%@ without Steam for now (no online play, achievements or cloud saves until you choose Play here).", gGame];
+        @"%@ without Steam for now (no online play, achievements or cloud saves until you choose Play here).", gGame]
+        : @"Steam plays one game per account at a time. Play here to end the game on the other device; the "
+          @"license check then goes on.";
+}
+
+// Calls done once Steam no longer says the account plays elsewhere, or after seconds.
+static void WhenUnblocked(double seconds, dispatch_block_t done) {
+    if (seconds <= 0 || !RecompSteam_PlayingBlocked(NULL)) {
+        done();
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        WhenUnblocked(seconds - 0.5, done);
+    });
 }
 
 - (void)tapHere {
-    RecompSteam_KickPlayingSession();
-    [self uncover];
+    if (RecompSteam_State() == RecompSteamLoggedOn) {
+        RecompSteam_KickPlayingSession();
+        [self uncover];
+        return;
+    }
+    // Steam logged the session off, and a kick needs a logon. Under Deny every logon claims the
+    // game, which gets it logged off again, so this one logs on with concurrent play allowed (no
+    // claim while the account plays elsewhere), ends the other game, then goes back to Deny,
+    // which claims the game here, and checks the license again.
+    NSDictionary *tokens = self.elsewhereTokens;
+    BOOL verified = self.elsewhereVerified;
+    NSInteger gen = ++self.gen;
+    [self show:RLChecking status:nil];
+    self.titleLabel.text = @"Ending the game on the other device…";
+    LLOG(@"play here: logging on again to end the game on the other device");
+    RecompSteam_SetConcurrentPlay(RecompSteamConcurrentPlayAllow);
+    RecompSteam_Stop();
+    RecompSteam_Start([tokens[@"refresh"] UTF8String], gAppId, DeviceName().UTF8String);
+    RecompSteam_WhenLoggedOn(kLogonWait, ^(bool loggedOn) {
+        if (loggedOn) RecompSteam_KickPlayingSession();
+        Main(^{
+            WhenUnblocked(loggedOn ? 10 : 0, ^{
+                LLOG(@"play here: %@", RecompSteam_PlayingBlocked(NULL) ? @"Steam still says the other device plays"
+                                                                        : @"the other device stopped");
+                RecompSteam_SetConcurrentPlay(RecompSteamConcurrentPlayDeny);
+                if (gen != self.gen) return;
+                [self checkLicense:tokens quiet:verified];
+            });
+        });
+    });
+}
+
+// A short note at the top of the screen over the game, gone after a few seconds; touches go
+// through it to the game.
+- (void)note:(NSString *)text {
+    UIWindowScene *scene = GameWindow().windowScene;
+    UIWindow *w = scene ? [[UIWindow alloc] initWithWindowScene:scene] : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    w.windowLevel = UIWindowLevelAlert + 5;
+    w.userInteractionEnabled = NO;
+    w.backgroundColor = UIColor.clearColor;
+    UIViewController *vc = RL_AUTORELEASE([[UIViewController alloc] init]);
+    vc.view.backgroundColor = UIColor.clearColor;
+    vc.view.userInteractionEnabled = NO;
+    w.rootViewController = vc;
+    UILabel *label = RL_AUTORELEASE([[UILabel alloc] init]);
+    label.text = [NSString stringWithFormat:@"   %@   ", text];   // room around the text inside the rounded label
+    label.numberOfLines = 0;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = UIColor.whiteColor;
+    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    label.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
+    label.layer.cornerRadius = 12;
+    label.layer.masksToBounds = YES;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [vc.view addSubview:label];
+    UILayoutGuide *safe = vc.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
+        [label.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [label.widthAnchor constraintLessThanOrEqualToAnchor:safe.widthAnchor multiplier:0.9],
+        [label.widthAnchor constraintLessThanOrEqualToConstant:560],
+        [label.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+    ]];
+    self.noteWindow = RL_AUTORELEASE(w);
+    w.hidden = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        w.hidden = YES;
+        if (self.noteWindow == w) self.noteWindow = nil;
+    });
 }
 
 - (void)tapAway {
+    self.elsewhereDismissed = YES;
     [self uncover];
+}
+
+// While the game runs: another device started playing (or took the game with its own Play
+// here), so Steam logged this session off and says the account plays elsewhere. The player
+// chooses again, as at launch; after "without Steam" only once Steam is back here and the
+// other device plays again. Deny's retries keep the session trying every two minutes, and it
+// gets Steam back on its own once the other game ends.
+//
+// Steam logs the session off (LoggedInElsewhere) without saying the account plays elsewhere,
+// and Kettle does not tell why a session ended; the next logon would, two minutes later. So a
+// session lost while the game runs logs on again at once: Steam then says whether the account
+// plays elsewhere (and logs it off again for claiming the game). After a network loss that
+// logon just fails, as the retry would have.
+- (void)watchPlaying {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [self watchPlaying]; });
+    uint32_t app = 0;
+    BOOL blocked = RecompSteam_PlayingBlocked(&app);
+    BOOL loggedOn = RecompSteam_State() == RecompSteamLoggedOn;
+    BOOL lost = self.wasLoggedOn && !loggedOn;
+    self.wasLoggedOn = loggedOn;
+    if (loggedOn && !blocked && self.elsewhereDismissed) {
+        self.elsewhereDismissed = NO;
+        LLOG(@"back on Steam: the other device stopped playing");
+        [self note:@"Back on Steam: the other device stopped playing. Online play, achievements and cloud "
+                   @"saves work again."];
+    }
+    if (lost && !self.window && !self.elsewhereDismissed &&
+        RecompSteam_ConcurrentPlay() != RecompSteamConcurrentPlayAllow) {
+        NSDictionary *state = LoadState();
+        if (state) {
+            LLOG(@"the Steam session ended while playing: logging on again to ask Steam why");
+            RecompSteam_Stop();
+            RecompSteam_Start([state[@"refresh"] UTF8String], gAppId, DeviceName().UTF8String);
+        }
+        return;
+    }
+    if (self.window || self.elsewhereDismissed || loggedOn || !blocked ||
+        RecompSteam_ConcurrentPlay() == RecompSteamConcurrentPlayAllow)
+        return;
+    NSDictionary *state = LoadState();
+    if (!state) return;
+    NSTimeInterval age = NSDate.date.timeIntervalSince1970 - [state[@"verified"] doubleValue];
+    ++self.gen;
+    PauseGame(YES);
+    [self elsewhere:app tokens:state verified:age > -86400 && age < kGrace];
+    self.titleLabel.text = @"Your Steam account is now playing on another device";
 }
 
 // --- sign-in ---
@@ -815,6 +982,10 @@ static UILabel *Label(CGFloat size, UIFontWeight weight, UIColor *color) {
 - (void)uncover {
     self.launchCheck = NO;
     PauseGame(NO);
+    if (!self.watching) {
+        self.watching = YES;
+        [self watchPlaying];
+    }
     if (!self.window) return;
     [self.window endEditing:YES];
     self.window.hidden = YES;

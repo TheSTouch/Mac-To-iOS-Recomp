@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // A small protobuf encoder and decoder for the Steam messages RecompSteam uses: no
 // generated code, no runtime. Callers write and read fields by number, following the
 // .proto files of SteamKit2 / node-steam-user.

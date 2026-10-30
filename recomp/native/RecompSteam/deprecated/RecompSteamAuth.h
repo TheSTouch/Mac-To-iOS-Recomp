@@ -1,3 +1,4 @@
+// Deprecated: built from recomp/vendor/kettle
 // Signing in to Steam as a Steam client (EAuthTokenPlatformType SteamClient), and the
 // refresh token that sign-in leaves on this device. The session (RecompSteamSession.h)
 // logs on with that token; one sign-in serves the license check, saves, achievements

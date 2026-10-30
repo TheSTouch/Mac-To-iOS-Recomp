@@ -104,6 +104,7 @@ Two kinds of fixes apply on top of the generic pipeline:
   | `touch_gamepad` | `true` for action games: on-screen gamepad in play (see below) |
   | `saves` | where the game keeps its saves on the Mac and on iOS, for syncing them between devices |
   | `steam_app_id` | the game's Steam app id, for the [Steam runtime](#steam-runtime) (found from the Steam library otherwise) |
+  | `steam_concurrent_play` | `"deny"` (the default) or `"allow"`: whether Steam stays usable while the same account plays on another device ([Playing on another device](#sign-in-and-license-check)). No port allows it |
   | `mods` | where the game keeps its mods on the Mac and on iOS, for compiling them in ([Mods](#mods-unity-ports)) |
   | `touch_keys` | extra on-screen keys above Esc: `[{"label": "Dev", "keys": ["leftAlt", "leftShift", "z"]}]` (Input System key names, held together) |
   | `iphone` | settings applied only on an iPhone, over the generic phone defaults: `render_scale`, `target_frame_rate`, `quality_level`, `player_prefs`, `static_fields`, `portrait`, `portrait_horizontal_fov` (listed in `PHONE_DEFAULTS`, `recomp/unity_ios.py`) |
@@ -557,12 +558,27 @@ has to load DLLs with `Assembly.Load(bytes)` or `Assembly.LoadFrom(path)`.
 
 ## Steam runtime
 
-iOS has no Steam app, so a port of a Steam game carries its own Steam client,
-`recomp/native/RecompSteam`. It connects to Steam's servers over the same WebSocket connection the
+iOS has no Steam app, so a port of a Steam game carries its own Steam client. It connects to Steam's servers over the same WebSocket connection the
 Steam client uses, logs on as the player and serves the Steamworks API the game calls
 (`SteamAPI_*`), so the game's own Steam code runs unchanged. Everything goes straight to Steam,
 never through a server of this project. `SteamAPI_Init` succeeds in every port, signed in or not:
 games such as Valheim quit without Steam.
+
+Where the code is:
+
+- **The Steam client core** (the session, the sign-in, the protobuf codec, the Steam Cloud
+  protocol, concurrent play) comes from [Kettle](https://github.com/TheSTouch/kettle) (MIT), a
+  git submodule at `recomp/vendor/kettle` pinned to a tag (`Sources/KettleExperimental`). Run
+  `git submodule update --init recomp/vendor/kettle` after cloning. Every route builds it with
+  Kettle's default parts (sign-in, Cloud, tickets) plus `-DKETTLE_CONCURRENT_PLAY=1`.
+- **The Steamworks API on top** stays here, in `recomp/native/RecompSteam`: the flat API, stats
+  and achievements, user, apps, the start at load, the Cloud sync with local folders, matchmaking
+  and networking. `recomp/steam_runtime.py` lists the sources, include paths and flags every
+  route (Unity, Unreal, AIR, the Mac clone, `cli/build.sh`) builds with.
+- **`recomp/native/RecompSteam/deprecated/`** is the old copy of the core, kept for reference and
+  no longer built.
+- **Fixes to the core go to Kettle first**: a pull request there, a new tag, then the submodule
+  moves to it here. Never patch the files under `recomp/vendor/kettle` in place.
 
 ### Sign-in and license check
 
@@ -588,9 +604,36 @@ shared with someone else, does not play without the game's license.
   second. Offline or with Steam slow to answer, the game starts after a few seconds anyway, for
   30 days after the last successful check; past that it asks to go online. A refunded game or a
   sign-in removed in Steam brings the sign-in screen back at the next launch.
-- **Playing on another device**: Steam lets an account play one game at a time. When it already
-  plays elsewhere, the cover offers *Play here* (which ends the other session) or *Play without
-  Steam for now*; the port never takes over silently.
+- **Playing on another device**: Steam lets an account play one game at a time. What a port does
+  when the account already plays elsewhere is the profile key `steam_concurrent_play` (Info.plist
+  `RecompSteamConcurrentPlay`, handed to Kettle's `RecompSteam_SetConcurrentPlay` before any
+  logon):
+  - `"deny"`, the default and every port's setting: the cover offers *Play here* (which ends the
+    other session) or *Play without Steam for now*; the port never takes over silently. Steam logs
+    the port's session off as soon as it logs on (it claims the game at once, as the Steam client
+    does), so the cover comes from Steam's word that the account plays elsewhere, not from the
+    license check. *Play here* logs on again with concurrent play allowed for that moment (no
+    claim, so Steam keeps the session), ends the other game, then goes back to deny, claims the
+    game and checks the license. *Play without Steam* is offered only when the license was checked
+    within the last 30 days.
+
+    While the game runs, the device whose game another device takes (with its own *Play here*)
+    gets the same choice: Steam logs its session off, the port logs on again at once to learn why
+    (Steam's logoff does not say), and a Unity game pauses under "Your Steam account is now playing
+    on another device". After *Play without Steam* the session keeps trying every two minutes;
+    once the other device stops, the game is back on Steam by itself and a note at the top says so
+    for a few seconds. The other app keeps running in every case: neither Steam nor a port can
+    close an app on another device.
+  - `"allow"`: no cover; the game goes on with Steam (Cloud, achievements, tickets) without
+    ending the other game, and the session does not tell Steam it plays here while the account
+    plays elsewhere. Steam may still refuse some calls on its side, and this has not been tested
+    against live Steam.
+
+  Before allowing it, read what this can mean with Valve:
+  [Kettle's docs/valve.md, "Playing on two devices at once"](https://github.com/TheSTouch/kettle/blob/v0.1.0/docs/valve.md#playing-on-two-devices-at-once).
+  That is our reading, not legal advice: it may contain mistakes or be out of date, so rely only
+  on Valve's official texts, the
+  [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) first.
 - **Signing out**: delete `Recomp Steam license.txt` (Files, *On My iPad*, the game's folder);
   the session ends and the next launch asks to sign in again. Steam lists the sign-in as
   "Recomp: *game* on *device*" under Settings > Security > Authorized devices, where it can be
@@ -631,7 +674,17 @@ Tested: Valheim on the iPad (sign-in, license, online status, Steam Cloud both w
 Steam game, conflict prompt included, online play below) and Stray on the iPad (sign-in, license,
 online status). Achievements: Valheim's and Stray's are read as Steam has them, and an unlock
 through the runtime (`recomp-steam-cli achievements`, the same functions the game calls) reached
-Steam; an unlock from play on a device is not seen yet. Timberborn has not run on the runtime yet.
+Steam; an unlock from play on a device is not seen yet.
+
+On the Kettle-built runtime (2026-10-30, iPad, every port at `steam_concurrent_play` "deny"):
+Timberborn, Valheim, Brawlhalla and Stray kept their sign-in and passed the license check;
+Timberborn and Valheim uploaded saves to Steam Cloud and read their achievements; Valheim joined
+a password-protected Steam server by IP; Brawlhalla got its encrypted app ticket; Stray's Cloud
+passes ran with nothing to move. Downloads from Steam Cloud and a new unlock were not exercised.
+With Timberborn playing on an iPhone, Valheim launched on the iPad showed the "playing on another
+device" cover at once, and *Play here* ended the iPhone's game and went on online (before the fix
+in `RecompLicense.m`, Steam's logoff came before the ownership ticket and the port played on
+offline with no cover, as it did with the old copy of the core).
 
 ### Online play (Valheim)
 
@@ -718,12 +771,14 @@ SIGN_ID="Developer ID Application: <name> (<TEAMID>)" NOTARY_PROFILE=<profile> s
 The second form signs with the hardened runtime, builds a DMG, notarizes and staples it.
 Create the notary profile once with
 `xcrun notarytool store-credentials <profile> --apple-id <apple-id> --team-id <TEAMID>`.
-The app bundles the engine from `git archive HEAD`, so only committed files ship.
+The app bundles the engine from `git archive HEAD`, so only committed files ship, plus Kettle's
+sources at the commit the submodule pins.
 `swift scripts/make-icon.swift` regenerates the icon.
 
 ## Contributing
 
-This repository is public. Never commit game files or personal details: enable the guard
+This repository is public. After cloning, fetch Kettle with
+`git submodule update --init recomp/vendor/kettle`. Never commit game files or personal details: enable the guard
 once per clone with `git config core.hooksPath .githooks`, and list your own private
 strings (name, email, team ID, device names) as regexes in `.git/private-patterns`, which
 stays on your machine.
@@ -747,7 +802,10 @@ stays on your machine.
 - `recomp/textures.py`: BCn → ASTC texture conversion and asset bundle retargeting; `recomp/native/`:
   native start-up fixes, `RecompSaves.m`, the iOS side of the save sync, `RecompLicense.m`, the
   iOS side of the Steam license check, `RecompLog.m`, the log file; `recomp/native/RecompSteam/`:
-  the Steam runtime (session, sign-in, Steamworks API, Steam Cloud, networking, matchmaking, `cli/`)
+  the Steam runtime's Steamworks API (flat API, stats, Steam Cloud sync, networking, matchmaking,
+  `cli/`; `deprecated/` is not built); `recomp/vendor/kettle/`: Kettle, its Steam client core
+  (session, sign-in, Steam Cloud protocol), a submodule; `recomp/steam_runtime.py`: what each
+  route builds of the two
 - `recomp/steam_license.py`: the Mac side of the Steam license check (the app id a port checks)
 - `recomp/saves.py`: the Mac side of the save sync (`recomp.py saves`); `recomp/steam_cloud.py`: the save mode and Steam Cloud keys
 - `recomp/gamenetworkingsockets.py`, `recomp/playfab_party.py`: build GameNetworkingSockets, fetch PlayFab Party's iOS framework (when porting, not in git)

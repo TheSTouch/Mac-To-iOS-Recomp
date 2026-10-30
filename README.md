@@ -58,7 +58,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | **Saves on iCloud Drive** | ✅ [Shared](docs/TECHNICAL.md#saves-across-devices) with the Mac and your other devices |
 | **Mods** | ✅ Data mods any time; [code mods](docs/TECHNICAL.md#mods-unity-ports) compiled in when porting. The port's own mod, TheSTouchscreen, brings the touch input and the Mobile UI; the port turns it back on at every launch, so unticking it in the mod manager cannot leave the touch input off |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio, not yet confirmed on a device |
-| **Steam** | [Sign-in and license check](docs/TECHNICAL.md#steam-runtime). Achievements, online status and Steam Cloud are built into new ports, not yet tested with Timberborn |
+| **Steam** | [Sign-in and license check](docs/TECHNICAL.md#steam-runtime). Steam Cloud saves upload and achievements load (tested on the iPad); a download from another device and an unlock in play not tested yet |
 | **Frame rate** | Not measured yet |
 
 Known limits: no hover, so no tooltips or highlight under the cursor (the tool bar's tooltips are
@@ -387,6 +387,9 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [ ] Joining a friend's game through Steam's relay (Valheim)
 - [ ] Achievements in Unreal games (Stray)
 - [ ] Friends list, invites, Steam overlay, Workshop
+- [x] Steam client core from [Kettle](https://github.com/TheSTouch/kettle), shared with other iOS games
+- [x] "Playing on another device" screen at launch and in game, with *Play here* or play without
+  Steam, and a note when Steam is back
 
 ### Mods
 - [x] Data mods, added any time through Files
@@ -437,6 +440,10 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 
 - **[How it works](docs/TECHNICAL.md):** the Unity, Unreal and Qt routes, game profiles, touch controls in
   detail, mods, save sync rules, the Steam runtime, debugging on the device and building the app.
+- **Credits:** the Steam runtime every port carries is built on
+  [Kettle](https://github.com/TheSTouch/kettle) (MIT), its Steam client core (session, sign-in,
+  Steam Cloud), included as a git submodule: after cloning, run
+  `git submodule update --init recomp/vendor/kettle`.
 - **Contributing:** this repository is public. Never commit game files or personal details; see
   [Contributing](docs/TECHNICAL.md#contributing) for the commit guard.
 - **License:** [PolyForm Noncommercial 1.0.0](LICENSE): free for personal, hobby, research and other

@@ -88,9 +88,22 @@ bool RecompSteam_StartStored(void)
     return found;
 }
 
-// As the app loads; recomp-steam-cli has no app id and starts the session itself.
+// Info.plist "RecompSteamConcurrentPlay" (the profile's steam_concurrent_play): "allow" keeps
+// Steam working while the account plays on another device; anything else is Deny, the default.
+static void ApplyConcurrentPlay(void)
+{
+    id value = NSBundle.mainBundle.infoDictionary[@"RecompSteamConcurrentPlay"];
+    if ([value isKindOfClass:NSString.class] && [value isEqualToString:@"allow"])
+        RecompSteam_SetConcurrentPlay(RecompSteamConcurrentPlayAllow);
+}
+
+// As the app loads; recomp-steam-cli has no app id and starts the session itself. The
+// concurrent-play setting comes first, before any logon (this one, or RecompLicense.m's).
 __attribute__((constructor)) static void RecompSteamAutoStart(void)
 {
+    @autoreleasepool {
+        ApplyConcurrentPlay();
+    }
     if (getenv("RECOMP_STEAM_NO_AUTOSTART")) return;
     @autoreleasepool {
         if (RS_GameAppID()) RecompSteam_StartStored();

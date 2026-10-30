@@ -1,0 +1,3 @@
+[submodule "recomp/vendor/kettle"]
+	path = recomp/vendor/kettle
+	url = https://github.com/TheSTouch/kettle.git

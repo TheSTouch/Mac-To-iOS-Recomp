@@ -177,12 +177,12 @@ def exports(platform):
 
 def networking_exports():
     """The flat functions RecompSteam/networking.m defines when built with RECOMP_GNS."""
-    from recomp import iossdk
-    src = os.path.join(paths.CODE, "recomp", "native", "RecompSteam", "networking.m")
+    from recomp import iossdk, steam_runtime
+    src = os.path.join(steam_runtime.OURS, "networking.m")
     obj = os.path.join(ROOT, "obj", "networking.o")
     os.makedirs(os.path.dirname(obj), exist_ok=True)
     subprocess.run(["xcrun", "-sdk", "iphoneos", "clang", "-arch", "arm64", f"-mios-version-min={IOS_MIN}",
-                    "-isysroot", iossdk.sdk_path(), "-fobjc-arc", "-fmodules", "-w", "-DRECOMP_GNS",
+                    "-isysroot", iossdk.sdk_path(), "-fobjc-arc", "-fmodules", "-w", "-DRECOMP_GNS", *steam_runtime.flags(),
                     "-c", src, "-o", obj], check=True)
     out = subprocess.run(["nm", "-gUj", obj], capture_output=True, text=True, check=True).stdout
     return sorted(s[1:] for s in out.split() if s.startswith("_SteamAPI_"))
@@ -214,9 +214,9 @@ def install(native, work, log):
 
 def enable(native):
     """networking.m, as the Steam runtime copied it, built with RECOMP_GNS."""
-    from recomp import unity_ios
+    from recomp import steam_runtime, unity_ios
     with open(os.path.join(native, "networking.m.meta"), "w") as f:
-        f.write(unity_ios.native_meta("networking.m", "-fobjc-arc -DRECOMP_GNS"))
+        f.write(unity_ios.native_meta("networking.m", " ".join(["-fobjc-arc", "-DRECOMP_GNS", *steam_runtime.DEFINES])))
 
 
 if __name__ == "__main__":
