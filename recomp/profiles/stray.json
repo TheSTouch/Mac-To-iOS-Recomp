@@ -1,7 +1,7 @@
 {
   "name": "Stray",
   "tested": "playable on iPad, early testing (1.5, Steam).",
-  "tested_iphone": "playable on iPhone 17 through chapter 4 (1.5, Steam), 30 frames/s by default.",
+  "tested_iphone": "playable on iPhone 17 through chapter 4 (1.5, Steam), 20 frames/s rendered and 40 shown (frame generation).",
   "steam_app_id": 1332010,
   "saves": {
     "mac": "~/Library/Application Support/Stray/SaveGames/7656119*",

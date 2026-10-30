@@ -26,10 +26,13 @@ that one sign-in covers the following:
 - **DLC:** the port sees the DLC your account owns.
 - **Online play** in supported games (Valheim): Steam servers, the server list, crossplay servers
   and join codes, and hosting your own world.
+- **One device at a time:** when your account starts the game on another device, the port says so
+  and offers **Play here** (the other device stops) or playing without Steam for now, and notes
+  when Steam is back.
 
 Not there yet: joining a friend's game through Steam's relay, the friends list and invites, the
-Steam overlay and the Workshop. Unreal games (Stray) get the license and online status only, for
-now. [How it works](docs/TECHNICAL.md#steam-runtime)
+Steam overlay and the Workshop. Unreal games (Stray) get the license, online status and Steam Cloud
+saves, but no achievements yet. [How it works](docs/TECHNICAL.md#steam-runtime)
 
 ## Tested games
 
@@ -76,10 +79,10 @@ device.
 |---|---|
 | **App size** | 8.4 GB |
 | **Screen** | Landscape |
-| **Touch** | [On-screen gamepad](docs/TECHNICAL.md#on-screen-gamepad), with a D-pad on the left edge |
+| **Touch** | [On-screen gamepad](docs/TECHNICAL.md#on-screen-gamepad), with a D-pad on the left edge. On an iPhone the buttons sit against the screen's side edges, above and below the Dynamic Island, with the D-pad beside it. The sticks respond as soon as the thumb moves past their small dead zone |
 | **Controller** | ✅ Bluetooth controller tested; the on-screen pad hides when one connects |
 | **Keyboard, trackpad** | ✅ |
-| **Saves on iCloud Drive** | ✅ |
+| **Saves** | Steam Cloud, shared with the game on your Mac or PC (a first test ran the sync but sent no files; not confirmed yet) |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
 | **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down |
 | **Memory** | iPhone 17: chapter 4 (The Slums) reaches about 5.4 GB of the 6.1 GB iOS allows while exploring (sounds decode as they play instead of all being unpacked when a level loads); iOS sends memory warnings from about 5 GB |
@@ -369,6 +372,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [x] Touch as a mouse: tap, drag, pinch to scroll, two-finger right click, Apple Pencil
 - [x] On-screen gamepad for action games, hidden when a controller connects
 - [x] A D-pad on the on-screen gamepad (Unreal ports: Stray)
+- [x] On an iPhone, the on-screen gamepad against the screen's edges, around the Dynamic Island (Unreal ports)
 - [x] Bluetooth controllers, keyboards and trackpads
 - [x] iOS keyboard for the game's text fields
 - [x] Placement mode for building games (Timberborn)
@@ -382,6 +386,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [x] Steam license check, Family Sharing included, 30 days offline
 - [x] Online status: friends see you playing
 - [x] Steam Cloud saves, shared with the Mac and PC game (Valheim)
+- [ ] Steam Cloud saves confirmed in Stray
 - [x] Steam achievements and stats (Unity games)
 - [x] Online play (Valheim): Steam servers, the server list, crossplay, hosting
 - [x] Saves shared between Mac, iPad and iPhone through iCloud Drive, for games without Steam
