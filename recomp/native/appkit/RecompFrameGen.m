@@ -18,8 +18,8 @@
 //   mv=1       factor on the motion vector scale the game gives the upscaler
 //   jitter=0   pass the upscaler's jitter (the color given here is already upscaled)
 //   bench=1    no frame generation: the game renders as fast as it can (fps=0 for no
-//              cap) and the screen shows the newest frame at each refresh, dropping
-//              the rest. The GPU stays fully busy at its full clock, so the frames
+//              cap) into stand-ins it never waits for, and a thread of its own shows
+//              the newest finished frame at each refresh, dropping the rest. The GPU stays fully busy at its full clock, so the frames
 //              rendered each second measure what settings cost; otherwise iOS lowers
 //              the GPU clock to the load and the time per frame hides any saving.
 //
@@ -177,10 +177,12 @@ static dispatch_semaphore_t gRingFree;
 
 @class RFGDrawable;
 static void Generate(RFGDrawable *d);
+static void BenchPresent(RFGDrawable *d);
 
 @interface RFGDrawable : NSObject <CAMetalDrawable> {
 @public
     int slot;
+    BOOL bench;                        // one of the bench ring's
     RFGInputs *inputs;
     NSMutableArray *handlers;
     CFTimeInterval presented;
@@ -193,7 +195,8 @@ static void Generate(RFGDrawable *d);
 @implementation RFGDrawable
 - (void)present {
     Trace('P');
-    dispatch_async(gGen, ^{ Generate(self); });
+    if (bench) BenchPresent(self);
+    else dispatch_async(gGen, ^{ Generate(self); });
 }
 - (void)presentAtTime:(CFTimeInterval)t { [self present]; }
 - (void)presentAfterMinimumDuration:(CFTimeInterval)t { [self present]; }
@@ -225,6 +228,87 @@ static id RealDrawable(CAMetalLayer *layer) {
     return d;
 }
 
+// --- bench mode ------------------------------------------------------------------------------
+// The game never waits for the screen: it draws into one of kBench textures, a finished
+// frame replaces a finished one not yet shown (that one is dropped), and a thread of its
+// own puts the newest on the screen, waiting for the screen's drawables itself. Five
+// cover the worst case: two being drawn, one finished, one being copied, one free.
+enum { kBench = 5, kFree = 0, kDrawing, kReady, kCopying };
+static id<MTLTexture> gBenchTex[kBench];
+static int gBenchState[kBench];            // under gLock
+static int gBenchReady = -1;               // under gLock: the newest finished frame
+static CAMetalLayer *gBenchLayer;          // under gLock
+static dispatch_semaphore_t gBenchSignal;
+static atomic_uint gBenchRendered, gBenchShown;
+
+static id BenchAcquire(CAMetalLayer *layer) {
+    int k = -1;
+    os_unfair_lock_lock(&gLock);
+    for (int i = 0; i < kBench && k < 0; i++)
+        if (gBenchState[i] == kFree) k = i;
+    if (k >= 0) gBenchState[k] = kDrawing;
+    os_unfair_lock_unlock(&gLock);
+    if (k < 0) return nil;
+    // A drawing slot is the game's alone, so its texture can change here.
+    CGSize size = layer.drawableSize;
+    gBenchTex[k] = Match(gBenchTex[k], layer.device, layer.pixelFormat, (NSUInteger)size.width, (NSUInteger)size.height,
+                         MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+    RFGDrawable *d = [RFGDrawable new];
+    d->slot = k;
+    d->bench = YES;
+    d.texture = gBenchTex[k];
+    d.layer = layer;
+    return d;
+}
+
+static void BenchPresent(RFGDrawable *d) {
+    atomic_fetch_add(&gBenchRendered, 1);
+    os_unfair_lock_lock(&gLock);
+    if (gBenchReady >= 0) gBenchState[gBenchReady] = kFree;
+    gBenchState[d->slot] = kReady;
+    gBenchReady = d->slot;
+    gBenchLayer = d.layer;
+    os_unfair_lock_unlock(&gLock);
+    dispatch_semaphore_signal(gBenchSignal);
+}
+
+static void BenchPresenter(void) {
+    for (;;) {
+        dispatch_semaphore_wait(gBenchSignal, DISPATCH_TIME_FOREVER);
+        os_unfair_lock_lock(&gLock);
+        int k = gBenchReady;
+        if (k >= 0) {
+            gBenchReady = -1;
+            gBenchState[k] = kCopying;
+        }
+        CAMetalLayer *layer = gBenchLayer;
+        os_unfair_lock_unlock(&gLock);
+        if (k < 0) continue;
+        id<MTLTexture> tex = gBenchTex[k];
+        id<CAMetalDrawable> out = RealDrawable(layer);
+        id<MTLCommandQueue> q = RecompGameQueue();
+        if (!out || !q || out.texture.width != tex.width || out.texture.height != tex.height) {
+            os_unfair_lock_lock(&gLock);
+            gBenchState[k] = kFree;
+            os_unfair_lock_unlock(&gLock);
+            continue;
+        }
+        id<MTLCommandBuffer> cb = [q commandBuffer];
+        cb.label = @"recomp bench: copy";
+        id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
+        [b copyFromTexture:tex toTexture:out.texture];
+        [b endEncoding];
+        [cb addScheduledHandler:^(id<MTLCommandBuffer> c) { [out present]; }];
+        [cb addCompletedHandler:^(id<MTLCommandBuffer> c) {
+            os_unfair_lock_lock(&gLock);
+            gBenchState[k] = kFree;
+            os_unfair_lock_unlock(&gLock);
+        }];
+        [cb commit];
+        atomic_fetch_add(&gBenchShown, 1);
+    }
+}
+
 static id FixNextDrawable(CAMetalLayer *self, SEL s) {
     if (tOurs || !atomic_load(&gOn)) return ((id (*)(id, SEL))oNextDrawable)(self, s);
     if (self.framebufferOnly) {
@@ -233,6 +317,10 @@ static id FixNextDrawable(CAMetalLayer *self, SEL s) {
         return ((id (*)(id, SEL))oNextDrawable)(self, s);
     }
     Pace();
+    if (CurrentSettings().bench) {
+        id d = BenchAcquire(self);
+        return d ?: ((id (*)(id, SEL))oNextDrawable)(self, s);
+    }
     if (dispatch_semaphore_wait(gRingFree, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC))) {
         RLOG(@"framegen: no stand-in free after 1 s, the game gets a real drawable");
         return ((id (*)(id, SEL))oNextDrawable)(self, s);
@@ -288,8 +376,7 @@ static int gPrevSlot = -1;
 static id<MTLTexture> gPrevTexture;
 static id gInterpolator;
 static BOOL gInterpolatorFailed;
-static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed, dropped; double wait; } gStats;
-static atomic_int gShowing;            // bench: frames presented and not yet on screen
+static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed; double wait; } gStats;
 
 API_AVAILABLE(ios(26.0))
 static id<MTLFXFrameInterpolator> Interpolator(id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> motion) {
@@ -388,16 +475,7 @@ static void Generate(RFGDrawable *cur) {
     id<MTLCommandQueue> q = RecompGameQueue();
     Settings set = CurrentSettings();
     gStats.real++;
-    BOOL bench = set.bench && atomic_load(&gOn);
-    if (bench && atomic_load(&gShowing) > 0) {
-        // The screen has a frame waiting already: this one is dropped.
-        gStats.dropped++;
-        if (gPrevSlot >= 0) dispatch_semaphore_signal(gRingFree);
-        gPrevSlot = cur->slot;
-        gPrevTexture = cur.texture;
-        return;
-    }
-    BOOL made = q && !bench && Between(cur, q, set);
+    BOOL made = q && Between(cur, q, set);
     id<CAMetalDrawable> out = RealDrawable(cur.layer);
     if (q && out && out.texture.width == cur.texture.width && out.texture.height == cur.texture.height) {
         id<MTLCommandBuffer> cb = [q commandBuffer];
@@ -406,9 +484,7 @@ static void Generate(RFGDrawable *cur) {
         [b copyFromTexture:cur.texture toTexture:out.texture];
         [b endEncoding];
         double after = made ? 0.5 / set.fps : 0;
-        if (bench) atomic_fetch_add(&gShowing, 1);
         [out addPresentedHandler:^(id<MTLDrawable> d) {
-            if (bench) atomic_fetch_sub(&gShowing, 1);
             NSArray *handlers;
             @synchronized (cur) {
                 cur->presented = d.presentedTime;
@@ -467,12 +543,9 @@ static void Poll(void) {
 }
 
 static void Report(void) {
+    unsigned rendered = atomic_exchange(&gBenchRendered, 0), shown = atomic_exchange(&gBenchShown, 0);
+    if (rendered) RLOG(@"framegen: bench: %.1f frames/s rendered, %.1f shown", rendered / 10.0, shown / 10.0);
     if (!gStats.real) return;
-    if (CurrentSettings().bench) {
-        RLOG(@"framegen: bench: %.1f frames/s rendered, %.1f shown", gStats.real / 10.0, (gStats.real - gStats.dropped) / 10.0);
-        memset(&gStats, 0, sizeof gStats);
-        return;
-    }
     RLOG(@"framegen: %u frames rendered, %u made between (%.1f ms waiting for a drawable each); not made: %u without "
          @"upscaler inputs, %u history resets, %u without a previous frame, %u without a drawable, %u interpolator failures",
          gStats.real, gStats.made, gStats.made ? gStats.wait * 1000 / gStats.made : 0.0, gStats.noInputs, gStats.reset,
@@ -485,6 +558,11 @@ __attribute__((constructor)) static void RecompFrameGenInit(void) {
         gSet = kDefaults;
         gGen = dispatch_queue_create("recomp.framegen", DISPATCH_QUEUE_SERIAL);
         gRingFree = dispatch_semaphore_create(kRing);
+        gBenchSignal = dispatch_semaphore_create(0);
+        NSThread *presenter = [[NSThread alloc] initWithBlock:^{ BenchPresenter(); }];
+        presenter.name = @"recomp bench presenter";
+        presenter.qualityOfService = NSQualityOfServiceUserInteractive;
+        [presenter start];
         Swap([CAMetalLayer class], @selector(nextDrawable), (IMP)FixNextDrawable, &oNextDrawable);
         Class dc = NSClassFromString(@"CAMetalDrawable");
         if (dc) Swap(dc, @selector(present), (IMP)FixPresent, &oPresent);
