@@ -17,8 +17,17 @@
 //                                        makes of them. "x y x y 0" is a tap, "x y x y 0 800" a hold.
 //                                        One touch per line, each starting as the one before ends
 //                                        (two tap lines are a double tap)
+//   recomp-focus     "Class n" | "none"
+//                                     -> focuses the n-th visible widget of that class (from 0, a
+//                                        QSpinBox or QDoubleSpinBox say), as a click would but with no
+//                                        touch, or clears the focus
+//   recomp-pad       "key ..." | (empty)
+//                                     -> presses those keys of the iPad's number pad (0-9, separator,
+//                                        sign, delete, done), then logs where the pad is
 //   recomp-grab      (empty)          -> recomp-gl-<n>.png: what each QOpenGLWidget rendered, read back
-//                                        from its framebuffer, and recomp-window.png: the window
+//                                        from its framebuffer, recomp-window.png: the window, and
+//                                        recomp-screen.png: the screen with the UIKit views over it
+//                                        (the number pad)
 //
 // Each request file is deleted once handled. Checked once a second from Qt's event loop.
 #include <QtCore/QCoreApplication>
@@ -30,6 +39,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QAction>
 #include <QtGui/QImage>
+#include <QtGui/QInputMethod>
 #include <QtGui/QInputMethodEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
@@ -43,6 +53,8 @@
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QTextEdit>
 #include <QtWidgets/QWidget>
+
+#import <UIKit/UIKit.h>
 
 static QList<QAction *> allActions()
 {
@@ -123,6 +135,62 @@ static void nextSwipe()
     const QStringList v = swipesLeft.takeFirst().split(QLatin1Char(' '), Qt::SkipEmptyParts);
     swipe(QPointF(v.value(0).toDouble(), v.value(1).toDouble()), QPointF(v.value(2).toDouble(), v.value(3).toDouble()),
           v.value(4).toInt(), v.value(5).toInt());
+}
+
+static UIWindow *appWindow()
+{
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if ([scene isKindOfClass:[UIWindowScene class]])
+            for (UIWindow *window in static_cast<UIWindowScene *>(scene).windows)
+                if (window.isKeyWindow)
+                    return window;
+    return nil;
+}
+
+// The Qt plugin's QIOSNumberPad, if it has been made.
+static UIView *numberPad(UIView *view)
+{
+    if ([NSStringFromClass([view class]) isEqualToString:@"QIOSNumberPad"])
+        return view;
+    for (UIView *sub in view.subviews)
+        if (UIView *found = numberPad(sub))
+            return found;
+    return nil;
+}
+
+static void pressPadKeys(QStringList keys)
+{
+    UIView *pad = numberPad(appWindow());
+    if (keys.isEmpty()) {
+        const CGRect f = pad ? pad.frame : CGRect();
+        const CGRect in = pad ? pad.superview.bounds : CGRect();
+        const QRectF item = QGuiApplication::inputMethod()->inputItemClipRectangle();
+        const QRectF cursor = QGuiApplication::inputMethod()->cursorRectangle();
+        const QWindow *window = QGuiApplication::focusWindow();
+        const QRect at = window ? window->geometry() : QRect();
+        fprintf(stderr, "[recomp] number pad: %s at %g,%g %gx%g in %gx%g; input %g,%g %gx%g, cursor %g,%g %gx%g "
+                "in the focus window %dx%d+%d+%d\n", !pad ? "none" : pad.hidden ? "hidden" : "shown",
+                f.origin.x, f.origin.y, f.size.width, f.size.height, in.size.width, in.size.height,
+                item.x(), item.y(), item.width(), item.height(), cursor.x(), cursor.y(), cursor.width(),
+                cursor.height(), at.width(), at.height(), at.x(), at.y());
+        return;
+    }
+    const QString name = keys.takeFirst();
+    UIButton *key = nil;
+    for (UIView *sub in pad.subviews)
+        if ([sub.accessibilityIdentifier isEqualToString:(QStringLiteral("numberpad.") + name).toNSString()])
+            key = static_cast<UIButton *>(sub);
+    if (key && !pad.hidden && !key.hidden) {
+        [key sendActionsForControlEvents:UIControlEventTouchDown];
+        [key sendActionsForControlEvents:UIControlEventTouchUpInside];
+        QWidget *w = QApplication::focusWidget();
+        fprintf(stderr, "[recomp] pad key %s: %s\n", qPrintable(name),
+                w ? qPrintable(w->inputMethodQuery(Qt::ImSurroundingText).toString()) : "(no focus)");
+    } else {
+        fprintf(stderr, "[recomp] pad key %s: %s\n", qPrintable(name), !pad || pad.hidden ? "no pad" : "no such key");
+    }
+    // One key per event loop pass, as taps would come.
+    QTimer::singleShot(100, [keys] { pressPadKeys(keys); });
 }
 
 static void poll()
@@ -216,6 +284,13 @@ static void poll()
                     target ? qPrintable(target->objectName()) : "not found");
         }
     }
+    QFile pad(docs + QStringLiteral("recomp-pad"));
+    if (pad.exists() && pad.open(QIODevice::ReadOnly)) {
+        const QStringList keys = QString::fromUtf8(pad.readAll()).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        pad.close();
+        pad.remove();
+        pressPadKeys(keys);
+    }
     QFile swipeRequest(docs + QStringLiteral("recomp-swipe"));
     if (swipeRequest.exists() && swipeRequest.open(QIODevice::ReadOnly)) {
         swipesLeft = QString::fromUtf8(swipeRequest.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -249,6 +324,14 @@ static void poll()
             fprintf(stderr, "[recomp] window %s %dx%d+%d+%d, minimum %dx%d; screen available %dx%d+%d+%d\n",
                     top->metaObject()->className(), top->width(), top->height(), top->x(), top->y(),
                     top->minimumWidth(), top->minimumHeight(), screen.width(), screen.height(), screen.x(), screen.y());
+        }
+        if (UIWindow *window = appWindow()) {
+            UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:window.bounds];
+            UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *) {
+                [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
+            }];
+            [UIImagePNGRepresentation(image) writeToFile:(docs + QStringLiteral("recomp-screen.png")).toNSString()
+                                              atomically:YES];
         }
     }
     QFile request(docs + QStringLiteral("recomp-action"));

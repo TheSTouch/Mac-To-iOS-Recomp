@@ -216,8 +216,27 @@ retargets the rest (`recomp/qt_ios.py`):
      whatever size the app restores, other windows are kept on screen, and the screen is the app's
      own `UIWindow` when that is smaller than the display (iPadOS 26 runs apps in resizable windows
      and ignores `UIRequiresFullScreen`);
-   - **keyboard**: it follows focus only, so a tap on the focused text input brings it back once
-     the user has hidden it; on iPad a hide-keyboard button is added at the right of its shortcuts bar.
+   - **keyboard**: a focus change made by a touch brings the keyboard up only once the finger
+     lifts, and only if the touch landed on the focused input, so a menu or dialog closing and
+     handing focus back brings nothing up. A focus window change made while the keyboard is down
+     keeps it down. A tap on the focused input brings the keyboard back after the user hid it, and a
+     single-line input puts its cursor at the end of its text. On iPad a hide-keyboard button sits at
+     the right of the shortcuts bar. A **docked** keyboard (along the bottom, at least 90 % of the
+     width and 150 pt tall) is taken off the screen's available geometry, so the maximized main
+     window resizes to the space above it and the root view no longer scrolls up. The floating
+     keyboard and the 70 pt bar a hardware keyboard leaves lie over the app;
+   - **number pad** (`qiosnumberpad.mm`): on iPad, number inputs (`ImhDigitsOnly`, a QSpinBox;
+     `ImhFormattedNumbersOnly`, a QDoubleSpinBox) get the app's own pad and no system keyboard: an
+     empty input view and no shortcuts bar. iPadOS's number pad is a popover by the caret, drawn by
+     the out-of-process keyboard. When a tap made the field first responder, iPadOS swaps the pad
+     for the docked keyboard 1 to 1.5 s later, with no call into the app in between, and a tap
+     outside the popover never reaches the app. The pad sits under the input, or above it when there
+     is no room below, on the Qt root view above the windows. It has keys 7 8 9 / 4 5 6 / 1 2 3 /
+     +/- 0 and the locale's decimal separator (doubles only) / delete and Done, typed through the
+     text responder (`insertText:`, `deleteBackward`, `qt_toggleSign`). Touches outside it reach the
+     app, so a tap on another number input moves it there. Done or any other focus change resigns
+     the responder and hides it. It hides while a Qt popup (a menu, a combo box's list) shows, and
+     with a hardware keyboard connected (`GCKeyboard`). The iPhone keeps iOS's own pads.
 2. **prepare**: every Mach-O of the bundle except Qt's own is thinned to arm64 and marked as iOS. Mac
    Qt apps' binaries bind their imports with dyld-info opcodes, by **library slot**, so each keeps its
    library list slot for slot (`macho.py` `bound_imports()` reads which symbols come through which
@@ -323,7 +342,9 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-type` | the text | types it into the focused widget, as the keyboard commits text |
 | `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
 | `recomp-swipe` | `x1 y1 x2 y2 ms [hold]` per line, screen points | a one-finger touch through Qt's touch input, as the iOS plugin sends it: held `hold` ms, then moved to the end over `ms`; each line starts as the one before ends (a double tap is two 0 ms lines) |
-| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes, and each GL view's depth and stencil bits, in the log |
+| `recomp-focus` | `Class n` (a QSpinBox, a QDoubleSpinBox…), or `none` | focuses the n-th visible widget of that class (from 0) as a click would, with no touch, or clears the focus. `recomp-click` does not move focus, and no hook makes a UIKit touch, so keyboard behaviour after a real tap needs a person |
+| `recomp-pad` | keys (`0`–`9`, `separator`, `sign`, `delete`, `done`), or empty | presses those keys of the iPad number pad one by one, logging the input's text after each; then logs where the pad is, the input and cursor rectangles and the focus window |
+| `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; `recomp-screen.png`, the UIKit window with its views (the number pad), which the Qt grab misses; window and screen sizes, and each GL view's depth and stencil bits, in the log |
 | `recomp-drawers` | empty | in the log: each dock drawer, open or closed, its handle's screen rectangle (for `recomp-click`) and its docks; the left grip, the central-widget button and the left docks' width (`RecompQtDrawers.mm`) |
 | `recomp-appearance` | empty | in the log: the colour scheme, the application palette per group, and each visible label, button and item view's text and background colours, with whether it has its own palette or a style sheet (`RecompQtAppearance.mm`) |
 | `recomp-input` | empty | in the log: the focus object, whether it takes text, its input rectangle (and whether the widget answers it itself), its cursor rectangle, and UIKit's first responder (`QIOSTextInputResponder` while keys go to the input) (`RecompQtInput.mm`) |
