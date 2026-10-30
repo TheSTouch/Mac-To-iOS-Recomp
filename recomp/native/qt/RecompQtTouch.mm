@@ -4,12 +4,15 @@
 // app style's. Installed when the first widget is polished, once QApplication has
 // set up its style and fonts, and again if the app replaces the style. Text is
 // raised to 15 pt at the same time, except in text editors, and a press has to
-// move further before it starts a drag.
+// move further before it starts a drag. A menu's rows get shorter when 44 pt ones
+// would not fit the screen's height, which Qt meets with more columns.
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QRegularExpression>
 #include <QtWidgets/QAbstractSpinBox>
+#include <QtGui/QScreen>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QMenu>
 #include <QtWidgets/QProxyStyle>
 #include <QtWidgets/QStyleOption>
 #include <QtWidgets/QWidget>
@@ -75,7 +78,7 @@ public:
             if (auto *item = qstyleoption_cast<const QStyleOptionMenuItem *>(option))
                 if (item->menuItemType == QStyleOptionMenuItem::Separator)
                     break;
-            size.setHeight(qMax(size.height(), kTarget));
+            size.setHeight(qMax(size.height(), menuRowHeight(widget)));
             break;
         case CT_MenuBarItem:
         case CT_PushButton:
@@ -111,6 +114,40 @@ public:
             break;
         }
         return size;
+    }
+
+    // kTarget, or less in a menu whose rows would not fit the screen's height (the space
+    // above a docked keyboard): its rows share it. Never less than their text needs, as
+    // sizeFromContents keeps the larger.
+    int menuRowHeight(const QWidget *widget) const
+    {
+        auto *menu = qobject_cast<const QMenu *>(widget);
+        if (!menu || !menu->screen())
+            return kTarget;
+        int rows = 0;
+        int separators = 0;
+        for (QAction *action : menu->actions()) {
+            if (!action->isVisible())
+                continue;
+            if (action->isSeparator()) {
+                // As QMenu sizes a separator (QMenuPrivate::updateActionRects).
+                QStyleOptionMenuItem option;
+                option.initFrom(menu);
+                option.menuItemType = QStyleOptionMenuItem::Separator;
+                separators += QProxyStyle::sizeFromContents(CT_MenuItem, &option, QSize(2, 2), menu).height();
+            } else {
+                ++rows;
+            }
+        }
+        if (!rows)
+            return kTarget;
+        // QMenu starts a new column below this (QMenuPrivate::updateActionRects).
+        const QMargins margins = menu->contentsMargins();
+        const int frame = 2 * (pixelMetric(PM_MenuDesktopFrameWidth, nullptr, menu)
+                               + pixelMetric(PM_MenuPanelWidth, nullptr, menu) + pixelMetric(PM_MenuVMargin, nullptr, menu))
+            + margins.top() + margins.bottom();
+        const int room = menu->screen()->availableGeometry().height() - frame - separators;
+        return qMin(kTarget, room / rows);
     }
 
     // The spin box's up and down buttons grow towards the text; the text field

@@ -253,7 +253,9 @@ stops top-level layouts enforcing their minimum, so the contents squeeze into th
 style over the app's own style (installed when the first widget is polished, and again if the app
 replaces its style): hit targets of 44 pt for menu items, tabs, buttons, combo boxes and line edits,
 32 pt spin-box arrows and dock title-bar buttons, 24 pt check boxes, 12 pt splitter and dock
-separators, 44 pt shortest scroll-bar slider. Drawing stays the app style's. Text is raised to at
+separators, 44 pt shortest scroll-bar slider. A menu whose 44 pt rows would not fit the screen's
+height (the space above a docked keyboard, say) gets shorter rows instead, never shorter than their
+text, so it stays one column where Qt would start a second. Drawing stays the app style's. Text is raised to at
 least 15 pt, except in text editors (`QPlainTextEdit`, `QTextEdit`, QScintilla), which keep the app's
 or the user's size, and a press must move 12 pt before it starts a drag.
 
