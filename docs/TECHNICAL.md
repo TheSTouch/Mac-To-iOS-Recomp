@@ -248,6 +248,27 @@ int-to-float conversion, no `smoothstep(e, e, x)`; fix those with `resource_patc
 is wider than an 11-inch iPad), and it grows the window back to it. `RecompQtWindows.mm` in the shim
 stops top-level layouts enforcing their minimum, so the contents squeeze into the screen.
 
+**Touch sizes**: a QWidget app keeps the Mac's mouse-sized controls. `RecompQtTouch.mm` puts a proxy
+style over the app's own style (installed when the first widget is polished, and again if the app
+replaces its style): hit targets of 44 pt for menu items, tabs, buttons, combo boxes and line edits,
+32 pt spin-box arrows and dock title-bar buttons, 24 pt check boxes, 12 pt splitter and dock
+separators, 44 pt shortest scroll-bar slider. Drawing stays the app style's. Text is raised to at
+least 15 pt, except in text editors (`QPlainTextEdit`, `QTextEdit`, QScintilla), which keep the app's
+or the user's size, and a press must move 12 pt before it starts a drag.
+
+**Dock drawers**: around a main window's central widget, docks leave little of it on an 11-inch
+iPad. `RecompQtDrawers.mm`, for any `QMainWindow`, puts handles on the central widget, kept clear
+of toolbars that run along its edges:
+- right and bottom edges: the dock areas there are drawers. A tap hides every dock in the area,
+  the next brings back the ones that were open; a dock the app opens itself opens its drawer.
+  Open or closed is saved per area in the app's `QSettings` (`recomp/drawers/right`,
+  `recomp/drawers/bottom`, the hidden docks under `recomp/drawerDocks/<area>`) and applied once the
+  app has restored its own layout. First launch: both closed;
+- left edge, while docks are open there: a grip that resizes them by dragging; a tap switches
+  between an even split with the central widget and the width before it;
+- top-right corner: the central widget alone. Every dock and the window's own toolbars hide, and
+  the next tap brings back what was open; a dock the app opens meanwhile ends it.
+
 **Debugging**: in the simulator, `xcrun simctl launch --wait-for-debugger` then lldb. On a device and
 in the simulator, files dropped into the app's `Documents` (`devicectl device copy to --domain-type
 appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
@@ -260,6 +281,7 @@ appDataContainer`, or the simulator's data container) drive `RecompQtHooks.mm`:
 | `recomp-type` | the text | types it into the focused widget, as the keyboard commits text |
 | `recomp-click` | `x y`, screen points | a left click (not a touch) on the widget there |
 | `recomp-grab` | empty | `recomp-gl-<n>.png`, each QOpenGLWidget read back; `recomp-window.png`, the active window; window and screen sizes, and each GL view's depth and stencil bits, in the log |
+| `recomp-drawers` | empty | in the log: each dock drawer, open or closed, its handle's screen rectangle (for `recomp-click`) and its docks; the left grip, the central-widget button and the left docks' width (`RecompQtDrawers.mm`) |
 
 `LIBGL_LOGSHADERERROR=1` and `LIBGL_DBGSHADERCONV=1` (prefix them `SIMCTL_CHILD_` for the simulator)
 show gl4es's shader conversions and errors.
