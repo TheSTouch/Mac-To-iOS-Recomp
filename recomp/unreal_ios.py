@@ -480,6 +480,8 @@ def info_plist(game):
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
         "RecompIniOverrides": ini_overrides(game.profile),
         "RecompIniOverridesPhone": overlay(ini_overrides(PHONE_DEFAULTS), ini_overrides(game.profile.get("iphone", {}))),
+        # Read by RecompFrameGen.m: frame generation's settings on an iPhone ("fps=20"), or none.
+        "RecompFrameGenPhone": game.profile.get("iphone", {}).get("frame_generation", ""),
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }

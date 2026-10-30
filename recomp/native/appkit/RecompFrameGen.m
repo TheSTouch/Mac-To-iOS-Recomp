@@ -9,8 +9,10 @@
 // and a warm phone drops back to 60), so 20 rendered -> 40 shown does not fit; 30 -> 60
 // is smoother but not cooler.
 //
-// Experimental and off: switched while the game runs by a file named recomp-framegen in
-// Documents. Empty or "off": off. Otherwise on, with optional key=value words:
+// On an iPhone, a game's profile can turn it on ("frame_generation" in its "iphone" block,
+// RecompFrameGenPhone in the Info.plist); Stray's does, at 20 -> 40. A file named
+// recomp-framegen in Documents overrides that while the game runs: empty or "off": off;
+// "default": the profile's setting; otherwise on, with optional key=value words:
 //   fps=20     frames the game renders each second (the screen shows twice as many)
 //   fov=50     the camera's vertical field of view, in degrees
 //   near=10    near plane in game units (Unreal: centimetres)
@@ -550,7 +552,7 @@ static void WantRate(double shown) {
     // Asked for 40-120 preferring 40, iOS ran the screen at 60 Hz, where 40 frames/s does
     // not fit; at 120 each shown frame lasts 3 refreshes.
     gLink.preferredFrameRateRange = CAFrameRateRangeMake(120, 120, 120);
-    RLOG(@"framegen: screen asked for %.0f Hz", shown);
+    RLOG(@"framegen: screen asked for 120 Hz, %.0f frames/s shown", shown);
 }
 
 // --- the switch -------------------------------------------------------------------------------
@@ -560,6 +562,16 @@ static void Poll(void) {
     NSString *text = [NSString stringWithContentsOfFile:[docs stringByAppendingPathComponent:@"recomp-framegen"]
                                                encoding:NSUTF8StringEncoding error:nil];
     text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    // Without the file (or with "default"), the profile's setting on an iPhone.
+    if (!text || [text isEqualToString:@"default"]) {
+        static NSString *profile;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            NSString *v = NSBundle.mainBundle.infoDictionary[@"RecompFrameGenPhone"];
+            profile = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone && v.length ? v : @"";
+        });
+        text = profile;
+    }
     BOOL on = text.length && ![text isEqualToString:@"off"];
     Settings s = kDefaults;
     for (NSString *word in [text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
