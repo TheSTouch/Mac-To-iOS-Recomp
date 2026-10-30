@@ -2,9 +2,11 @@
 // controls (10 pt spin-box arrows, 12 pt dock buttons), which a finger misses. A
 // proxy style over the app's own style raises the hit targets; drawing stays the
 // app style's. Installed when the first widget is polished, once QApplication has
-// set up its style and fonts, and again if the app replaces the style.
+// set up its style and fonts, and again if the app replaces the style. Text is
+// raised to 15 pt at the same time, except in text editors.
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
+#include <QtCore/QRegularExpression>
 #include <QtWidgets/QAbstractSpinBox>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QProxyStyle>
@@ -20,6 +22,10 @@ const int kScrollBar = 18;
 const int kScrollSlider = 44;    // shortest scroll-bar slider
 const int kDockButton = 32;      // dock title-bar close and float buttons
 const int kSeparator = 12;       // splitter and dock separator handles
+const qreal kFont = 15;          // smallest text, in points
+
+// Text views keep the app's font: code and logs are sized by the app or the user.
+const char *const kEditors[] = {"QPlainTextEdit", "QTextEdit", "QsciScintillaBase"};
 
 class TouchStyle : public QProxyStyle
 {
@@ -145,6 +151,47 @@ void installTouchStyle()
     QApplication::setStyle(touchStyle);
 }
 
+void raiseFonts()
+{
+    const QFont font = QApplication::font();
+    if (font.pointSizeF() > 0 && font.pointSizeF() < kFont) {
+        QFont bigger = font;
+        bigger.setPointSizeF(kFont);
+        QApplication::setFont(bigger);
+        for (const char *editor : kEditors)
+            QApplication::setFont(font, editor);
+        fprintf(stderr, "[recomp] touch fonts: app font %g pt -> %g pt\n", font.pointSizeF(), kFont);
+    }
+    // A font size in the app's style sheet wins over the app font: smaller ones
+    // are raised too. When a "*" rule set it, text views keep that size.
+    const QString sheet = qApp->styleSheet();
+    if (sheet.isEmpty())
+        return;
+    static const QRegularExpression size(QStringLiteral("font-size\\s*:\\s*([0-9.]+)\\s*(pt|px)"));
+    static const QRegularExpression universal(QStringLiteral("(?:^|\\})\\s*\\*\\s*\\{[^}]*?(font-size\\s*:[^;}]*)"));
+    QString raised;
+    qsizetype from = 0;
+    for (const QRegularExpressionMatch &m : size.globalMatch(sheet)) {
+        if (m.captured(1).toDouble() >= kFont)
+            continue;
+        raised += sheet.mid(from, m.capturedStart() - from) + QStringLiteral("font-size: %1pt").arg(kFont);
+        from = m.capturedEnd();
+    }
+    if (!from)
+        return;
+    raised += sheet.mid(from);
+    const QRegularExpressionMatch all = universal.match(sheet);
+    if (all.hasMatch()) {
+        QStringList editors;
+        for (const char *editor : kEditors)
+            editors << QString::fromLatin1(editor);
+        raised += QLatin1Char('\n') + editors.join(QStringLiteral(", ")) + QStringLiteral(" { ") + all.captured(1)
+            + QStringLiteral(" }");
+    }
+    qApp->setStyleSheet(raised);
+    fprintf(stderr, "[recomp] touch fonts: style sheet font sizes raised to %g pt\n", kFont);
+}
+
 class TouchSetup : public QObject
 {
 public:
@@ -155,6 +202,10 @@ public:
         // Seen before the widget's own polish, so it is polished with the new style.
         // The proxy goes away when the app sets another style: wrap that one too.
         if (event->type() == QEvent::Polish && object->isWidgetType() && !touchStyle && !gaveUp) {
+            if (!fontsRaised) {
+                fontsRaised = true;
+                raiseFonts();
+            }
             installTouchStyle();
             gaveUp = !touchStyle;
         }
@@ -173,6 +224,7 @@ public:
 
 private:
     bool gaveUp = false;
+    bool fontsRaised = false;
 };
 
 void startTouch()
