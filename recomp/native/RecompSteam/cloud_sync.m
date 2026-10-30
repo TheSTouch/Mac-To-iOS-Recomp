@@ -178,6 +178,18 @@ static NSString *BackupPath(NSString *side, NSString *name) {
 }
 
 // Writes data (or copies the file at src) to dst through a temporary file next to it, with mtime.
+// RSCloudCommit as of Kettle v0.1.0 sets its error inside an @autoreleasepool that drains before
+// it returns, so the error it hands back is already freed and retaining it crashes (the iPhone's
+// Timberborn at every launch, once an upload failed). Until Kettle fixes it, no error is asked for.
+static BOOL Commit(uint32_t appid, NSDictionary<NSString *, NSString *> *uploads,
+                   NSDictionary<NSString *, NSNumber *> *times, NSArray<NSString *> *deletes, NSString **error) {
+    if (RSCloudCommit(appid, gDevice, uploads, times, deletes, NULL)) return YES;
+    if (error && !*error)
+        *error = [NSString stringWithFormat:@"the upload of %lu files and %lu deletions failed",
+                  (unsigned long)uploads.count, (unsigned long)deletes.count];
+    return NO;
+}
+
 static BOOL Place(NSData *data, NSString *src, NSString *dst, NSTimeInterval mtime, NSMutableArray *errors) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *dir = dst.stringByDeletingLastPathComponent;
@@ -404,7 +416,7 @@ RSCloudReport *RSCloudSync(NSString *why, BOOL download, BOOL upload, BOOL settl
         [deletes removeAllObjects];
     }
     if (uploads.count || deletes.count) {
-        if (RSCloudCommit(appid, gDevice, uploads, times, deletes, &err)) {
+        if (Commit(appid, uploads, times, deletes, &err)) {
             for (NSString *name in uploads) {
                 RSCloudFile *c = [[RSCloudFile alloc] init];
                 NSData *d = [NSData dataWithContentsOfFile:uploads[name] options:NSDataReadingMappedIfSafe error:nil];
@@ -478,7 +490,7 @@ RSCloudReport *RSCloudResolve(NSArray<RSCloudConflict *> *conflicts, BOOL keepCl
             }
         }
     }
-    if ((uploads.count || deletes.count) && RSCloudCommit(appid, gDevice, uploads, times, deletes, &err)) {
+    if ((uploads.count || deletes.count) && Commit(appid, uploads, times, deletes, &err)) {
         for (NSString *name in uploads) {
             RSCloudFile *c = [[RSCloudFile alloc] init];
             NSData *d = [NSData dataWithContentsOfFile:uploads[name] options:NSDataReadingMappedIfSafe error:nil];
