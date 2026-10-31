@@ -6,7 +6,9 @@
 //
 // On an iPhone, RecompIniOverridesPhone (the profile's "iphone" block over the
 // generic phone defaults, see unreal_ios.py) is laid over RecompIniOverrides key
-// by key: phone values win, base keys it does not name are kept.
+// by key: phone values win, base keys it does not name are kept. On an iPad,
+// RecompIniOverridesPad (the profile's "ipad" block; there are no generic iPad
+// defaults) is laid over them the same way. An iOS app on a Mac gets the base.
 //
 // Engine.ini keys are workarounds: they are rewritten at every launch, in case
 // the game saved over them. Every other file's keys are defaults the player may
@@ -159,17 +161,24 @@ static void RemoveKeys(NSString *path, NSDictionary<NSString *, NSArray *> *sect
     if (removed.count) [[lines componentsJoinedByString:@"\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
+// RECOMP_IDIOM=phone or pad applies that device's set elsewhere, e.g. on a Mac running
+// the iOS build, to measure what an iPhone or an iPad gets.
+NSString *RecompIdiom(void) {
+    const char *env = getenv("RECOMP_IDIOM");
+    if (env && !strcmp(env, "phone")) return @"Phone";
+    if (env && !strcmp(env, "pad")) return @"Pad";
+    if (NSProcessInfo.processInfo.isiOSAppOnMac) return nil;
+    UIUserInterfaceIdiom idiom = UIDevice.currentDevice.userInterfaceIdiom;
+    return idiom == UIUserInterfaceIdiomPhone ? @"Phone" : idiom == UIUserInterfaceIdiomPad ? @"Pad" : nil;
+}
+
 __attribute__((constructor)) static void RecompConfigInit(void) {
     @autoreleasepool {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
         NSString *dir = info[@"RecompConfigDir"];
         NSDictionary *files = info[@"RecompIniOverrides"];
-        // RECOMP_IDIOM=phone in the environment applies the phone set elsewhere,
-        // e.g. on a Mac running the iOS build, to measure what an iPhone gets.
-        const char *idiom = getenv("RECOMP_IDIOM");
-        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ||
-                     (idiom && !strcmp(idiom, "phone"));
-        NSDictionary *phoneFiles = phone ? info[@"RecompIniOverridesPhone"] : nil;
+        NSString *idiom = RecompIdiom();
+        NSDictionary *deviceFiles = idiom ? info[[@"RecompIniOverrides" stringByAppendingString:idiom]] : nil;
         if (!dir) return;
         dir = [NSHomeDirectory() stringByAppendingPathComponent:dir];
         NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -177,14 +186,14 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         NSDictionary *tests = TestSettings([docs stringByAppendingPathComponent:@"recomp-ini"]);
         NSDictionary *applied = [NSDictionary dictionaryWithContentsOfFile:appliedPath];
         NSMutableSet *names = [NSMutableSet setWithArray:[files allKeys]];
-        [names addObjectsFromArray:[phoneFiles allKeys]];
+        [names addObjectsFromArray:[deviceFiles allKeys]];
         [names addObjectsFromArray:[tests allKeys]];
         [names addObjectsFromArray:[applied allKeys]];
-        NSString *set = phoneFiles ? @"iPhone settings over the base" : @"base settings";
+        NSString *set = deviceFiles ? [NSString stringWithFormat:@"i%@ settings over the base", idiom] : @"base settings";
         NSMutableDictionary *nowApplied = [NSMutableDictionary new];
         for (NSString *name in names) {
             NSString *path = [dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]];
-            NSDictionary *profile = Overlay(files[name], phoneFiles[name]);
+            NSDictionary *profile = Overlay(files[name], deviceFiles[name]);
             // Keys an earlier test wrote that neither the test nor the profile names now.
             NSMutableDictionary *stale = [NSMutableDictionary new];
             for (NSString *section in applied[name])

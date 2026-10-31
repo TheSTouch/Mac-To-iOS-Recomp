@@ -9,8 +9,11 @@
 // and a warm phone drops back to 60), so 20 rendered -> 40 shown does not fit; 30 -> 60
 // is smoother but not cooler.
 //
-// On an iPhone, a game's profile can turn it on ("frame_generation" in its "iphone" block,
-// RecompFrameGenPhone in the Info.plist); Stray's does, at 20 -> 40. A file named
+// A game's profile can turn it on for iPhones ("frame_generation" in its "iphone" block,
+// RecompFrameGenPhone in the Info.plist) and for iPads (its "ipad" block, RecompFrameGenPad).
+// Stray's does on both: 20 -> 40 on an iPhone, 30 -> 60 on an iPad, where the screen runs
+// at 120 Hz (an M1 iPad Pro renders the game at about 41 frames/s uncapped, CPU-bound, and
+// shows them unevenly). RECOMP_IDIOM=phone or pad picks a set on a Mac. A file named
 // recomp-framegen in Documents overrides that while the game runs: empty or "off": off;
 // "default": the profile's setting; otherwise on, with optional key=value words:
 //   fps=20     frames the game renders each second (the screen shows twice as many)
@@ -570,13 +573,14 @@ static void Poll(void) {
     NSString *text = [NSString stringWithContentsOfFile:[docs stringByAppendingPathComponent:@"recomp-framegen"]
                                                encoding:NSUTF8StringEncoding error:nil];
     text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    // Without the file (or with "default"), the profile's setting on an iPhone.
+    // Without the file (or with "default"), the profile's setting for an iPhone or an iPad.
     if (!text || [text isEqualToString:@"default"]) {
         static NSString *profile;
         static dispatch_once_t once;
         dispatch_once(&once, ^{
-            NSString *v = NSBundle.mainBundle.infoDictionary[@"RecompFrameGenPhone"];
-            profile = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone && v.length ? v : @"";
+            NSString *idiom = RecompIdiom();
+            profile = idiom ? NSBundle.mainBundle.infoDictionary[[@"RecompFrameGen" stringByAppendingString:idiom]] : nil;
+            if (!profile) profile = @"";
         });
         text = profile;
     }
