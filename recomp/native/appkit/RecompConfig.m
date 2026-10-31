@@ -72,10 +72,11 @@ static NSDictionary *Overlay(NSDictionary *base, NSDictionary *over) {
 }
 
 // Writes the sections' keys into the .ini at path. forced: every key; otherwise
-// only missing keys and keys whose wanted value changed since the last write.
-// Adds the lines written to written, and the player's lines left alone to kept.
+// only missing keys, keys whose wanted value changed since the last write, and the
+// keys in restore ({section: [key]}). Adds the lines written to written, and the
+// player's lines left alone to kept.
 static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sections, BOOL forced,
-                  NSMutableArray *written, NSMutableArray *kept) {
+                  NSDictionary<NSString *, NSArray *> *restore, NSMutableArray *written, NSMutableArray *kept) {
     NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
     NSMutableArray<NSString *> *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
     NSString *sidecar = [path stringByAppendingPathExtension:@"recomp"];
@@ -98,7 +99,8 @@ static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sect
             for (; i < lines.count && ![lines[i] hasPrefix:@"["]; i++)
                 if ([lines[i] hasPrefix:prefix]) found = i;
             wroteHere[key] = want;
-            if (!forced && found != NSNotFound && [last[section][key] isEqualToString:want]) {
+            if (!forced && found != NSNotFound && [last[section][key] isEqualToString:want] &&
+                ![restore[section] containsObject:key]) {
                 [kept addObject:lines[found]];
                 continue;
             }
@@ -194,12 +196,16 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         for (NSString *name in names) {
             NSString *path = [dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]];
             NSDictionary *profile = Overlay(files[name], deviceFiles[name]);
-            // Keys an earlier test wrote that neither the test nor the profile names now.
-            NSMutableDictionary *stale = [NSMutableDictionary new];
+            // Keys an earlier test wrote that the test no longer names: taken out, or set back
+            // to the profile's value when it names them (the sidecar still holds that value,
+            // so Merge would take the test's for the player's own).
+            NSMutableDictionary *stale = [NSMutableDictionary new], *restore = [NSMutableDictionary new];
             for (NSString *section in applied[name])
-                for (NSString *key in applied[name][section])
-                    if (!tests[name][section][key] && !profile[section][key])
-                        stale[section] = [(stale[section] ?: @[]) arrayByAddingObject:key];
+                for (NSString *key in applied[name][section]) {
+                    if (tests[name][section][key]) continue;
+                    NSMutableDictionary *into = profile[section][key] ? restore : stale;
+                    into[section] = [(into[section] ?: @[]) arrayByAddingObject:key];
+                }
             NSMutableArray *removed = [NSMutableArray new];
             RemoveKeys(path, stale, removed);
             if (removed.count) RLOG(@"config: %@.ini: test settings taken out: %@", name, [removed componentsJoinedByString:@", "]);
@@ -210,7 +216,7 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
             if (![sections count]) continue;
             BOOL forced = [name isEqualToString:@"Engine"] || tests[name];
             NSMutableArray *written = [NSMutableArray new], *kept = [NSMutableArray new];
-            Merge(path, sections, forced, written, kept);
+            Merge(path, sections, forced, restore, written, kept);
             RLOG(@"config: %@.ini (%@): %@ %@%@%@", name, set, forced ? @"forced" : @"defaults written:",
                  written.count ? [written componentsJoinedByString:@", "] : @"none",
                  kept.count ? @"; left as the player set them: " : @"", [kept componentsJoinedByString:@", "]);
