@@ -233,21 +233,23 @@ Metal pipeline compiles are the big hitches (up to 0.9 s while a new area loads)
 compiled pipelines in the app's container: a 27 s scripted walk compiled 357 pipelines in 6.2 s
 (longest frame 1049 ms) the first time, and in 0.2-1 s (longest 51-203 ms) on later launches.
 Deleting the app loses them (the first level load after a fresh install: 539 pipelines in 9.3 s);
-whether an update in place keeps them is not measured yet. Unreal's own pipeline cache cannot help
+an update in place keeps them (the same launch and load: about 780 pipelines in 0.5 s after the
+update, 0.9 s on the launch after a fresh install's first; then a new build: 578 in 0.4 s). Unreal's own pipeline cache cannot help
 in Stray, which ships no shared shader code library.
 
-Sharper output on the iPad (measured, not the default): under frame generation at 30, standing at
-the same spot, paired runs with a 3 min cool-down between them, the game's default settings:
+Sharper output on the iPad: under frame generation at 30, standing at the same spot, paired runs with a 3 min cool-down between them, the game's default settings:
 
 | Output | Rendered from | Rendered/s | Shown/s | GPU ms/frame |
 |---|---|---|---|---|
-| 1389×970 (today) | 75 %, 1044×728 | 30, then ~24 | 47-50 | 17.2-18.5 |
+| 1389×970 (the earlier default) | 75 %, 1044×728 | 30, then ~24 | 47-50 | 17.2-18.5 |
 | 2084×1455 (`ResolutionSizeX/Y=auto`, `FullscreenMode=0`) | 50 %, 1044×728 | ~27, then ~24.5 | 52 | 15.2-15.4 |
 | 2084×1455 | 40 %, 836×584 | 30, then ~27 | 58 | 14.9 |
 | 2084×1455 | 75 %, 1564×1092 | ~21, then ~19 | 39-40 | 21.7-21.9 |
 
 2x output at 50 % or 40 % is visibly sharper (shop signs become legible) and, oddly, cheaper than
-today's 1x output from the same render size.
+the 1x output from the same render size. Stray's `ipad` block makes 2x from 40 % the default (since
+1 Nov 2026; the first row was the default before): with the profile's own settings it showed 60 for
+a minute there, then about 54 (GPU 14 ms).
 
 ### Measuring power on an iPhone
 

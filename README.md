@@ -84,12 +84,12 @@ device.
 | **Keyboard, trackpad** | ✅ |
 | **Saves** | Steam Cloud, shared with the game on your Mac or PC: a fresh install on the iPad got its saves back from Steam Cloud |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
-| **Frame rate** | iPad M1: the game renders 30 fps and MetalFX frame generation makes one frame between each two, so the screen shows 60 at 120 Hz (uncapped, the M1 renders 40–50 fps, held back by its CPU, and they land on the screen unevenly); 1389×970 output upscaled by MetalFX from 75 %. In busy spots it renders about 25 and shows 50. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down |
+| **Frame rate** | iPad M1: the game renders 30 fps and MetalFX frame generation makes one frame between each two, so the screen shows 60 at 120 Hz (uncapped, the M1 renders 40–50 fps, held back by its CPU, and they land on the screen unevenly); 2084×1455 output (2x the screen's point size) upscaled by MetalFX from 40 %, sharp enough to read distant signs. In busy spots it renders about 27 and shows 54–58. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down |
 | **Memory** | iPhone 17: chapter 4 (The Slums) reaches about 5.4 GB of the 6.1 GB iOS allows while exploring (sounds decode as they play instead of all being unpacked when a level loads); iOS sends memory warnings from about 5 GB |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 
 Known limits: played up to chapter 4; freezes of up to a few seconds when new areas load, while
-Metal compiles pipeline states (up to 0.9 s each), worst right after an install (iOS keeps the compiled pipelines from one launch to the next); on the iPhone the
+Metal compiles pipeline states (up to 0.9 s each), worst after a fresh install (iOS keeps the compiled pipelines from one launch to the next and across updates, but not when the app is deleted); on the iPhone the
 cat looks pixelated while it moves (MetalFX shows moving objects at the render resolution), the
 phone still warms up over a long session, and iOS sometimes stops showing the game while it keeps
 running (black screen; the app now re-shows its window by itself, not yet seen working; going to
