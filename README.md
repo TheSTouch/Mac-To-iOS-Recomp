@@ -41,7 +41,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 26.2) and an iPhone 17 (8 GB).
 | Game | Engine | iPad | iPhone |
 |---|---|---|---|
 | [Timberborn](https://store.steampowered.com/app/1062090/Timberborn/) 1.1.2 | Unity 6, Mono | ✅ Playable | ✅ Playable, with a HUD laid out for the phone |
-| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing | ✅ Playable through chapter 4: 20 frames/s rendered, 40 shown (frame generation) |
+| [Stray](https://store.steampowered.com/app/1332010/Stray/) 1.5 | Unreal Engine 4.27 | ✅ Playable, early testing: 30 frames/s rendered, 60 shown (frame generation) | ✅ Playable through chapter 4: 20 frames/s rendered, 40 shown (frame generation) |
 | [Valheim](https://store.steampowered.com/app/892970/Valheim/) 1.0.20 | Unity 6, Mono | ✅ Playable, online play | ✅ Playable |
 | [Brawlhalla](https://store.steampowered.com/app/291550/Brawlhalla/) (Steam build 25942757) | Adobe AIR 32 | ✅ Playable offline, keyboard and mouse | Not tried |
 
@@ -82,14 +82,14 @@ device.
 | **Touch** | [On-screen gamepad](docs/TECHNICAL.md#on-screen-gamepad), with a D-pad on the left edge. On an iPhone the buttons sit against the screen's side edges, above and below the Dynamic Island, with the D-pad beside it. The sticks respond as soon as the thumb moves past their small dead zone |
 | **Controller** | ✅ Bluetooth controller tested; the on-screen pad hides when one connects |
 | **Keyboard, trackpad** | ✅ |
-| **Saves** | Steam Cloud, shared with the game on your Mac or PC (a first test ran the sync but sent no files; not confirmed yet) |
+| **Saves** | Steam Cloud, shared with the game on your Mac or PC: a fresh install on the iPad got its saves back from Steam Cloud |
 | **Steam** | Sign-in, license check and online status. No achievements yet: Unreal games need more of Steam's C++ interface |
-| **Frame rate** | iPad M1: 40–50 fps, MetalFX upscaling from 75 %. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down |
+| **Frame rate** | iPad M1: the game renders 30 fps and MetalFX frame generation makes one frame between each two, so the screen shows 60 at 120 Hz (uncapped, the M1 renders 40–50 fps, held back by its CPU, and they land on the screen unevenly); 2084×1455 output (2x the screen's point size) upscaled by MetalFX from 40 %, sharp enough to read distant signs. In busy spots it renders about 27 and shows 54–58. iPhone 17: the game renders 20 fps and MetalFX frame generation makes one frame between each two, so the screen shows 40 at 120 Hz; 1748×804 output (2×) upscaled by MetalFX from 44 %, no screen-space reflections. That draws about 17.5 % battery per hour against 24.3 at a plain 30 fps (unplugged, full brightness); at 60 fps the phone overheats within minutes and slows down. On both, the rendered frames and the frames made between them are held to the screen's refreshes (2 refreshes each on the iPad, 3 on the iPhone), so the picture no longer jitters for minutes at a time when the game's timing drifts against the screen's |
 | **Memory** | iPhone 17: chapter 4 (The Slums) reaches about 5.4 GB of the 6.1 GB iOS allows while exploring (sounds decode as they play instead of all being unpacked when a level loads); iOS sends memory warnings from about 5 GB |
 | **Sound** | Plays with the iPhone in silent mode, mixed with other apps' audio |
 
 Known limits: played up to chapter 4; freezes of up to a few seconds when new areas load, while
-Metal compiles pipeline states (up to 0.9 s each), worst right after an install; on the iPhone the
+Metal compiles pipeline states (up to 0.9 s each), worst after a fresh install (iOS keeps the compiled pipelines from one launch to the next and across updates, but not when the app is deleted); on the iPhone the
 cat looks pixelated while it moves (MetalFX shows moving objects at the render resolution), the
 phone still warms up over a long session, and iOS sometimes stops showing the game while it keeps
 running (black screen; the app now re-shows its window by itself, not yet seen working; going to
@@ -421,6 +421,7 @@ Tested on an iPad Pro 11" (M1, iPadOS 27.0.1) and in the iPad Air 13" simulator.
 - [ ] Fewer stutters the first time a scene appears, while Metal compiles shaders
 - [x] Stray on iPhone: a sharper image (2× output instead of 1×, no screen-space reflections)
 - [x] Stray on iPhone: frame generation, 20 frames/s rendered and 40 shown, 28 % less battery than 30 fps
+- [x] Stray on iPad: frame generation, 30 frames/s rendered and 60 shown
 - [ ] Stray on iPhone: no freezes while new areas load, no black screen, more memory headroom
 
 ## Disclaimer

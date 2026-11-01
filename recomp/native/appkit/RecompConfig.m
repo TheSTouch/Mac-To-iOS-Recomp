@@ -6,7 +6,9 @@
 //
 // On an iPhone, RecompIniOverridesPhone (the profile's "iphone" block over the
 // generic phone defaults, see unreal_ios.py) is laid over RecompIniOverrides key
-// by key: phone values win, base keys it does not name are kept.
+// by key: phone values win, base keys it does not name are kept. On an iPad,
+// RecompIniOverridesPad (the profile's "ipad" block; there are no generic iPad
+// defaults) is laid over them the same way. An iOS app on a Mac gets the base.
 //
 // Engine.ini keys are workarounds: they are rewritten at every launch, in case
 // the game saved over them. Every other file's keys are defaults the player may
@@ -70,10 +72,11 @@ static NSDictionary *Overlay(NSDictionary *base, NSDictionary *over) {
 }
 
 // Writes the sections' keys into the .ini at path. forced: every key; otherwise
-// only missing keys and keys whose wanted value changed since the last write.
-// Adds the lines written to written, and the player's lines left alone to kept.
+// only missing keys, keys whose wanted value changed since the last write, and the
+// keys in restore ({section: [key]}). Adds the lines written to written, and the
+// player's lines left alone to kept.
 static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sections, BOOL forced,
-                  NSMutableArray *written, NSMutableArray *kept) {
+                  NSDictionary<NSString *, NSArray *> *restore, NSMutableArray *written, NSMutableArray *kept) {
     NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"";
     NSMutableArray<NSString *> *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
     NSString *sidecar = [path stringByAppendingPathExtension:@"recomp"];
@@ -96,7 +99,8 @@ static void Merge(NSString *path, NSDictionary<NSString *, NSDictionary *> *sect
             for (; i < lines.count && ![lines[i] hasPrefix:@"["]; i++)
                 if ([lines[i] hasPrefix:prefix]) found = i;
             wroteHere[key] = want;
-            if (!forced && found != NSNotFound && [last[section][key] isEqualToString:want]) {
+            if (!forced && found != NSNotFound && [last[section][key] isEqualToString:want] &&
+                ![restore[section] containsObject:key]) {
                 [kept addObject:lines[found]];
                 continue;
             }
@@ -159,17 +163,24 @@ static void RemoveKeys(NSString *path, NSDictionary<NSString *, NSArray *> *sect
     if (removed.count) [[lines componentsJoinedByString:@"\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
+// RECOMP_IDIOM=phone or pad applies that device's set elsewhere, e.g. on a Mac running
+// the iOS build, to measure what an iPhone or an iPad gets.
+NSString *RecompIdiom(void) {
+    const char *env = getenv("RECOMP_IDIOM");
+    if (env && !strcmp(env, "phone")) return @"Phone";
+    if (env && !strcmp(env, "pad")) return @"Pad";
+    if (NSProcessInfo.processInfo.isiOSAppOnMac) return nil;
+    UIUserInterfaceIdiom idiom = UIDevice.currentDevice.userInterfaceIdiom;
+    return idiom == UIUserInterfaceIdiomPhone ? @"Phone" : idiom == UIUserInterfaceIdiomPad ? @"Pad" : nil;
+}
+
 __attribute__((constructor)) static void RecompConfigInit(void) {
     @autoreleasepool {
         NSDictionary *info = NSBundle.mainBundle.infoDictionary;
         NSString *dir = info[@"RecompConfigDir"];
         NSDictionary *files = info[@"RecompIniOverrides"];
-        // RECOMP_IDIOM=phone in the environment applies the phone set elsewhere,
-        // e.g. on a Mac running the iOS build, to measure what an iPhone gets.
-        const char *idiom = getenv("RECOMP_IDIOM");
-        BOOL phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ||
-                     (idiom && !strcmp(idiom, "phone"));
-        NSDictionary *phoneFiles = phone ? info[@"RecompIniOverridesPhone"] : nil;
+        NSString *idiom = RecompIdiom();
+        NSDictionary *deviceFiles = idiom ? info[[@"RecompIniOverrides" stringByAppendingString:idiom]] : nil;
         if (!dir) return;
         dir = [NSHomeDirectory() stringByAppendingPathComponent:dir];
         NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -177,20 +188,24 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
         NSDictionary *tests = TestSettings([docs stringByAppendingPathComponent:@"recomp-ini"]);
         NSDictionary *applied = [NSDictionary dictionaryWithContentsOfFile:appliedPath];
         NSMutableSet *names = [NSMutableSet setWithArray:[files allKeys]];
-        [names addObjectsFromArray:[phoneFiles allKeys]];
+        [names addObjectsFromArray:[deviceFiles allKeys]];
         [names addObjectsFromArray:[tests allKeys]];
         [names addObjectsFromArray:[applied allKeys]];
-        NSString *set = phoneFiles ? @"iPhone settings over the base" : @"base settings";
+        NSString *set = deviceFiles ? [NSString stringWithFormat:@"i%@ settings over the base", idiom] : @"base settings";
         NSMutableDictionary *nowApplied = [NSMutableDictionary new];
         for (NSString *name in names) {
             NSString *path = [dir stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"ini"]];
-            NSDictionary *profile = Overlay(files[name], phoneFiles[name]);
-            // Keys an earlier test wrote that neither the test nor the profile names now.
-            NSMutableDictionary *stale = [NSMutableDictionary new];
+            NSDictionary *profile = Overlay(files[name], deviceFiles[name]);
+            // Keys an earlier test wrote that the test no longer names: taken out, or set back
+            // to the profile's value when it names them (the sidecar still holds that value,
+            // so Merge would take the test's for the player's own).
+            NSMutableDictionary *stale = [NSMutableDictionary new], *restore = [NSMutableDictionary new];
             for (NSString *section in applied[name])
-                for (NSString *key in applied[name][section])
-                    if (!tests[name][section][key] && !profile[section][key])
-                        stale[section] = [(stale[section] ?: @[]) arrayByAddingObject:key];
+                for (NSString *key in applied[name][section]) {
+                    if (tests[name][section][key]) continue;
+                    NSMutableDictionary *into = profile[section][key] ? restore : stale;
+                    into[section] = [(into[section] ?: @[]) arrayByAddingObject:key];
+                }
             NSMutableArray *removed = [NSMutableArray new];
             RemoveKeys(path, stale, removed);
             if (removed.count) RLOG(@"config: %@.ini: test settings taken out: %@", name, [removed componentsJoinedByString:@", "]);
@@ -201,7 +216,7 @@ __attribute__((constructor)) static void RecompConfigInit(void) {
             if (![sections count]) continue;
             BOOL forced = [name isEqualToString:@"Engine"] || tests[name];
             NSMutableArray *written = [NSMutableArray new], *kept = [NSMutableArray new];
-            Merge(path, sections, forced, written, kept);
+            Merge(path, sections, forced, restore, written, kept);
             RLOG(@"config: %@.ini (%@): %@ %@%@%@", name, set, forced ? @"forced" : @"defaults written:",
                  written.count ? [written componentsJoinedByString:@", "] : @"none",
                  kept.count ? @"; left as the player set them: " : @"", [kept componentsJoinedByString:@", "]);

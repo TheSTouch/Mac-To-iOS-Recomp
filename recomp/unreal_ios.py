@@ -475,12 +475,16 @@ def info_plist(game):
         "ITSAppUsesNonExemptEncryption": False,
         # Read by the shim (RecompConfig.m): settings merged into the engine's user
         # config files at each launch, from the game's profile; on an iPhone, the
-        # phone set is laid over them.
+        # phone set is laid over them, on an iPad the profile's "ipad" block (the base
+        # settings are tuned on an iPad, so there are no generic iPad defaults).
         "RecompConfigDir": f"Library/Preferences/{game.name}/MacNoEditor",
         "RecompIniOverrides": ini_overrides(game.profile),
         "RecompIniOverridesPhone": overlay(ini_overrides(PHONE_DEFAULTS), ini_overrides(game.profile.get("iphone", {}))),
-        # Read by RecompFrameGen.m: frame generation's settings on an iPhone ("fps=20"), or none.
+        "RecompIniOverridesPad": ini_overrides(game.profile.get("ipad", {})),
+        # Read by RecompFrameGen.m: frame generation's settings on an iPhone ("fps=20") and
+        # on an iPad, or none.
         "RecompFrameGenPhone": game.profile.get("iphone", {}).get("frame_generation", ""),
+        "RecompFrameGenPad": game.profile.get("ipad", {}).get("frame_generation", ""),
         # Read by RecompSaves.m: the game's name names its folder in iCloud Drive.
         "RecompGame": game.name,
     }

@@ -172,7 +172,9 @@ Game profiles for this route match on the Unreal project folder:
 `engine_ini` keys are written into the game's user config (`Engine.ini`) at each launch, and
 `game_user_settings_ini` keys into `GameUserSettings.ini` (the game's own options, such as its
 upscaler and screen percentage); `auto` for `r.Streaming.PoolSize` sizes the texture pool from the
-device's RAM. `intercept` lists extra imports
+device's RAM. An `iphone` block (over generic phone defaults) and an `ipad` block (no generic
+defaults) hold the same keys plus `frame_generation`, laid over the base on that device; an iOS app
+on a Mac gets the base, and `RECOMP_IDIOM=phone` or `pad` in the environment picks a block there. `intercept` lists extra imports
 to bind to the shim, and `patches` replaces byte strings in the executable (hex, same length).
 
 Debugging: shipping builds log almost nothing, but Mac game binaries usually keep their symbol table.
@@ -188,7 +190,8 @@ Debugging: shipping builds log almost nothing, but Mac game binaries usually kee
 - a file named `recomp-ini` in `Documents` lays test settings over the profile's at launch, so an
   engine setting is tried with a relaunch instead of a rebuild. `[Engine:SystemSettings]` and
   `[GameUserSettings:<section>]` blocks of `key=value` lines; a key taken out is taken out of the
-  game's `.ini` at the next launch (`recomp-ini.applied` remembers which keys it wrote);
+  game's `.ini` at the next launch, or set back to the profile's value when the profile has one
+  (`recomp-ini.applied` remembers which keys it wrote);
 - `recomp-memory` logs the app's memory by kind of region (Unreal's own heap shows as "untagged";
   Metal's resources count against the app but not there);
 - copy an empty file named `recomp-screenshot` into the app's `Documents` (`devicectl device copy to
@@ -197,7 +200,7 @@ Debugging: shipping builds log almost nothing, but Mac game binaries usually kee
   -p <pid>` after a `devicectl ... launch --start-stopped`); give it ~20 s to load symbols;
 - `tools/xref.py` finds the code that uses a string or address.
 
-### Frame generation (iPhone)
+### Frame generation
 
 `recomp/native/appkit/RecompFrameGen.m`. On iOS 26, MetalFX's frame interpolator makes a frame
 between each two the game renders, from the depth and motion vectors the game already hands
@@ -207,12 +210,57 @@ presents one, the frame between it and the previous one goes straight into a rea
 frame itself is copied into another, each shown for half a rendered frame less 3 ms. A display link
 asks for 120 Hz: otherwise ProMotion follows the game's present rate and 20 rendered became 15.
 
-A profile turns it on for iPhones (`"frame_generation": "fps=20"` in its `iphone` block, the
-Info.plist key `RecompFrameGenPhone`); Stray's does, with `r.OneFrameThreadLag=0` so the controls
-lag less. A file `recomp-framegen` in `Documents` overrides it while the game runs: `off`, `default`
-(the profile's), or `key=value` words (`fps`, `fov`, `near`, `far`, `mv`, `jitter`). `bench=1`
-(with `fps=0`) is meant to measure what settings cost, but the stand-in path renders slower than
-real drawables, so it does not measure yet.
+Locked (`lock=1`, the default), the game's frames start a whole number of refreshes apart and both
+shown frames are presented at refresh times, two refreshes apart. Unlocked, the game's clock and the
+screen's drift apart over minutes; on an M1 iPad Pro at 2x output, from the title screen to the
+game, there were minutes at a time when the frame between went on the screen half a refresh late,
+so it stayed 20.8 ms and the rendered frame 12.5, and the picture seemed to jump between two images.
+Locked, a frame shown later than asked moves the next ones a refresh later; on the title screen
+every frame then stayed exactly 2 refreshes for 25 minutes, outside a heavy camera move every
+100 s (29.3 frames/s rendered on average instead of 29.8 unlocked). Every 10 s the log counts the
+shown frames that stayed 1, 2, 3 or 4+ refreshes, and lists the last ones' times when any did not
+stay 2.
+
+A profile turns it on per device: `"frame_generation": "fps=20"` in its `iphone` block (the
+Info.plist key `RecompFrameGenPhone`) or in its `ipad` block (`RecompFrameGenPad`). Stray's renders
+20 and shows 40 on an iPhone, and renders 30 and shows 60 on an iPad, both with
+`r.OneFrameThreadLag=0` so the controls lag less. On an M1 iPad Pro, uncapped, Stray renders about
+41 frames/s standing still in a city street, with the GPU 70 % busy (17.7 ms): the CPU holds it back,
+screen-space reflections off save 10 % of the GPU and no frames, and 40-50 frames/s land on the
+120 Hz refreshes unevenly. With `fps=30` every presented frame reaches the screen; it showed a
+steady 60 there and on a scripted walk with the player's earlier settings, while with the game's
+default settings (a fresh install) the M1 renders about 24 there after half a minute (shows 48-50,
+GPU 87 % busy).
+
+A file `recomp-framegen` in `Documents` overrides it while the game runs: `off`, `default` (the
+profile's), or `key=value` words (`fps`, `fov`, `near`, `far`, `mv`, `jitter`). `pace=N` turns frame
+generation off and holds each frame the game presents on the 120 Hz screen for at least 1/N s, so a
+game held to 40 frames/s by its own limit shows each frame for exactly 3 refreshes (a test tool:
+an even 40 was not kept as Stray's default). `bench=1` (with `fps=0`) renders as fast as it can into
+stand-ins the game never waits for, and shows the newest finished one at each refresh: the GPU stays
+at its full clock, so frames rendered per second measure what settings cost.
+
+Metal pipeline compiles are the big hitches (up to 0.9 s while a new area loads). iOS keeps the
+compiled pipelines in the app's container: a 27 s scripted walk compiled 357 pipelines in 6.2 s
+(longest frame 1049 ms) the first time, and in 0.2-1 s (longest 51-203 ms) on later launches.
+Deleting the app loses them (the first level load after a fresh install: 539 pipelines in 9.3 s);
+an update in place keeps them (the same launch and load: about 780 pipelines in 0.5 s after the
+update, 0.9 s on the launch after a fresh install's first; then a new build: 578 in 0.4 s). Unreal's own pipeline cache cannot help
+in Stray, which ships no shared shader code library.
+
+Sharper output on the iPad: under frame generation at 30, standing at the same spot, paired runs with a 3 min cool-down between them, the game's default settings:
+
+| Output | Rendered from | Rendered/s | Shown/s | GPU ms/frame |
+|---|---|---|---|---|
+| 1389×970 (the earlier default) | 75 %, 1044×728 | 30, then ~24 | 47-50 | 17.2-18.5 |
+| 2084×1455 (`ResolutionSizeX/Y=auto`, `FullscreenMode=0`) | 50 %, 1044×728 | ~27, then ~24.5 | 52 | 15.2-15.4 |
+| 2084×1455 | 40 %, 836×584 | 30, then ~27 | 58 | 14.9 |
+| 2084×1455 | 75 %, 1564×1092 | ~21, then ~19 | 39-40 | 21.7-21.9 |
+
+2x output at 50 % or 40 % is visibly sharper (shop signs become legible) and, oddly, cheaper than
+the 1x output from the same render size. Stray's `ipad` block makes 2x from 40 % the default (since
+1 Nov 2026; the first row was the default before): with the profile's own settings it showed 60 for
+a minute there, then about 54 (GPU 14 ms).
 
 ### Measuring power on an iPhone
 

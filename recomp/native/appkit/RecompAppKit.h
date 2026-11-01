@@ -29,6 +29,9 @@ typedef CGSize NSSize;
 CGSize RecompScreenSize(void);
 CGFloat RecompScreenScale(void);
 CGSize RecompLargestModeSize(void); // the largest display mode games are offered (RecompDisplay.m)
+// Which of the profile's device blocks applies: @"Phone", @"Pad", or nil (base settings only,
+// an iOS app on a Mac). RECOMP_IDIOM=phone or pad in the environment picks one (RecompConfig.m).
+NSString *RecompIdiom(void);
 // Delivers an event the way AppKit does: local monitors, then -[NSApp sendEvent:].
 void RecompDispatchEvent(RNSEvent *event);
 // Root view, main thread only; nil before launch.
