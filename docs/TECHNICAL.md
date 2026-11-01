@@ -210,6 +210,17 @@ presents one, the frame between it and the previous one goes straight into a rea
 frame itself is copied into another, each shown for half a rendered frame less 3 ms. A display link
 asks for 120 Hz: otherwise ProMotion follows the game's present rate and 20 rendered became 15.
 
+Locked (`lock=1`, the default), the game's frames start a whole number of refreshes apart and both
+shown frames are presented at refresh times, two refreshes apart. Unlocked, the game's clock and the
+screen's drift apart over minutes; on an M1 iPad Pro at 2x output, from the title screen to the
+game, there were minutes at a time when the frame between went on the screen half a refresh late,
+so it stayed 20.8 ms and the rendered frame 12.5, and the picture seemed to jump between two images.
+Locked, a frame shown later than asked moves the next ones a refresh later; on the title screen
+every frame then stayed exactly 2 refreshes for 25 minutes, outside a heavy camera move every
+100 s (29.3 frames/s rendered on average instead of 29.8 unlocked). Every 10 s the log counts the
+shown frames that stayed 1, 2, 3 or 4+ refreshes, and lists the last ones' times when any did not
+stay 2.
+
 A profile turns it on per device: `"frame_generation": "fps=20"` in its `iphone` block (the
 Info.plist key `RecompFrameGenPhone`) or in its `ipad` block (`RecompFrameGenPad`). Stray's renders
 20 and shows 40 on an iPhone, and renders 30 and shows 60 on an iPad, both with

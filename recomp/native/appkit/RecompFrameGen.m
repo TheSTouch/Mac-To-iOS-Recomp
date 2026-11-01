@@ -22,6 +22,12 @@
 //   far=1e6    far plane (Unreal's is infinite)
 //   mv=1       factor on the motion vector scale the game gives the upscaler
 //   jitter=0   pass the upscaler's jitter (the color given here is already upscaled)
+//   lock=1     hold the game's frames and both shown frames to the screen's refreshes
+//              (lock=0: the game on a clock of its own, each frame shown as soon as it
+//              is ready). Unlocked, the two drift apart over minutes, and at some
+//              offsets the drawables are late: on an M1 iPad Pro at 2x output, for
+//              minutes at a time, every other frame stayed 1.5 refreshes and the next
+//              2.5, and the picture seemed to jump between two images.
 //   bench=1    no frame generation: the game renders as fast as it can (fps=0 for no
 //              cap) into stand-ins it never waits for, and a thread of its own shows
 //              the newest finished frame at each refresh, dropping the rest. The GPU stays fully busy at its full clock, so the frames
@@ -40,7 +46,9 @@
 // next stand-in the game takes is the frame they belong to. When the game presents
 // a stand-in, a frame between it and the previous one is made straight into a real
 // drawable and presented, then the frame itself is copied into another and
-// presented half a frame later.
+// presented half a frame later. Locked (the default), the game's frames start a whole
+// number of refreshes apart and both are presented at refresh times: the frame between
+// two refreshes after the last shown frame, or the first refresh it can be ready for.
 //
 // Whatever the switch, the upscaler's inputs are logged once (formats, sizes, motion
 // vector scale, jitter), and the order of upscaler encodes, drawables and presents
@@ -54,8 +62,8 @@
 
 id<MTLCommandQueue> RecompGameQueue(void); // RecompMetal.m
 
-typedef struct { double fps, fov, nearZ, farZ, mv, pace; BOOL jitter, bench; } Settings;
-static const Settings kDefaults = {20, 50, 10, 1e6, 1, 0, NO, NO};
+typedef struct { double fps, fov, nearZ, farZ, mv, pace; BOOL jitter, bench, lock; } Settings;
+static const Settings kDefaults = {20, 50, 10, 1e6, 1, 0, NO, NO, YES};
 
 static os_unfair_lock gLock = OS_UNFAIR_LOCK_INIT;
 static Settings gSet;                  // under gLock
@@ -220,15 +228,36 @@ static void BenchPresent(RFGDrawable *d);
 - (CFTimeInterval)presentedTime { return presented; }
 @end
 
+// The screen's refreshes, from the display link (RFGTick).
+static os_unfair_lock gGridLock = OS_UNFAIR_LOCK_INIT;
+static double gVsync, gPeriod;         // under gGridLock
+static double Period(void) {
+    os_unfair_lock_lock(&gGridLock);
+    double v = gVsync, p = gPeriod;
+    os_unfair_lock_unlock(&gGridLock);
+    return p > 0 && CACurrentMediaTime() - v < 1 ? p : 0;
+}
+// The refresh nearest t, or the first at or after it; t itself without a display link.
+static double Refresh(double t, BOOL nearest) {
+    os_unfair_lock_lock(&gGridLock);
+    double v = gVsync, p = gPeriod;
+    os_unfair_lock_unlock(&gGridLock);
+    if (p <= 0 || CACurrentMediaTime() - v > 1) return t;
+    double n = (t - v) / p;
+    return v + (nearest ? round(n) : ceil(n - 1e-3)) * p;
+}
+
 static double gNextAcquire;            // the render thread's
 
+// Holds the game to `fps`; locked, its frames start a whole number of refreshes apart.
 static void Pace(void) {
-    double fps = CurrentSettings().fps;
-    if (fps <= 0) return;
-    double interval = 1 / fps, now = CACurrentMediaTime();
+    Settings set = CurrentSettings();
+    if (set.fps <= 0) return;
+    double interval = 1 / set.fps, now = CACurrentMediaTime();
     if (gNextAcquire > now && gNextAcquire - now < 1) usleep((useconds_t)((gNextAcquire - now) * 1e6));
     now = CACurrentMediaTime();
     gNextAcquire = (gNextAcquire > now - interval ? gNextAcquire : now) + interval;
+    if (set.lock && !set.bench) gNextAcquire = Refresh(gNextAcquire, YES);
 }
 
 static IMP oNextDrawable;
@@ -368,9 +397,13 @@ static void FixPresent(id self, SEL s) {
 // Metal cannot present a stand-in through a command buffer: it becomes a present
 // from the command buffer's scheduled handler.
 static IMP oCBPresent, oCBPresentAt, oCBPresentAfter;
+static atomic_uint gLateInputs;
 static BOOL StandIn(id<MTLCommandBuffer> cb, id d) {
     Trace('C');
     if (![d isKindOfClass:[RFGDrawable class]]) return NO;
+    os_unfair_lock_lock(&gLock);
+    if (gPending) atomic_fetch_add(&gLateInputs, 1);
+    os_unfair_lock_unlock(&gLock);
     [cb addScheduledHandler:^(id<MTLCommandBuffer> b) { [d present]; }];
     return YES;
 }
@@ -390,7 +423,32 @@ static int gPrevSlot = -1;
 static id<MTLTexture> gPrevTexture;
 static id gInterpolator;
 static BOOL gInterpolatorFailed;
-static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed; double wait; } gStats;
+static struct { unsigned real, made, noInputs, reset, noPrev, noDrawable, failed, corrected; double wait, maxWait; } gStats;
+
+// How long each shown frame stayed on the screen, in refreshes at 120 Hz: with frame
+// generation each should stay 2 (60 shown). [0] dropped, [1] 1, [2] 2, [3] 3, [4] 4 or more.
+static os_unfair_lock gShownLock = OS_UNFAIR_LOCK_INIT;
+static unsigned gShown[5];
+static CFTimeInterval gLastShown;
+// Locked: a shown frame that went on the screen later than asked (only those asked after
+// the last correction count) moves the next ones a refresh later.
+static atomic_bool gLate;
+static _Atomic double gCorrected;
+static char gTimes[400];               // under gShownLock: the last shown frames, 'm'/'o' interval ms (+ late vs asked)
+static void Shown(id<MTLDrawable> d, double asked, char kind) {
+    CFTimeInterval t = d.presentedTime;
+    if (asked > 0 && t > asked + 0.001 && asked > atomic_load(&gCorrected)) atomic_store(&gLate, true);
+    os_unfair_lock_lock(&gShownLock);
+    size_t n = strlen(gTimes);
+    if (t > 0 && gLastShown > 0 && n < sizeof gTimes - 24)
+        snprintf(gTimes + n, sizeof gTimes - n, " %c%.1f%+.1f", kind, (t - gLastShown) * 1000, asked > 0 ? (t - asked) * 1000 : 0);
+    if (t <= 0) gShown[0]++;
+    else {
+        if (gLastShown > 0 && t > gLastShown) gShown[MIN(4, MAX(1, (int)lround((t - gLastShown) * 120)))]++;
+        gLastShown = t;
+    }
+    os_unfair_lock_unlock(&gShownLock);
+}
 
 API_AVAILABLE(ios(26.0))
 static id<MTLFXFrameInterpolator> Interpolator(id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> motion) {
@@ -444,7 +502,14 @@ static double Half(Settings set) { return 0.5 / set.fps - 0.003; }
 
 // Makes the frame between the previous one and `cur` straight into a real drawable and
 // presents it; NO when it cannot be made.
-static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set) {
+// Locked: when the last shown frame goes on the screen, and how long it takes from a
+// frame's present to the frame between being ready, the wait for its drawable included
+// (rises at once, falls slowly). Without the wait, the frame between was often not
+// ready in time: for minutes, every other frame stayed 1.5 refreshes and the next 2.5.
+static double gLastOut;                // on gGen
+static _Atomic double gLatency = 0.02;
+
+static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set, double at, double start) {
     RFGInputs *in = cur->inputs;
     id<MTLTexture> tex = cur.texture, prev = gPrevTexture;
     if (!atomic_load(&gOn)) return NO;
@@ -460,7 +525,9 @@ static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set) {
         if (!fi) { gStats.failed++; return NO; }
         double t0 = CACurrentMediaTime();
         id<CAMetalDrawable> mid = RealDrawable(cur.layer);
-        gStats.wait += CACurrentMediaTime() - t0;
+        double waited = CACurrentMediaTime() - t0;
+        gStats.wait += waited;
+        gStats.maxWait = MAX(gStats.maxWait, waited);
         if (!mid || mid.texture.width != tex.width || mid.texture.height != tex.height) { gStats.noDrawable++; return NO; }
         id<MTLCommandBuffer> cb = [q commandBuffer];
         cb.label = @"recomp frame generation";
@@ -482,7 +549,14 @@ static BOOL Between(RFGDrawable *cur, id<MTLCommandQueue> q, Settings set) {
         fi.shouldResetHistory = NO;
         [fi encodeToCommandBuffer:cb];
         double half = Half(set);
-        [cb addScheduledHandler:^(id<MTLCommandBuffer> b) { [mid presentAfterMinimumDuration:half]; }];
+        [mid addPresentedHandler:^(id<MTLDrawable> d) { Shown(d, at, 'm'); }];
+        if (at > 0) {
+            [cb addScheduledHandler:^(id<MTLCommandBuffer> b) { [mid presentAtTime:at]; }];
+            [cb addCompletedHandler:^(id<MTLCommandBuffer> b) {
+                double took = CACurrentMediaTime() - start, l = atomic_load(&gLatency);
+                atomic_store(&gLatency, MIN(0.1, took > l ? took : l * 0.98 + took * 0.02));
+            }];
+        } else [cb addScheduledHandler:^(id<MTLCommandBuffer> b) { [mid presentAfterMinimumDuration:half]; }];
         LogErrors(cb);
         [cb commit];
         gStats.made++;
@@ -495,7 +569,25 @@ static void Generate(RFGDrawable *cur) {
     id<MTLCommandQueue> q = RecompGameQueue();
     Settings set = CurrentSettings();
     gStats.real++;
-    BOOL made = q && Between(cur, q, set);
+    // Locked, the frame between goes on the screen at a refresh: two after the last shown
+    // frame, or the first the GPU can make, and the frame itself two refreshes later.
+    double start = CACurrentMediaTime(), period = set.lock ? Period() : 0, at = 0, at2 = 0;
+    if (period > 0) {
+        double each = MAX(1, lround(0.5 / set.fps / period)) * period;
+        double soonest = Refresh(start + atomic_load(&gLatency) + 0.002, NO);
+        at = gLastOut + each >= soonest && gLastOut + each < start + 0.2 ? gLastOut + each : soonest;
+        if (atomic_exchange(&gLate, false)) {
+            at += period;
+            atomic_store(&gCorrected, at);
+            gStats.corrected++;
+        }
+        at2 = at + each;
+    }
+    BOOL made = q && Between(cur, q, set, at, start);
+    if (period > 0) gLastOut = made ? at2 : at;
+    // The previous frame's texture is read only by the frame between, committed above:
+    // back to the ring, so the game does not wait while this thread waits for a drawable.
+    if (gPrevSlot >= 0) dispatch_semaphore_signal(gRingFree);
     id<CAMetalDrawable> out = RealDrawable(cur.layer);
     if (q && out && out.texture.width == cur.texture.width && out.texture.height == cur.texture.height) {
         id<MTLCommandBuffer> cb = [q commandBuffer];
@@ -503,8 +595,9 @@ static void Generate(RFGDrawable *cur) {
         id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
         [b copyFromTexture:cur.texture toTexture:out.texture];
         [b endEncoding];
-        double after = made ? Half(set) : 0;
+        double after = made ? Half(set) : 0, when = made ? at2 : at;
         [out addPresentedHandler:^(id<MTLDrawable> d) {
+            Shown(d, when, 'o');
             NSArray *handlers;
             @synchronized (cur) {
                 cur->presented = d.presentedTime;
@@ -512,14 +605,13 @@ static void Generate(RFGDrawable *cur) {
             }
             for (MTLDrawablePresentedHandler h in handlers) h(cur);
         }];
-        [cb addScheduledHandler:^(id<MTLCommandBuffer> c) { [out presentAfterMinimumDuration:after]; }];
+        if (when > 0) [cb addScheduledHandler:^(id<MTLCommandBuffer> c) { [out presentAtTime:when]; }];
+        else [cb addScheduledHandler:^(id<MTLCommandBuffer> c) { [out presentAfterMinimumDuration:after]; }];
         LogErrors(cb);
         [cb commit];
     } else {
         gStats.noDrawable++;
     }
-    // The previous frame's texture is no longer read: back to the ring.
-    if (gPrevSlot >= 0) dispatch_semaphore_signal(gRingFree);
     gPrevSlot = cur->slot;
     gPrevTexture = cur.texture;
 }
@@ -536,6 +628,10 @@ static void Generate(RFGDrawable *cur) {
 }
 // Logs the refresh rate the screen really runs at, every 10 s.
 - (void)tick:(CADisplayLink *)link {
+    os_unfair_lock_lock(&gGridLock);
+    gVsync = link.timestamp;
+    gPeriod = link.targetTimestamp - link.timestamp;
+    os_unfair_lock_unlock(&gGridLock);
     if (!start) start = link.timestamp;
     ticks++;
     if (link.timestamp - start >= 10) {
@@ -597,6 +693,7 @@ static void Poll(void) {
         else if ([kv[0] isEqualToString:@"far"] && v > 0) s.farZ = v;
         else if ([kv[0] isEqualToString:@"mv"]) s.mv = v;
         else if ([kv[0] isEqualToString:@"jitter"]) s.jitter = v != 0;
+        else if ([kv[0] isEqualToString:@"lock"]) s.lock = v != 0;
         else if ([kv[0] isEqualToString:@"pace"] && v >= 5) s.pace = v;
     }
     if (s.pace) on = NO;
@@ -614,8 +711,8 @@ static void Poll(void) {
     double shown = on && !s.bench ? 2 * s.fps : s.pace;
     dispatch_async(dispatch_get_main_queue(), ^{ WantRate(shown); });
     if (on && s.bench) RLOG(@"framegen: bench, newest frame shown at each refresh, cap %.0f frames/s (0: none)", s.fps);
-    else if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d",
-                      s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter);
+    else if (on) RLOG(@"framegen: on, %.0f frames/s rendered, fov %.0f, near %g, far %g, motion x%g, jitter %d, lock %d",
+                      s.fps, s.fov, s.nearZ, s.farZ, s.mv, s.jitter, s.lock);
     else if (s.pace) RLOG(@"framegen: off, each frame shown at least 1/%.0f s", s.pace);
     else RLOG(@"framegen: off");
 }
@@ -624,10 +721,22 @@ static void Report(void) {
     unsigned rendered = atomic_exchange(&gBenchRendered, 0), shown = atomic_exchange(&gBenchShown, 0);
     if (rendered) RLOG(@"framegen: bench: %.1f frames/s rendered, %.1f shown", rendered / 10.0, shown / 10.0);
     if (!gStats.real) return;
-    RLOG(@"framegen: %u frames rendered, %u made between (%.1f ms waiting for a drawable each); not made: %u without "
-         @"upscaler inputs, %u history resets, %u without a previous frame, %u without a drawable, %u interpolator failures",
-         gStats.real, gStats.made, gStats.made ? gStats.wait * 1000 / gStats.made : 0.0, gStats.noInputs, gStats.reset,
-         gStats.noPrev, gStats.noDrawable, gStats.failed);
+    unsigned stay[5];
+    char times[sizeof gTimes];
+    os_unfair_lock_lock(&gShownLock);
+    memcpy(stay, gShown, sizeof stay);
+    memset(gShown, 0, sizeof gShown);
+    memcpy(times, gTimes, sizeof times);
+    gTimes[0] = 0;
+    os_unfair_lock_unlock(&gShownLock);
+    if (stay[1] + stay[3] + stay[4])
+        RLOG(@"framegen: uneven, the last shown (m between, o rendered; ms since the one before, ms late):%s", times);
+    RLOG(@"framegen: %u frames rendered, %u made between (%.1f ms waiting for a drawable each, longest %.0f); not made: %u without "
+         @"upscaler inputs, %u history resets, %u without a previous frame, %u without a drawable, %u interpolator failures; "
+         @"%u given the frame before's inputs; shown for 1/2/3/4+ refreshes: %u/%u/%u/%u, %u dropped; GPU latency %.0f ms, %u corrections",
+         gStats.real, gStats.made, gStats.made ? gStats.wait * 1000 / gStats.made : 0.0, gStats.maxWait * 1000, gStats.noInputs,
+         gStats.reset, gStats.noPrev, gStats.noDrawable, gStats.failed, atomic_exchange(&gLateInputs, 0), stay[1], stay[2],
+         stay[3], stay[4], stay[0], atomic_load(&gLatency) * 1000, gStats.corrected);
     memset(&gStats, 0, sizeof gStats);
 }
 
